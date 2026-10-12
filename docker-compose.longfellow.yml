@@ -1,0 +1,13 @@
+# Replaces the stub services with the Longfellow prover and verifier images.
+# Both images must implement docs/backend-api.md and listen on port 8080.
+#
+#   export LONGFELLOW_PROVER_IMAGE=<image>
+#   export LONGFELLOW_VERIFIER_IMAGE=<image>
+#   docker compose -f docker-compose.yml -f docker-compose.longfellow.yml --profile full up -d
+services:
+  prover:
+    build: !reset null
+    image: ${LONGFELLOW_PROVER_IMAGE:?set LONGFELLOW_PROVER_IMAGE}
+  verifier:
+    build: !reset null
+    image: ${LONGFELLOW_VERIFIER_IMAGE:?set LONGFELLOW_VERIFIER_IMAGE}

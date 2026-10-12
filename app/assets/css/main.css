@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-canvas: #f3f4f6;
+  --color-surface: #ffffff;
+  --color-line: #e1e4e8;
+  --color-ink: #1a1d21;
+  --color-muted: #5f6974;
+  --color-brand: #0d7a64;
+  --color-brand-strong: #0a604f;
+  --color-brand-soft: #e3f3ef;
+  --color-down: #5b5fc7;
+  --color-teen: #7c3aed;
+  --color-adult: #c2410c;
+
+  /* EUDI Wallet App (grey-blue) */
+  --color-w-bg: #eef2f6;
+  --color-w-surface: #ffffff;
+  --color-w-primary: #3d5a78;
+  --color-w-strong: #2c4560;
+  --color-w-soft: #dde5ee;
+  --color-w-ink: #1d2733;
+  --color-w-muted: #637385;
+  --color-w-line: #d6dee7;
+}
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface;
+  }
+  .btn-primary {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-strong disabled:opacity-50;
+  }
+  .btn-outline {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-full border border-brand px-4 text-sm font-semibold text-brand transition-colors hover:bg-brand-soft disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-muted transition-colors hover:bg-canvas;
+  }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(150px); }
+  100% { transform: translateY(0); }
+}
+.animate-scanline {
+  animation: scanline 1.6s ease-in-out infinite;
+}

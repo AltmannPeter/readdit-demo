@@ -1,0 +1,6 @@
+{
+  "name": "readdit-stub-verifier",
+  "private": true,
+  "type": "module",
+  "dependencies": { "cbor-x": "^1.6.6" }
+}

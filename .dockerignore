@@ -1,0 +1,6 @@
+node_modules
+.nuxt
+.output
+demo-shots
+backend-stubs/*/node_modules
+.DS_Store
