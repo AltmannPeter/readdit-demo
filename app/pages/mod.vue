@@ -17,16 +17,13 @@ interface Overview {
 }
 
 const data = ref<Overview>({ accounts: [], comments: [] })
-const backend = ref<{ mode: 'services' | 'offline'; phoneFactor: number }>({ mode: 'services', phoneFactor: 2 })
 const confirmReset = ref(false)
 const load = async () => {
-  ;[data.value, backend.value] = await Promise.all([
-    $fetch<Overview>('/api/mod/overview'),
-    $fetch<{ mode: 'services' | 'offline'; phoneFactor: number }>('/api/demo/backend'),
-  ])
-}
-async function setBackend(change: { mode?: 'services' | 'offline'; phoneFactor?: number }) {
-  backend.value = await $fetch('/api/demo/backend', { method: 'POST', body: change })
+  try {
+    data.value = await $fetch<Overview>('/api/mod/overview')
+  } catch {
+    /* the next poll tries again */
+  }
 }
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -69,38 +66,6 @@ const time = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-d
         </button>
       </div>
     </header>
-
-    <section class="mx-auto max-w-5xl px-6 pt-6">
-      <div class="card flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
-        <div>
-          <h2 class="text-sm font-semibold">Proof backend</h2>
-          <p class="text-xs text-muted">
-            {{ backend.mode === 'offline' ? 'Built-in simulation. Works without the services and without a network.' : 'Prover and verifier services.' }}
-          </p>
-        </div>
-        <div class="flex rounded-full border border-line p-0.5 text-xs font-semibold" role="group" aria-label="Proof backend">
-          <button
-            v-for="m in (['services', 'offline'] as const)"
-            :key="m"
-            class="rounded-full px-3 py-1.5"
-            :class="backend.mode === m ? (m === 'offline' ? 'bg-amber-500 text-white' : 'bg-brand text-white') : 'text-muted hover:text-ink'"
-            @click="setBackend({ mode: m })"
-          >
-            {{ m === 'services' ? 'Services' : 'Offline' }}
-          </button>
-        </div>
-        <label v-if="backend.mode === 'offline'" class="flex items-center gap-2 text-xs">
-          <span class="text-muted">Simulated phone speed</span>
-          <select
-            class="rounded-md border border-line bg-surface px-2 py-1"
-            :value="backend.phoneFactor"
-            @change="setBackend({ phoneFactor: Number(($event.target as HTMLSelectElement).value) })"
-          >
-            <option v-for="f in 5" :key="f" :value="f">desktop ×{{ f }}</option>
-          </select>
-        </label>
-      </div>
-    </section>
 
     <main class="mx-auto grid max-w-5xl gap-6 px-6 py-6 lg:grid-cols-[3fr_2fr]">
       <section class="card">

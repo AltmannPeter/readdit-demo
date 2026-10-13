@@ -32,7 +32,5 @@ const isActive = (slug: string) => route.params.slug === slug
         </li>
       </ul>
     </div>
-
-    <p class="px-3 text-xs leading-relaxed text-muted">Readdit is a demo site. Accounts and posts are not real.</p>
   </nav>
 </template>

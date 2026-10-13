@@ -1,29 +1,28 @@
 <script setup lang="ts">
-const props = defineProps<{ kind: 'done' | 'declined' | 'error'; verifierName?: string; text?: string }>()
+// SIROS ID completion and error screens (PresentationCompleteScreen, PresentationErrorScreen):
+// a large thin circle icon, the title, the text, and Close in the bottom bar.
+const props = defineProps<{ kind: 'done' | 'declined' | 'error'; title: string; text: string }>()
 defineEmits<{ close: [] }>()
-
-const title = computed(() =>
-  props.kind === 'done' ? `Shared with ${props.verifierName}` : props.kind === 'declined' ? 'Nothing was shared' : 'Something went wrong',
-)
-const body = computed(
-  () => props.text ?? (props.kind === 'done' ? 'You can go back to the website.' : props.kind === 'declined' ? 'You cancelled the request.' : ''),
-)
 </script>
 
 <template>
-  <div class="flex h-full flex-col px-4 pb-8">
-    <div class="flex flex-1 flex-col items-center justify-center px-4 text-center">
-      <span
-        class="flex size-16 items-center justify-center rounded-full"
-        :class="props.kind === 'done' ? 'bg-w-primary text-white' : 'bg-w-soft text-w-primary'"
-      >
-        <AppIcon :name="props.kind === 'done' ? 'check' : props.kind === 'declined' ? 'close' : 'alert'" class="size-8" />
-      </span>
-      <h2 class="mt-5 text-lg font-semibold text-w-ink">{{ title }}</h2>
-      <p v-if="body" class="mt-1 text-sm text-w-muted">{{ body }}</p>
+  <div class="flex h-full flex-col bg-white">
+    <WalletAppHeader />
+    <div class="min-h-0 flex-1 px-6 text-sid-gray-900">
+      <WalletSirosIcon
+        :name="props.kind === 'done' ? 'circle-check' : 'circle-x'"
+        :stroke-width="1"
+        class="mt-10 size-20"
+        :class="props.kind === 'done' ? 'text-sid-green' : props.kind === 'declined' ? 'text-sid-gray-700' : 'text-sid-red'"
+      />
+      <div class="space-y-4 pt-6" :role="props.kind === 'error' ? 'alert' : 'status'">
+        <h1 class="text-2xl font-bold">{{ props.title }}</h1>
+        <p>{{ props.text }}</p>
+        <hr v-if="props.kind === 'done'" class="border-sid-gray-300" />
+      </div>
     </div>
-    <button class="h-12 w-full rounded-2xl bg-w-primary text-[15px] font-semibold text-white active:bg-w-strong" @click="$emit('close')">
-      Done
-    </button>
+    <div class="flex shrink-0 flex-col bg-white px-6 pt-4 pb-8">
+      <WalletButton variant="primary" size="lg" @click="$emit('close')">Close</WalletButton>
+    </div>
   </div>
 </template>

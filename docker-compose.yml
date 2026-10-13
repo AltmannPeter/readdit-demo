@@ -1,25 +1,11 @@
-# Readdit demo services.
+# Readdit demo in a container: the site with the Vega prover and verifier built in (Rust addon).
 #
-#   docker compose up -d --build                  prover + verifier only (run the site with npm run dev)
-#   docker compose --profile full up -d --build   prover + verifier + site on http://localhost:3000
+#   docker compose up -d --build        http://localhost:3000   (the first build takes several minutes)
+#   docker compose down
 #
-# prover and verifier are STUBS (no zero-knowledge proof). For the Longfellow services,
-# add the override file:  -f docker-compose.yml -f docker-compose.longfellow.yml
+# There are no separate prover and verifier containers: the site's server runs both in process.
 services:
-  prover:
-    build: ./backend-stubs/prover
-    ports: ["8081:8080"]
-    environment:
-      DEMO_PIN: "123456"
-      DEMO_BIRTH_DATE: "2011-03-14"
-  verifier:
-    build: ./backend-stubs/verifier
-    ports: ["8082:8080"]
   web:
-    profiles: ["full"]
     build: .
     ports: ["3000:3000"]
     environment:
-      NUXT_PROVER_URL: http://prover:8080
-      NUXT_VERIFIER_URL: http://verifier:8080
-    depends_on: [prover, verifier]

@@ -1,25 +1,39 @@
 <script setup lang="ts">
-defineProps<{ url: string | null }>()
+// SIROS ID QR scanner (src/components/QRCodeScanner/QRCodeScanner.jsx), full screen on a phone:
+// back arrow and "Scan the QR Code", the camera view with the white scan region, the zoom row.
+// The camera sees the QR code on the website's screen; once read, a green check shows.
+defineProps<{ url: string | null; detected: boolean }>()
 defineEmits<{ cancel: [] }>()
 </script>
 
 <template>
-  <div class="absolute inset-0 flex flex-col items-center text-white">
-    <p class="mt-8 text-sm font-medium text-white/80">Point the camera at the QR code</p>
-    <div class="relative mt-10 size-[200px]">
-      <span class="absolute top-0 left-0 size-7 rounded-tl-xl border-t-[3px] border-l-[3px] border-white" />
-      <span class="absolute top-0 right-0 size-7 rounded-tr-xl border-t-[3px] border-r-[3px] border-white" />
-      <span class="absolute bottom-0 left-0 size-7 rounded-bl-xl border-b-[3px] border-l-[3px] border-white" />
-      <span class="absolute right-0 bottom-0 size-7 rounded-br-xl border-r-[3px] border-b-[3px] border-white" />
-      <div
-        v-if="url"
-        class="absolute inset-6 rounded bg-white p-2 opacity-90"
-        style="transform: perspective(500px) rotateX(10deg) rotateZ(-4deg)"
-      >
-        <QrCode :value="url" />
+  <div class="flex h-full flex-col bg-white">
+    <WalletAppHeader />
+    <div class="flex min-h-0 flex-1 flex-col px-6 pt-6 pb-8">
+      <div class="flex">
+        <button class="mr-2 mb-2 text-sid-gray-900" aria-label="Go back to the previous page" @click="$emit('cancel')">
+          <WalletSirosIcon name="arrow-left" class="size-5" />
+        </button>
+        <WalletH1 heading="Scan the QR Code" :hr="false" />
       </div>
-      <span class="animate-scanline absolute inset-x-3 top-6 h-0.5 rounded bg-sky-300/80 shadow-[0_0_12px_2px_rgba(125,211,252,0.6)]" />
+      <div class="relative mt-4 flex h-[300px] w-full items-center justify-center overflow-hidden bg-gradient-to-b from-[#2a2f36] to-[#15181c]">
+        <div v-if="url" class="w-[150px] rounded bg-white p-2 opacity-90" style="transform: perspective(500px) rotateX(12deg) rotateZ(-4deg)">
+          <QrCode :value="url" />
+        </div>
+        <!-- the scan region: a white square with corner marks -->
+        <div class="pointer-events-none absolute size-[190px]">
+          <span class="absolute top-0 left-0 size-6 border-t-4 border-l-4 border-white" />
+          <span class="absolute top-0 right-0 size-6 border-t-4 border-r-4 border-white" />
+          <span class="absolute bottom-0 left-0 size-6 border-b-4 border-l-4 border-white" />
+          <span class="absolute right-0 bottom-0 size-6 border-r-4 border-b-4 border-white" />
+        </div>
+        <WalletSirosIcon v-if="detected" name="check-circle" class="absolute size-[100px] text-green-600" />
+      </div>
+      <div class="my-4 flex w-full items-center">
+        <WalletSirosIcon name="zoom-out" class="mt-2 mr-2 size-[30px] text-sid-gray-800" />
+        <input type="range" min="1" max="3" step="0.1" value="1" class="mt-2 h-2 w-full cursor-pointer rounded-lg bg-sid-gray-200" aria-label="Zoom" />
+        <WalletSirosIcon name="zoom-in" class="mt-2 ml-2 size-[30px] text-sid-gray-800" />
+      </div>
     </div>
-    <button class="mt-auto mb-12 text-sm font-semibold text-white/80" @click="$emit('cancel')">Cancel</button>
   </div>
 </template>

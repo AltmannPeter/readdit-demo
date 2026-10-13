@@ -4,5 +4,7 @@ node_modules
 .data
 .env
 demo-shots
-backend-stubs/*/node_modules
 .DS_Store
+native/vega/target
+native/vega/readdit-vega.node
+native/vega/readdit-vega.node.tmp

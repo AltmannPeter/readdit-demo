@@ -1,4 +1,4 @@
-// Timing and size model for the technical view and the offline simulation.
+// Timing and size model for the technical view's estimates.
 //
 // Desktop figures are measurements on Apple M5 and AMD Ryzen 9, from:
 //   NYM-AUTH.md               full nym_auth statement (age + pseudonym) on mdoc
@@ -184,23 +184,4 @@ export function presentationRange(sys: SystemModel): Range {
 
 export function systemForCircuit(circuitId?: string | null): SystemModel {
   return SYSTEMS.find((s) => circuitId?.includes(`:${s.key}:`)) ?? SYSTEMS[0]!
-}
-
-/**
- * Point values used by the offline simulation (Longfellow, Google Rust, 1 thread, with caches,
- * NYM-AUTH.md), scaled by the chosen phone factor for the phone-side steps.
- */
-export function simulatedLongfellow(phoneFactor: number) {
-  const f = phoneFactor
-  return {
-    prove: {
-      load_ms: +(37.9 * f).toFixed(1),
-      witness_ms: +(44.6 * f).toFixed(1),
-      prove_ms: +(276 * f).toFixed(1),
-      total_ms: +((37.9 + 44.6 + 276) * f).toFixed(1),
-      peak_memory_mb: 94,
-      proof_bytes: 345_608,
-    },
-    verify: { load_ms: 34.5, verify_ms: 131, total_ms: 165.5, proof_bytes: 345_608 },
-  }
 }

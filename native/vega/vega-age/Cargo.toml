@@ -1,0 +1,27 @@
+[package]
+name = "vega-age"
+version = "0.1.0"
+edition = "2024"
+description = "Age verification circuits for mdoc and SD-JWT credentials such as the PID, proved with Vega"
+publish = false
+
+[dependencies]
+# The prover the specification is validated against, at the pinned revision.
+vega-prover = { git = "https://github.com/microsoft/vega-prover", rev = "c0ee259053cd12eaf43ed71b5cde375452b3ee4d" }
+bellpepper-core = "0.4.0"
+bellpepper = "0.4.0"
+ff = "0.13.0"
+group = "0.13.0"
+halo2curves = "0.10.0"
+sha2 = { version = "0.10.7", features = ["compress"] }
+# The witness synthesizes the step instances in parallel, on the prover's thread pool (app.rs).
+rayon = "1.12"
+# The keys, the prepared state and the proof are newtypes, serialized as the prover serializes
+# what they wrap.
+serde = { version = "1.0", features = ["derive"] }
+# The prover's serialization, in which the circuits as data are stored and read (app::shapes).
+bincode = "1.3"
+
+# `unsafe_code` is forbidden for every target of this package.
+[lints.rust]
+unsafe_code = "forbid"

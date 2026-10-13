@@ -1,22 +1,29 @@
-import type { AgeCheckReq, RequestObject } from '#shared/types/oid4vp'
+import type { AgeCheckReq, PseudonymConfig, RequestObject } from '#shared/types/oid4vp'
 import { NYM_DOCTYPE } from '#shared/types/oid4vp'
 import type { CircuitEntry } from '#shared/registry/circuits'
 import { selectCircuit } from '#shared/utils/negotiation'
+import { derivePseudonym } from '#shared/utils/pseudonym'
+import { fromHex } from '#shared/utils/bytes'
 import type { CredentialView } from './holder'
+import { credentialLabel, holders } from './holder'
+import { CONFIG_PROPERTIES } from './rulebook'
 
 export type RequestItemView =
-  | { kind: 'pseudonym' }
-  | { kind: 'age'; minAge?: number; maxAge?: number }
+  | { kind: 'pseudonym'; handle: string; config: PseudonymConfig; verifierIdType?: string; verifierContext?: string }
+  | { kind: 'age'; handle: string; ge?: string; le?: string; minAge?: number; maxAge?: number }
 
 export interface RequestView {
   verifierName: string
   verifierHost: string
+  clientId: string
   items: RequestItemView[]
   /** false: the wallet cannot produce a presentation. */
   satisfiable: boolean
   /** age: holder data does not meet the predicate (-> access_denied).
    *  unsupported / no_circuit: independent of holder data (-> invalid_request). */
   problem?: 'age' | 'unsupported' | 'no_circuit'
+  /** For unsupported / no_circuit: the rule the request breaks, for the guide. */
+  reason?: string
   circuit?: CircuitEntry
 }
 
@@ -34,8 +41,9 @@ function daysBetween(a: string, b: string): number {
 function ageItem(r: AgeCheckReq, today: string): RequestItemView {
   return {
     kind: 'age',
-    ...(r.params.le && { minAge: ageOn(r.params.le, today) }),
-    ...(r.params.ge && { maxAge: ageOn(r.params.ge, today) }),
+    handle: r.return,
+    ...(r.params.ge && { ge: r.params.ge, maxAge: ageOn(r.params.ge, today) }),
+    ...(r.params.le && { le: r.params.le, minAge: ageOn(r.params.le, today) }),
   }
 }
 
@@ -58,17 +66,19 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
   const view: RequestView = {
     verifierName: req.client_metadata.client_name ?? host,
     verifierHost: host,
+    clientId: req.client_id,
     items: [],
     satisfiable: true,
   }
-  const reject = (problem: 'unsupported' | 'no_circuit') => ({ ...view, satisfiable: false, problem })
+  const reject = (problem: 'unsupported' | 'no_circuit', reason: string): RequestView => ({ ...view, satisfiable: false, problem, reason })
 
-  const queries = req.dcql_query.credentials
-  if (queries.length !== 1) return reject('unsupported')
+  const queries = req.dcql_query?.credentials ?? []
+  if (queries.length !== 1) return reject('unsupported', `${queries.length} credential queries; the wallet answers exactly one`)
   const q = queries[0]!
-  if (q.format !== 'circuit_zk' || q.meta.doctype_value !== NYM_DOCTYPE || q.meta.doctype_value !== cred.docType) return reject('unsupported')
-  if ((q as { require_cryptographic_holder_binding?: boolean }).require_cryptographic_holder_binding === false) return reject('unsupported')
-  if (!q.req.length) return reject('unsupported')
+  if (q.format !== 'circuit_zk') return reject('unsupported', `format ${q.format}; the wallet presents circuit_zk`)
+  if (q.meta?.doctype_value !== NYM_DOCTYPE || q.meta.doctype_value !== cred.docType) return reject('unsupported', `doctype ${q.meta?.doctype_value}; the wallet holds ${cred.docType}`)
+  if ((q as { require_cryptographic_holder_binding?: boolean }).require_cryptographic_holder_binding === false) return reject('unsupported', 'require_cryptographic_holder_binding is false')
+  if (!q.req?.length) return reject('unsupported', 'req is empty')
 
   let nyms = 0
   let ages = 0
@@ -77,38 +87,129 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
     if (r.id === 'pseudonym-v1-sha256') {
       nyms++
       const { config, verifier_id_type: idType, verifier_context: ctx } = r.params
+      if (!(config in CONFIG_PROPERTIES)) return reject('unsupported', `pseudonym configuration ${config} is not defined by the rulebook`)
       const usesVerifierInput = ID_TYPE_CONFIGS.has(config)
-      if (usesVerifierInput !== !!idType) return reject('unsupported')
-      if (idType && idType !== 'x509_san_dns' && idType !== 'semantic') return reject('unsupported')
-      if (idType === 'x509_san_dns' && !host) return reject('unsupported')
-      if (idType === 'semantic') return reject('unsupported') // no registration certificate in this demo
-      if ((config === 'account-recovery-ssc') !== (ctx != null)) return reject('unsupported')
-      if (ctx != null && (new TextEncoder().encode(ctx).length < 1 || new TextEncoder().encode(ctx).length > 64)) return reject('unsupported')
-      if (config === 'known-offender-matching-psc' && !cred.attributes.psc) return reject('unsupported')
-      view.items.push({ kind: 'pseudonym' })
+      if (usesVerifierInput !== !!idType) return reject('unsupported', `${config} ${usesVerifierInput ? 'needs' : 'takes no'} verifier_id_type`)
+      if (idType && idType !== 'x509_san_dns' && idType !== 'semantic') return reject('unsupported', `verifier_id_type ${idType} is not defined by the rulebook`)
+      if (idType === 'x509_san_dns' && !host) return reject('unsupported', `verifier_id_type x509_san_dns with client_id ${req.client_id}`)
+      if (idType === 'semantic') return reject('unsupported', "verifier_id_type semantic needs the verifier's registration certificate, which this demo does not have")
+      if ((config === 'account-recovery-ssc') !== (ctx != null)) return reject('unsupported', `verifier_context is ${ctx != null ? 'only for' : 'required by'} account-recovery-ssc`)
+      if (ctx != null && (new TextEncoder().encode(ctx).length < 1 || new TextEncoder().encode(ctx).length > 64)) return reject('unsupported', 'verifier_context must be 1 to 64 bytes')
+      if (config === 'known-offender-matching-psc' && !cred.attributes.psc) return reject('unsupported', 'known-offender-matching-psc needs psc, which the credential does not contain')
+      view.items.push({ kind: 'pseudonym', handle: r.return, config, ...(idType && { verifierIdType: idType }), ...(ctx != null && { verifierContext: ctx }) })
     } else if (r.id === 'age_check') {
       ages++
       const { ge, le } = r.params
-      if (!ge && !le) return reject('unsupported')
-      if (ge && le && (le < ge || daysBetween(ge, le) + 1 < 365)) return reject('unsupported')
+      if (!ge && !le) return reject('unsupported', 'age_check without ge or le')
+      if (ge && le && (le < ge || daysBetween(ge, le) + 1 < 365)) return reject('unsupported', 'age_check bounds span less than 365 days')
       view.items.push(ageItem(r, today))
       if (!((!ge || cred.attributes.birth_date >= ge) && (!le || cred.attributes.birth_date <= le))) ageFails = true
     } else {
-      return reject('unsupported')
+      return reject('unsupported', `function ${(r as { id: string }).id} is not defined by the rulebook`)
     }
   }
-  if (nyms > 1 || ages > 1) return reject('unsupported')
+  if (nyms > 1 || ages > 1) return reject('unsupported', 'more than one pseudonym or age_check in req')
 
-  const circuit = selectCircuit({ offer: req.client_metadata.vp_formats_supported.circuit_zk, walletCircuitIds, query: q })
-  if (!circuit) return reject('no_circuit')
+  const offer = req.client_metadata?.vp_formats_supported?.circuit_zk ?? {}
+  const circuit = selectCircuit({ offer, walletCircuitIds, query: q })
+  if (!circuit) {
+    return reject('no_circuit', `the request offers ${offer.circuit_id_values?.join(', ') || 'no circuit id'}; the wallet runs ${walletCircuitIds.join(', ') || 'none'}`)
+  }
   view.circuit = circuit
 
   if (ageFails) return { ...view, satisfiable: false, problem: 'age' }
   return view
 }
 
+/** "between 13 and 17", "18 or older", "under 18". */
 export function ageText(item: { minAge?: number; maxAge?: number }): string {
-  if (item.minAge != null && item.maxAge != null) return `${item.minAge}–${item.maxAge}`
+  if (item.minAge != null && item.maxAge != null) return `between ${item.minAge} and ${item.maxAge}`
   if (item.minAge != null) return `${item.minAge} or older`
   return `under ${item.maxAge! + 1}`
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+export function fmtDate(iso: string): string {
+  return new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** "Born between 14 Oct 2008 and 13 Oct 2013", "Born on or before 13 Oct 2008". */
+export function birthRangeText(item: { ge?: string; le?: string }): string {
+  if (item.ge && item.le) return `Born between ${fmtDate(item.ge)} and ${fmtDate(item.le)}`
+  if (item.le) return `Born on or before ${fmtDate(item.le)}`
+  return `Born on or after ${fmtDate(item.ge!)}`
+}
+
+/**
+ * A request, in two forms, both derived from the request, the circuit's registry entry and the
+ * credential: `fields` is what the wallet's request screen lists; the rest is the technical
+ * account of the same request, which the guide panel shows.
+ */
+export interface ConsentView {
+  verifier: { name: string; host: string; clientId: string; certificate?: string }
+  /** The credential the presentation is made from: its position in the wallet and its label. */
+  credential: { index: number; label: string }
+  /** The request screen's "Requested Information", in product wording. */
+  fields: Array<{ name: string; value: string }>
+  /** The pseudonym this request discloses, computed by the wallet as the circuit will, with the
+   *  rulebook's properties of the requested configuration. */
+  pseudonym?: { handle: string; config: PseudonymConfig; verifierId: string; value: string; properties: string[] }
+  age?: { handle: string; text: string; range: string; ge?: string; le?: string }
+  /** The other values the verifier receives, from the circuit's registry entry. */
+  alsoSent: Array<{ label: string; value: string }>
+  notShared: Array<{ label: string; value?: string }>
+}
+
+const ELEMENT_LABELS: Record<string, string> = {
+  birth_date: 'Birth date',
+  ssc: 'Seed commitment (ssc)',
+  psc: 'Private seed commitment (psc)',
+}
+
+export async function consentFor(view: RequestView, cred: CredentialView, certificate?: string): Promise<ConsentView> {
+  const host = view.verifierHost || view.clientId
+  const out: ConsentView = {
+    verifier: { name: view.verifierName, host, clientId: view.clientId, ...(certificate && { certificate }) },
+    credential: { index: cred.index, label: credentialLabel(cred) },
+    fields: [],
+    alsoSent: [],
+    notShared: [],
+  }
+
+  for (const item of view.items) {
+    if (item.kind === 'pseudonym') {
+      const verifierId = view.clientId
+      const value = await derivePseudonym({ config: item.config, seed: fromHex(holders[cred.index]!.secret_seed), verifierId, verifierContext: item.verifierContext })
+      const p = CONFIG_PROPERTIES[item.config]
+      const properties = [`The same at every visit to ${host}.`]
+      if (p.distinctPerVerifier) properties.push(`Different for every site: it is derived from the verifier_id ${verifierId}.`)
+      if (p.sameAcrossVerifiers) properties.push('The same value at every site that receives it.')
+      if (p.knownOffenderMatching) properties.push(`${host} recognises it at a new sign-up, for example after a ban.`)
+      properties.push(
+        p.issuerCanLink
+          ? `The issuer, ${cred.issuer.name}, knows the seed and can link the pseudonym to the holder.`
+          : `The issuer, ${cred.issuer.name}, cannot link the pseudonym to the holder.`,
+      )
+      out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, properties }
+      out.fields.push({ name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site' })
+    } else {
+      const text = ageText(item)
+      out.age = { handle: item.handle, text, range: birthRangeText(item), ...(item.ge && { ge: item.ge }), ...(item.le && { le: item.le }) }
+      out.fields.push({ name: 'Age', value: capitalize(text) })
+    }
+  }
+
+  for (const input of view.circuit?.public_inputs ?? []) {
+    if (input.name === 'issuer_key_set') out.alsoSent.push({ label: 'Issuer certificate', value: cred.issuer.documentSigner })
+    if (input.name === 'proof_time') out.alsoSent.push({ label: 'Proof time', value: 'The time of the presentation, to the second' })
+  }
+  if (view.circuit) out.alsoSent.push({ label: 'Circuit', value: `${view.circuit.label} (${view.circuit.proof_system})` })
+
+  for (const e of cred.elements) {
+    const label = ELEMENT_LABELS[e.id] ?? e.id
+    out.notShared.push(e.id === 'birth_date' ? { label, value: fmtDate(cred.attributes.birth_date) } : { label })
+  }
+  out.notShared.push({ label: 'Secret seed' }, { label: 'Device key' }, { label: 'The credential itself: issuer signature and validity dates' })
+  return out
 }

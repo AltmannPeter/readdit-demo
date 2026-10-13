@@ -1,11 +1,14 @@
 <script setup lang="ts">
-defineProps<{ title: string; text?: string }>()
+// SIROS ID progress (PresentationSharingScreen): the spinner and a shimmering status line.
+defineProps<{ title: string }>()
 </script>
 
 <template>
-  <div class="flex h-full flex-col items-center justify-center px-8 pb-10 text-center">
-    <span class="size-14 animate-spin rounded-full border-4 border-w-soft border-t-w-primary" />
-    <h2 class="mt-5 text-lg font-semibold text-w-ink">{{ title }}</h2>
-    <p v-if="text" class="mt-1 text-sm text-w-muted">{{ text }}</p>
+  <div class="flex h-full flex-col bg-white">
+    <WalletAppHeader />
+    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 pb-16">
+      <WalletSpinner />
+      <p class="sid-shimmer text-center text-2xl font-bold" role="status" aria-live="polite">{{ title }}</p>
+    </div>
   </div>
 </template>

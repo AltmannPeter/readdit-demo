@@ -9,7 +9,7 @@ const post = computed(() => {
   return p && p.community === community.value?.slug ? p : undefined
 })
 const { access } = useCommunityAccess(community)
-const { account } = useAccount()
+const { account, refresh } = useAccount()
 
 interface UserComment {
   id: string
@@ -23,14 +23,21 @@ const { data: userComments, refresh: refreshComments } = await useFetch<UserComm
 })
 const draft = ref('')
 const posting = ref(false)
+const postError = ref('')
 async function submit() {
   const body = draft.value.trim()
   if (!body || posting.value) return
   posting.value = true
+  postError.value = ''
   try {
     await $fetch('/api/comments', { method: 'POST', body: { postId: route.params.id, body } })
     draft.value = ''
     await refreshComments()
+  } catch (e) {
+    const status = (e as { statusCode?: number }).statusCode
+    // 401: logged out or banned meanwhile; 403: the age check no longer settles this community.
+    if (status === 401 || status === 403) await refresh()
+    postError.value = status === 401 ? 'Log in to comment.' : 'Your comment was not posted. Try again.'
   } finally {
     posting.value = false
   }
@@ -77,11 +84,13 @@ useHead(() => ({ title: post.value ? `${post.value.title} · Readdit` : 'Readdit
             <textarea
               v-model="draft"
               rows="3"
+              maxlength="2000"
               :placeholder="account ? `Comment as u/${account.handle}` : 'Log in to comment'"
               :disabled="!account"
               class="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand disabled:bg-canvas"
             />
-            <div class="mt-2 flex justify-end">
+            <div class="mt-2 flex items-center justify-end gap-3">
+              <p v-if="postError" class="text-sm text-adult" role="alert">{{ postError }}</p>
               <button class="btn-primary" type="submit" :disabled="!account || !draft.trim() || posting">Comment</button>
             </div>
           </form>
@@ -97,7 +106,7 @@ useHead(() => ({ title: post.value ? `${post.value.title} · Readdit` : 'Readdit
         </div>
       </template>
     </div>
-    <aside class="hidden w-80 shrink-0 xl:block">
+    <aside class="hidden w-80 shrink-0 @7xl:block">
       <AboutCard :community="community" />
     </aside>
   </div>

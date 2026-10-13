@@ -8,8 +8,35 @@ export interface WalletTransport {
     method: 'get' | 'post'
     clientId: string
     walletMetadata?: WalletMetadata
-  }): Promise<RequestObject>
+  }): Promise<VerifiedRequest>
   postResponse(responseUri: string, body: AuthorizationResponse): Promise<void>
+}
+
+/** An HTTP refusal from request_uri or response_uri: its status and the code in its error body. */
+export class TransportError extends Error {
+  constructor(
+    public endpoint: 'request_uri' | 'response_uri',
+    public status: number,
+    public code?: string,
+  ) {
+    super(`${endpoint} ${status}${code ? ` ${code}` : ''}`)
+  }
+}
+
+/** The refusal code in an error body (`data.error`), if the body is the server's JSON error. */
+async function codeOf(res: Response): Promise<string | undefined> {
+  try {
+    const body = (await res.json()) as { data?: { error?: unknown } }
+    return typeof body?.data?.error === 'string' ? body.data.error : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** A Request Object whose signature and certificate SAN checked out, with the signer's subject. */
+export interface VerifiedRequest {
+  request: RequestObject
+  signer: { subject: string }
 }
 
 const ES256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
@@ -19,7 +46,7 @@ const ES256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
  * x5c leaf, and a dNSName SAN equal to the client_id host. Trust-anchor validation of
  * the chain is not done in this demo wallet.
  */
-async function verifyRequestJws(jws: string, clientId: string): Promise<RequestObject> {
+async function verifyRequestJws(jws: string, clientId: string): Promise<VerifiedRequest> {
   // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
   await import('reflect-metadata')
   const x509 = await import('@peculiar/x509')
@@ -33,7 +60,7 @@ async function verifyRequestJws(jws: string, clientId: string): Promise<RequestO
   const { payload } = await compactVerify(jws, key)
   const request = JSON.parse(new TextDecoder().decode(payload)) as RequestObject
   if (request.client_id !== clientId) throw new Error('client_id mismatch')
-  return request
+  return { request, signer: { subject: leaf.subject } }
 }
 
 /** OpenID4VP over HTTP, as a phone would do it. */
@@ -49,16 +76,16 @@ export const httpTransport: WalletTransport = {
     } else {
       res = await fetch(requestUri)
     }
-    if (!res.ok) throw new Error(`request_uri ${res.status}`)
-    const request = await verifyRequestJws((await res.text()).trim(), clientId)
-    if (walletNonce && request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
-    return request
+    if (!res.ok) throw new TransportError('request_uri', res.status, await codeOf(res))
+    const verified = await verifyRequestJws((await res.text()).trim(), clientId)
+    if (walletNonce && verified.request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
+    return verified
   },
   async postResponse(responseUri, body) {
     const form = new URLSearchParams({ state: body.state })
     if ('error' in body) form.set('error', body.error)
     else form.set('vp_token', JSON.stringify(body.vp_token))
     const res = await fetch(responseUri, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })
-    if (!res.ok) throw new Error(`response_uri ${res.status}`)
+    if (!res.ok) throw new TransportError('response_uri', res.status, await codeOf(res))
   },
 }

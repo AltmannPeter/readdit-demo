@@ -7,11 +7,11 @@ const wallet = useWallet()
   <div v-if="!account" class="card p-4">
     <h2 class="font-semibold">Welcome to Readdit</h2>
     <p class="mt-2 text-sm leading-relaxed text-muted">
-      Join with your EU Digital Identity Wallet. You get a pseudonym that only works on Readdit. No email, no password.
+      Sign up with your EU Digital Identity Wallet. Your account uses a pseudonym that is valid only on Readdit, with no email address or password.
     </p>
     <div class="mt-4 grid gap-2">
-      <button class="btn-primary w-full" @click="wallet.start({ kind: 'signin' })">Sign up</button>
-      <button class="btn-outline w-full" @click="wallet.start({ kind: 'signin' })">Log in</button>
+      <button class="btn-primary w-full" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
+      <button class="btn-outline w-full" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
     </div>
   </div>
 

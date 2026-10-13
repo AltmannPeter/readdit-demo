@@ -2,36 +2,36 @@
 import type { RequestView } from '~/wallet/engine'
 import { ageText } from '~/wallet/engine'
 
-const props = defineProps<{ view: RequestView }>()
-defineEmits<{ close: [] }>()
+// The wallet cannot answer: the age predicate does not hold for the credential (the rulebook then
+// requires access_denied with no description), or the request is unsupported (invalid_request).
+// Laid out as the SIROS ID error screen (PresentationErrorScreen). "Unsupported Request" is the
+// wallet's own string (openIdCallback.errorCodes.UNSUPPORTED_FLOW_TYPE); the wallet has no string
+// for an unmet age requirement, so that one is written in the same style.
+// With other matching credentials, "Switch credential" (presentCredentialsFlow.overview) offers them.
+const props = defineProps<{ view: RequestView; alternatives?: number }>()
+defineEmits<{ close: []; switch: [] }>()
 const age = computed(() => props.view.items.find((i) => i.kind === 'age'))
 </script>
 
 <template>
-  <div class="flex h-full flex-col px-4 pb-8">
-    <div class="pt-2">
-      <WalletVerifierHeader :name="view.verifierName" :host="view.verifierHost" />
+  <div class="flex h-full flex-col bg-white">
+    <WalletAppHeader />
+    <div class="min-h-0 flex-1 px-6 text-sid-gray-900">
+      <WalletSirosIcon name="circle-x" :stroke-width="1" class="mt-10 size-20 text-sid-red" />
+      <div class="space-y-4 pt-6" role="alert">
+        <template v-if="view.problem === 'age' && age && age.kind === 'age'">
+          <h1 class="text-2xl font-bold">Requirement Not Met</h1>
+          <p>{{ view.verifierName }} asks you to prove that you are {{ ageText(age) }}. Your credential does not meet this requirement.</p>
+        </template>
+        <template v-else>
+          <h1 class="text-2xl font-bold">Unsupported Request</h1>
+          <p>This type of request is not supported.</p>
+        </template>
+      </div>
     </div>
-    <div class="flex flex-1 flex-col items-center justify-center px-2 text-center">
-      <span class="flex size-14 items-center justify-center rounded-full bg-w-soft text-w-primary">
-        <AppIcon name="alert" class="size-7" />
-      </span>
-      <template v-if="view.problem === 'age' && age && age.kind === 'age'">
-        <h2 class="mt-4 text-lg font-semibold text-w-ink">Requirement not met</h2>
-        <p class="mt-2 text-sm leading-snug text-w-muted">
-          {{ view.verifierName }} asks you to prove you are {{ ageText(age) }}. Your credential does not meet this requirement.
-        </p>
-      </template>
-      <template v-else>
-        <h2 class="mt-4 text-lg font-semibold text-w-ink">Request not supported</h2>
-        <p class="mt-2 text-sm leading-snug text-w-muted">
-          {{ view.problem === 'no_circuit' ? 'Your wallet does not support the proof method this site asks for.' : 'Your wallet cannot answer this request.' }}
-        </p>
-      </template>
-      <p class="mt-5 rounded-xl bg-w-surface px-3 py-2 text-xs font-medium text-w-ink">Nothing is shared with {{ view.verifierName }}.</p>
+    <div class="flex shrink-0 flex-col gap-4 bg-white px-6 pt-4 pb-8">
+      <WalletButton v-if="props.alternatives" variant="outline" size="lg" @click="$emit('switch')">Switch credential</WalletButton>
+      <WalletButton variant="primary" size="lg" @click="$emit('close')">Close</WalletButton>
     </div>
-    <button class="h-12 w-full rounded-2xl bg-w-primary text-[15px] font-semibold text-white active:bg-w-strong" @click="$emit('close')">
-      Close
-    </button>
   </div>
 </template>

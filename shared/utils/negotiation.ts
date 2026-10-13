@@ -25,6 +25,7 @@ export function tailorFormats(offer: CircuitZkFormats, wallet?: CircuitZkFormats
 /** Does the circuit support every item in `req` with the given parameters? */
 export function circuitSupportsQuery(c: CircuitEntry, q: CircuitZkCredentialQuery): boolean {
   if (q.meta.doctype_value !== c.doctype) return false
+  if (c.functions['pseudonym-v1-sha256']?.required && !q.req.some((r) => r.id === 'pseudonym-v1-sha256')) return false
   return q.req.every((r) => {
     if (r.id === 'pseudonym-v1-sha256') {
       const f = c.functions['pseudonym-v1-sha256']

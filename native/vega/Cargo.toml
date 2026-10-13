@@ -1,0 +1,16 @@
+# Readdit's Vega backend: the nym_auth circuits and proving system of the nym-auth-circuits
+# archive, compiled into a Node addon that the site's server calls in process.
+#
+#   vega-age/      the circuits and the hand-written witness builder, vendored unchanged
+#                  (VENDOR-SHA256SUMS lists the archive's hashes; `sha256sum -c` checks them)
+#   circuits/      mdoc/shapes.zst, the circuits as data, vendored unchanged
+#   nym-vega/      prover and verifier logic around vega-age (no unsafe code)
+#   node/          the napi-rs addon: Prover and Verifier objects for Node (napi glue only)
+#   issuer/        nym-issuer: issues the demo credential, keys and trust anchor
+[workspace]
+resolver = "3"
+members = ["vega-age", "nym-vega", "node", "issuer"]
+
+[profile.release]
+# The addon and the issuer are built once; the prover's speed matters, its build time does not.
+codegen-units = 16
