@@ -11,6 +11,8 @@
   "features": {
     "ghcr.io/devcontainers/features/git:1": { "version": "os-provided" }
   },
+  // The runtime image has no CA certificates; git in the codespace needs them to reach GitHub.
+  "postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends ca-certificates",
   "forwardPorts": [3000],
   "portsAttributes": {
     "3000": { "label": "Readdit", "onAutoForward": "openBrowser" }
