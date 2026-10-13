@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const cfg = useRuntimeConfig(event)
-  const origin = getRequestURL(event).origin
+  const origin = publicOrigin(event)
   const id = randomHex(16)
   const ttl = sessionTtlMs()
   const query = buildCredentialQuery(gate ? gateRange(gate, todayISO()) : undefined)
@@ -77,3 +77,21 @@ export default defineEventHandler(async (event) => {
 
   return { id, authorizationUrl: authorizationUrl(String(cfg.public.siteHost), requestUriFor(origin, id)), expiresIn: Math.round(ttl / 1000) }
 })
+
+/**
+ * The site's address as the browser sees it, for request_uri and response_uri. Behind a proxy that
+ * rewrites the Host header (GitHub Codespaces forwards to localhost:3000), the browser's Origin
+ * header is the reliable one; without it (a script, not a browser), the forwarded host and protocol.
+ */
+function publicOrigin(event: Parameters<typeof getRequestURL>[0]): string {
+  const header = getRequestHeader(event, 'origin')
+  if (header) {
+    try {
+      const u = new URL(header)
+      if (u.protocol === 'https:' || u.protocol === 'http:') return u.origin
+    } catch {
+      /* not a URL: fall back */
+    }
+  }
+  return getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
+}

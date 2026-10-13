@@ -146,6 +146,7 @@ native/vega/                     Rust workspace: the proof backend
   issuer/                        nym-issuer: the demo credentials (one per --holder), keys and trust anchor
   demo/document-signer.pem       the verifier's trust anchor
 Dockerfile                       the site with the addon (Rust build stage); docker-compose.yml runs it
+.devcontainer/devcontainer.json  GitHub Codespaces: builds the Dockerfile and runs the site on port 3000 (TRY-IT.md)
 docker-compose.longfellow.yml    kept from the HTTP design; has no effect on the addon-based site
 scripts/build-native.mjs         npm run build:native
 scripts/vega-check.mjs           npm run vega:check: real proofs, pseudonym, refusals
