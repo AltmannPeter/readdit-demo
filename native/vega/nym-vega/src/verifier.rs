@@ -159,10 +159,10 @@ impl Verifier {
     let Some(ResultValue::Pseudonym(nym)) = value(&s.nym_handle) else {
       return Err(refuse("results", format!("results.{} is not a 32-byte pseudonym", s.nym_handle)));
     };
-    if let Some(h) = &s.age_handle {
-      if value(h) != Some(&ResultValue::True) {
-        return Err(refuse("results", format!("results.{h} is not true")));
-      }
+    if let Some(h) = &s.age_handle
+      && value(h) != Some(&ResultValue::True)
+    {
+      return Err(refuse("results", format!("results.{h} is not true")));
     }
 
     // 5. The proof, against the public inputs in the registry order.

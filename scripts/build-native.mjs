@@ -2,7 +2,7 @@
 // where the site's server loads it (server/utils/services.ts). Needs Rust (https://rustup.rs).
 // Usage: npm run build:native
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync } from 'node:fs'
+import { copyFileSync, existsSync, renameSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
@@ -27,6 +27,13 @@ if (!existsSync(built)) {
   console.error(`build:native: cargo succeeded but ${built} is missing`)
   process.exit(1)
 }
+// Copy, then rename over the old addon: a running site keeps the old file mapped, untouched.
 const out = join(root, 'readdit-vega.node')
-copyFileSync(built, out)
-console.log(`build:native: ${out}`)
+copyFileSync(built, `${out}.tmp`)
+try {
+  renameSync(`${out}.tmp`, out)
+} catch (e) {
+  console.error(`build:native: cannot replace ${out} (${e.message}). Stop the site and run it again.`)
+  process.exit(1)
+}
+console.log(`build:native: ${out} (restart the site to load it)`)
