@@ -97,7 +97,7 @@ useHead(() => ({ title: post.value ? `${post.value.title} · Readdit` : 'Readdit
         </div>
       </template>
     </div>
-    <aside class="hidden w-80 shrink-0 xl:block">
+    <aside class="hidden w-80 shrink-0 @7xl:block">
       <AboutCard :community="community" />
     </aside>
   </div>

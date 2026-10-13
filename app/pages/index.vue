@@ -13,7 +13,7 @@ const feed = computed(() => rank(posts.filter((p) => decide(findCommunity(p.comm
     <div class="min-w-0 flex-1 space-y-3">
       <PostCard v-for="p in feed" :key="p.id" :post="p" show-community />
     </div>
-    <aside class="hidden w-80 shrink-0 space-y-4 xl:block">
+    <aside class="hidden w-80 shrink-0 space-y-4 @7xl:block">
       <HomeAside />
     </aside>
   </div>

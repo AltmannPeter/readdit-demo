@@ -22,8 +22,8 @@ const wallet = useWallet()
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
         <template v-if="!account">
-          <button class="btn-outline" @click="wallet.start({ kind: 'signin' })">Sign up</button>
-          <button class="btn-primary" @click="wallet.start({ kind: 'signin' })">Log in</button>
+          <button class="btn-outline" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
+          <button class="btn-primary" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
         </template>
         <UserMenu v-else />
       </div>

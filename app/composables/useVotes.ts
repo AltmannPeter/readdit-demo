@@ -4,7 +4,7 @@ export function useVotes() {
   const wallet = useWallet()
 
   function vote(id: string, dir: -1 | 1) {
-    if (!account.value) return wallet.start({ kind: 'signin' })
+    if (!account.value) return wallet.start({ kind: 'signin', intent: 'login' })
     votes.value[id] = votes.value[id] === dir ? 0 : dir
   }
 

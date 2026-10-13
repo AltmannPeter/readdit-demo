@@ -321,7 +321,7 @@ const statusTone = (s: string) =>
       <!-- estimates -->
       <section class="card">
         <div class="border-b border-line px-5 py-3">
-          <h2 class="text-sm font-semibold">What it takes: estimates per step</h2>
+          <h2 class="text-sm font-semibold">Estimates per step</h2>
           <p class="mt-0.5 text-xs text-muted">
             Desktop: measured on {{ DESKTOP_MACHINES }}. Phone: desktop ×{{ PHONE_FACTOR.min }}–{{ PHONE_FACTOR.max }}, not measured yet.
             Sending the proof assumes a {{ UPLINK_MBPS.min }}–{{ UPLINK_MBPS.max }} Mbit/s mobile uplink.

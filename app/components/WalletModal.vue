@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { findCommunity, COMMUNITY_PREFIX } from '#shared/data/communities'
+import type { DialogPhase } from '~/composables/useFlow'
 
 // Site side of the cross-device flow. The server owns the OpenID4VP session and runs
 // the verifier; this dialog shows the QR code, follows the status and applies the result
-// to this browser's login.
-
-type Phase = 'starting' | 'waiting' | 'scanned' | 'verifying' | 'success' | 'failed'
+// to this browser's login. It publishes its state for the guide panel (useDialogFlow).
 
 interface Completion {
   ok: boolean
@@ -15,15 +14,24 @@ interface Completion {
 
 const { state, close } = useWallet()
 const { refresh } = useAccount()
+const guide = useGuidePanel()
 const siteName = useRuntimeConfig().public.siteName as string
 
 const sessionId = ref<string | null>(null)
 const authUrl = ref<string | null>(null)
-const phase = ref<Phase>('starting')
+const phase = ref<DialogPhase>('starting')
+const failure = ref<string | null>(null)
+const completion = ref<Completion | null>(null)
 const message = ref('')
 const failTitle = ref('Not completed')
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let closeTimer: ReturnType<typeof setTimeout> | undefined
+
+const dialogFlow = useDialogFlow()
+const lastOutcome = useLastOutcome()
+watchEffect(() => {
+  dialogFlow.value = { phase: phase.value, authUrl: authUrl.value, failure: failure.value, completion: completion.value }
+})
 
 const community = computed(() =>
   state.value.purpose?.kind === 'age' ? findCommunity(state.value.purpose.community) : undefined,
@@ -35,19 +43,25 @@ const ageText = computed(() => {
   if (g.minAge != null) return `ages ${g.minAge} and older`
   return `ages under ${g.maxAge! + 1}`
 })
-const title = computed(() => (state.value.purpose?.kind === 'age' ? 'Verify your age' : `Log in to ${siteName}`))
+const title = computed(() => {
+  const p = state.value.purpose
+  if (p?.kind === 'age') return 'Verify your age'
+  return p?.intent === 'signup' ? `Sign up for ${siteName}` : `Log in to ${siteName}`
+})
 const subtitle = computed(() =>
-  community.value ? `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.` : `${siteName} gets a pseudonym, not your name.`,
+  community.value
+    ? `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
+    : `Use the SIROS ID app on your phone. ${siteName} receives a pseudonym, not your name or email address.`,
 )
 
 const FAILURES: Record<string, string> = {
   denied: `Nothing was shared with ${siteName}.`,
   invalid_request: `Nothing was shared with ${siteName}.`,
-  invalid: 'The proof could not be verified.',
-  unavailable: 'The verification service is not available.',
-  expired: 'The request expired.',
-  banned: `This wallet already has a ${siteName} account, and it is banned.`,
-  mismatch: 'This proof belongs to a different account.',
+  invalid: `${siteName} could not verify the response.`,
+  unavailable: 'Verification is not available right now. Try again later.',
+  expired: 'The code has expired. Try again.',
+  banned: `This wallet's ${siteName} account has been banned.`,
+  mismatch: 'The response belongs to a different account.',
 }
 
 function stop() {
@@ -58,8 +72,10 @@ function stop() {
 function failWith(kind: string) {
   stop()
   phase.value = 'failed'
+  failure.value = kind
   failTitle.value = kind === 'banned' ? 'Account banned' : 'Not completed'
   message.value = FAILURES[kind] ?? 'Something went wrong.'
+  if (state.value.purpose) lastOutcome.value = { purpose: state.value.purpose, ok: false, kind }
 }
 
 async function start() {
@@ -67,6 +83,8 @@ async function start() {
   const p = state.value.purpose
   if (!p) return
   phase.value = 'starting'
+  failure.value = null
+  completion.value = null
   sessionId.value = null
   authUrl.value = null
   try {
@@ -104,8 +122,10 @@ async function complete() {
   const c = await $fetch<Completion>(`/api/vp/session/${sessionId.value}/complete`, { method: 'POST' })
   if (!c.ok) return failWith(c.kind)
   await refresh()
-  message.value = c.kind === 'created' ? `Account created: u/${c.handle}` : c.kind === 'logged_in' ? `Logged in as u/${c.handle}` : 'Age confirmed'
+  completion.value = c
+  message.value = c.kind === 'created' ? `Account created: u/${c.handle}` : c.kind === 'logged_in' ? `Logged in as u/${c.handle}` : 'Age verified'
   phase.value = 'success'
+  if (state.value.purpose) lastOutcome.value = { purpose: state.value.purpose, ok: true, kind: c.kind, handle: c.handle }
   closeTimer = setTimeout(close, 1800)
 }
 
@@ -138,7 +158,13 @@ onBeforeUnmount(() => {
       leave-active-class="transition duration-150"
       leave-to-class="opacity-0"
     >
-      <div v-if="state.open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" @click.self="close">
+      <!-- covers the site, not the guide panel beside it -->
+      <div
+        v-if="state.open"
+        class="fixed inset-y-0 left-0 z-50 flex items-center justify-center bg-black/45 p-4"
+        :style="{ right: guide.width.value }"
+        @click.self="close"
+      >
         <div class="card flex w-full max-w-[880px] overflow-hidden shadow-2xl" role="dialog" aria-modal="true" :aria-label="title">
           <!-- website side -->
           <section class="flex min-w-0 flex-1 flex-col p-8">
@@ -173,7 +199,7 @@ onBeforeUnmount(() => {
                   </template>
                   <template v-else-if="phase === 'verifying'">
                     <span class="size-10 animate-spin rounded-full border-4 border-brand-soft border-t-brand" />
-                    <p class="mt-3 font-semibold">Checking proof</p>
+                    <p class="mt-3 font-semibold">Verifying</p>
                   </template>
                   <template v-else-if="phase === 'success'">
                     <span class="flex size-12 items-center justify-center rounded-full bg-brand text-white">
@@ -197,9 +223,9 @@ onBeforeUnmount(() => {
                   <button class="btn-outline" @click="close">Close</button>
                 </div>
                 <ol v-else class="space-y-2 text-sm text-muted">
-                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open the SIROS ID app on your phone</li>
-                  <li class="flex gap-3"><span class="font-semibold text-ink">2</span>Tap Scan QR code and scan this code</li>
-                  <li class="flex gap-3"><span class="font-semibold text-ink">3</span>Check the request and enter your PIN</li>
+                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open SIROS ID on your phone</li>
+                  <li class="flex gap-3"><span class="font-semibold text-ink">2</span>Tap the scan button and point your phone at this code</li>
+                  <li class="flex gap-3"><span class="font-semibold text-ink">3</span>Review the request and enter your PIN</li>
                 </ol>
               </div>
             </div>
