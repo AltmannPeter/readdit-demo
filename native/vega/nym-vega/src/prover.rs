@@ -2,7 +2,8 @@
 //! material to each step; the prover keeps only the prover key, which setup makes the same every
 //! time.
 //!
-//! 1. [`Prover::sign`]: the PIN unlocks the device key, which signs DeviceAuthentication (ES256).
+//! 1. [`Prover::sign`]: the device key signs DeviceAuthentication (ES256). The wallet's PIN screen
+//!    stands for the phone's unlock; any PIN unlocks in this demo, so the prover takes none.
 //! 2. [`Prover::witness`]: the credential taken apart, every holder-side check, and the witness of
 //!    every circuit instance (SPEC.md V5).
 //! 3. [`Prover::prove`]: prepare and prove (SPEC.md V6), and the presentation.
@@ -44,7 +45,6 @@ pub struct DeviceKey {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SignInput {
-  pub pin: String,
   pub device_key: DeviceKey,
   pub doc_type: String,
   pub handover: Handover,
@@ -95,7 +95,6 @@ pub struct Prover {
   pk: ProverKey,
   pub shapes_sha256: [u8; 32],
   pub load_ms: f64,
-  pin: String,
 }
 
 fn bad(e: impl std::fmt::Display) -> Refusal {
@@ -126,13 +125,10 @@ fn public_inputs(values: &[String]) -> Json {
 }
 
 impl Prover {
-  /// Builds the prover key from `shapes.zst`. `pin` unlocks the device key.
-  pub fn load(shapes: &Path, pin: String) -> Result<Self, String> {
-    if pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit()) {
-      return Err("the wallet PIN must be 6 digits".into());
-    }
+  /// Builds the prover key from `shapes.zst`.
+  pub fn load(shapes: &Path) -> Result<Self, String> {
     let loaded = keys::prover_key(shapes)?;
-    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, pin })
+    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms })
   }
 
   pub fn info(&self) -> Json {
@@ -152,13 +148,9 @@ impl Prover {
     })
   }
 
-  /// Step 1: the PIN unlocks the device key, which signs DeviceAuthentication over the
-  /// SessionTranscript of `handover`.
+  /// Step 1: the device key signs DeviceAuthentication over the SessionTranscript of `handover`.
   pub fn sign(&self, input: &SignInput) -> Result<SignOutput, Refusal> {
     let t = Instant::now();
-    if input.pin != self.pin {
-      return Err(Refusal::invalid_pin());
-    }
     if input.doc_type != DOC_TYPE {
       return Err(Refusal::unsupported_request(format!("docType {} is not {DOC_TYPE}", input.doc_type)));
     }

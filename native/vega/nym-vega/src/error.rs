@@ -17,11 +17,6 @@ impl Refusal {
     Refusal { status, error, detail: detail.into() }
   }
 
-  /// Wrong PIN: the device key does not sign.
-  pub fn invalid_pin() -> Self {
-    Self::new(401, "invalid_pin", "the PIN does not unlock the device key")
-  }
-
   /// A predicate does not hold for the holder's data (rulebook: the wallet then sends
   /// `access_denied`).
   pub fn unsatisfiable(detail: impl Into<String>) -> Self {

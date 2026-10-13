@@ -4,8 +4,9 @@
 //! - [`load_prover`] and [`load_verifier`] build each side's keys from `shapes.zst` once, on a
 //!   worker thread, and resolve to a [`Prover`] or a [`Verifier`] that keeps them. Setup is
 //!   deterministic, so keeping the keys keeps nothing about any holder or request.
-//! - The prover's native steps: [`Prover::sign`] (the PIN unlocks the device key, which signs
-//!   DeviceAuthentication), [`Prover::witness`] and [`Prover::prove`]. A [`Witness`] lives for the
+//! - The prover's native steps: [`Prover::sign`] (the device key signs DeviceAuthentication; the
+//!   wallet's PIN screen stands for the phone's unlock and the prover takes no PIN),
+//!   [`Prover::witness`] and [`Prover::prove`]. A [`Witness`] lives for the
 //!   one server request that makes it: `prove` takes its data out, and nothing else holds it.
 //! - [`Verifier::verify`].
 //!
@@ -49,7 +50,6 @@ fn refusal_json(r: &Refusal) -> String {
 
 pub struct LoadProver {
   shapes: PathBuf,
-  pin: String,
 }
 
 impl Task for LoadProver {
@@ -57,7 +57,7 @@ impl Task for LoadProver {
   type JsValue = Prover;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    guarded(|| prover::Prover::load(&self.shapes, self.pin.clone()))
+    guarded(|| prover::Prover::load(&self.shapes))
   }
 
   fn resolve(&mut self, _: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -65,10 +65,10 @@ impl Task for LoadProver {
   }
 }
 
-/// Builds the prover key from `shapes` (path to `shapes.zst`). `pin` unlocks the device key.
+/// Builds the prover key from `shapes` (path to `shapes.zst`).
 #[napi]
-pub fn load_prover(shapes: String, pin: String) -> AsyncTask<LoadProver> {
-  AsyncTask::new(LoadProver { shapes: PathBuf::from(shapes), pin })
+pub fn load_prover(shapes: String) -> AsyncTask<LoadProver> {
+  AsyncTask::new(LoadProver { shapes: PathBuf::from(shapes) })
 }
 
 pub struct LoadVerifier {
@@ -99,7 +99,7 @@ pub fn load_verifier(shapes: String, trust_anchors_pem: String, tolerance_s: i64
 
 // ---- the prover ----
 
-/// The holder side. Keeps the prover key and the PIN, nothing about any holder.
+/// The holder side. Keeps the prover key, nothing about any holder.
 #[napi]
 pub struct Prover {
   inner: Arc<prover::Prover>,
@@ -213,7 +213,7 @@ impl Prover {
     self.inner.info().to_string()
   }
 
-  /// Step 1, unlock and sign. JSON in (`pin`, `device_key`, `doc_type`, `handover`), JSON out.
+  /// Step 1, sign. JSON in (`device_key`, `doc_type`, `handover`), JSON out.
   #[napi]
   pub fn sign(&self, input: String) -> AsyncTask<Sign> {
     AsyncTask::new(Sign { prover: self.inner.clone(), input })

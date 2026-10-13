@@ -1,28 +1,30 @@
-//! nym-issuer: issues the Readdit demo's `eu.europa.ec.eudi.nym_auth.1` mdoc under the issuance
+//! nym-issuer: issues the Readdit demo's `eu.europa.ec.eudi.nym_auth.1` mdocs under the issuance
 //! profile of nym-auth-circuits SPEC.md §2.1, with fresh keys:
 //!
 //! - a demo issuer key (P-256) and its self-signed Document Signer certificate, which the
-//!   verifier trusts (`--trust-out`, PEM);
-//! - a device key pair (P-256), bound in the MSO;
-//! - a random 16-byte secret_seed, with `ssc` = SHA-256(secret_seed);
-//! - the items `birth_date` (`1004("YYYY-MM-DD")`) and `ssc` (bstr 32), 16-byte random salts,
-//!   digestIDs 0 and 1, the protected header exactly `{1: -7}`, `x5chain` in the unprotected
-//!   header, and the MSO with exactly version, digestAlgorithm, valueDigests, deviceKeyInfo,
-//!   docType and validityInfo (signed, validFrom, validUntil as 20-character tdates).
+//!   verifier trusts (`--trust-out`, PEM); every holder's credential is signed with it;
+//! - for each holder (`--holder`, repeated): a device key pair (P-256), bound in the MSO; a random
+//!   16-byte secret_seed, with `ssc` = SHA-256(secret_seed); the items `birth_date`
+//!   (`1004("YYYY-MM-DD")`) and `ssc` (bstr 32), 16-byte random salts, digestIDs 0 and 1, the
+//!   protected header exactly `{1: -7}`, `x5chain` in the unprotected header, and the MSO with
+//!   exactly version, digestAlgorithm, valueDigests, deviceKeyInfo, docType and validityInfo
+//!   (signed, validFrom, validUntil as 20-character tdates).
 //!
-//! The demo has no true holder binding: the wallet file (`--wallet-out`) holds the credential, the
-//! device private key and the seed, and the page's mocked wallet carries them. The issuer's private
-//! key is not written anywhere; to re-issue, run the tool again, which replaces both files.
+//! The demo has no true holder binding: the wallet file (`--wallet-out`) holds each holder's
+//! credential, device private key and seed, and the page's mocked wallet carries them. The issuer's
+//! private key is not written anywhere; to re-issue, run the tool again, which replaces both files.
 //!
-//! Before writing, the tool checks the profile's lengths (Sig_structure 423 B, birth_date item
-//! 95 B, ssc item 108 B) and takes the credential apart again as the prover does.
+//! Before writing, the tool checks the profile's lengths for each credential (Sig_structure 423 B,
+//! birth_date item 95 B, ssc item 108 B), prints them, and takes each credential apart again as the
+//! prover does.
 //!
 //! ```text
-//! nym-issuer --birth-date 2011-03-14 --wallet-out <file.json> --trust-out <file.pem>
+//! nym-issuer --holder YYYY-MM-DD[:DAYS] [--holder ...] --wallet-out <file.json> --trust-out <file.pem>
 //!            [--valid-from YYYY-MM-DD] [--days N]
 //! ```
-//! The validity runs from `--valid-from` (default: yesterday, UTC) 00:00:00Z for `--days` days
-//! (default 366); the certificate runs one year longer.
+//! Each holder's validity runs from `--valid-from` (default: yesterday, UTC) 00:00:00Z for DAYS days
+//! (default `--days`, 366); the certificate runs one year longer than the longest. `--birth-date`
+//! is accepted for `--holder`.
 
 use std::process::ExitCode;
 
@@ -44,21 +46,35 @@ const SIG_STRUCTURE_BYTES: usize = 423;
 const BIRTH_DATE_ITEM_BYTES: usize = 95;
 const SSC_ITEM_BYTES: usize = 108;
 
-struct Args {
+struct Holder {
   birth_date: Date,
+  /// Days of validity; `--days` when not given.
+  days: Option<i64>,
+}
+
+struct Args {
+  holders: Vec<Holder>,
   wallet_out: String,
   trust_out: String,
   valid_from: Date,
   days: i64,
 }
 
+fn holder(value: &str) -> Result<Holder, String> {
+  let (date, days) = match value.split_once(':') {
+    Some((d, n)) => (d, Some(n.parse::<i64>().map_err(|_| format!("--holder {value}: not a number of days"))?)),
+    None => (value, None),
+  };
+  Ok(Holder { birth_date: dates::date(date)?, days })
+}
+
 fn args() -> Result<Args, String> {
   let mut it = std::env::args().skip(1);
-  let (mut birth_date, mut wallet_out, mut trust_out, mut valid_from, mut days) = (None, None, None, None, 366);
+  let (mut holders, mut wallet_out, mut trust_out, mut valid_from, mut days) = (Vec::new(), None, None, None, 366);
   while let Some(flag) = it.next() {
     let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
     match flag.as_str() {
-      "--birth-date" => birth_date = Some(dates::date(&value)?),
+      "--holder" | "--birth-date" => holders.push(holder(&value)?),
       "--wallet-out" => wallet_out = Some(value),
       "--trust-out" => trust_out = Some(value),
       "--valid-from" => valid_from = Some(dates::date(&value)?),
@@ -66,12 +82,15 @@ fn args() -> Result<Args, String> {
       other => return Err(format!("unknown option {other}")),
     }
   }
-  if days < 2 {
-    return Err("--days must be at least 2".into());
+  if holders.is_empty() {
+    return Err("at least one --holder is required".into());
+  }
+  if days < 2 || holders.iter().any(|h| h.days.is_some_and(|d| d < 2)) {
+    return Err("a validity must be at least 2 days".into());
   }
   let yesterday = dates::from_unix(dates::unix(&dates::now()?)? - 86_400)?.date;
   Ok(Args {
-    birth_date: birth_date.ok_or("--birth-date is required")?,
+    holders,
     wallet_out: wallet_out.ok_or("--wallet-out is required")?,
     trust_out: trust_out.ok_or("--trust-out is required")?,
     valid_from: valid_from.unwrap_or(yesterday),
@@ -113,21 +132,16 @@ fn document_signer(issuer: &SigningKey, not_before: &Time, not_after: &Time) -> 
   params.self_signed(&key_pair).map_err(|e| e.to_string())
 }
 
-fn run() -> Result<(), String> {
-  let a = args()?;
-  let valid_from = midnight(a.valid_from);
-  let valid_until = dates::from_unix(dates::unix(&valid_from)? + a.days * 86_400)?;
-  let cert_until = dates::from_unix(dates::unix(&valid_until)? + 365 * 86_400)?;
-
-  let issuer = SigningKey::random(&mut OsRng);
+/// One holder's credential, device key and seed, signed by `issuer` with the Document Signer `ds`;
+/// checked against the profile's lengths and read back as the prover reads it.
+fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time) -> Result<serde_json::Value, String> {
   let device = SigningKey::random(&mut OsRng);
   let device_point = device.verifying_key().to_encoded_point(false);
   let (dx, dy) = (device_point.x().ok_or("device x")?, device_point.y().ok_or("device y")?);
   let seed: [u8; 16] = random();
   let ssc = sha256(&seed);
-  let ds = document_signer(&issuer, &valid_from, &cert_until)?;
 
-  let birth_item = item_bytes(0, &random::<16>(), BIRTH_DATE, full_date(&a.birth_date));
+  let birth_item = item_bytes(0, &random::<16>(), BIRTH_DATE, full_date(birth_date));
   let ssc_item = item_bytes(1, &random::<16>(), SSC, Value::Bytes(ssc.to_vec()));
   let cose_key = Value::Map(vec![
     (int(1), int(2)),
@@ -166,7 +180,7 @@ fn run() -> Result<(), String> {
   let signature: Signature = issuer.sign(&sig_structure);
   let issuer_auth = Value::Array(vec![
     Value::Bytes(protected),
-    Value::Map(vec![(int(33), Value::Bytes(ds.der().to_vec()))]),
+    Value::Map(vec![(int(33), Value::Bytes(ds.to_vec()))]),
     Value::Bytes(payload),
     Value::Bytes(signature.to_bytes().to_vec()),
   ]);
@@ -183,7 +197,7 @@ fn run() -> Result<(), String> {
     ("ssc item", ssc_item.len(), SSC_ITEM_BYTES),
   ];
   for (what, got, want) in lengths {
-    println!("{what}: {got} B (profile: {want} B)");
+    println!("  {what}: {got} B (profile: {want} B)");
     if got != want {
       return Err(format!("{what} is {got} bytes, the profile's is {want}: not written"));
     }
@@ -193,25 +207,45 @@ fn run() -> Result<(), String> {
   let encoded = b64url(&issuer_signed);
   let m = mdoc::parse(&encoded)?;
   let signer = x509::parse(&m.document_signer)?;
-  if m.sig_structure != sig_structure || m.birth_date()? != a.birth_date || m.ssc()? != ssc || !m.digests_listed() {
+  if m.sig_structure != sig_structure || m.birth_date()? != *birth_date || m.ssc()? != ssc || !m.digests_listed() {
     return Err("the issued credential does not read back".into());
   }
   if m.device_key.x[..] != dx[..] || m.device_key.y[..] != dy[..] || !signer.self_signed {
     return Err("the device key or the Document Signer does not read back".into());
   }
+  println!("  IssuerSigned: {} B; validity {} to {}; ssc {}", issuer_signed.len(), valid_from.text(), valid_until.text(), nym_vega::hex(&ssc));
 
-  let wallet = json!({
-    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer). No true holder binding: the device private key and the secret seed sit in the page.",
+  Ok(json!({
     "credential": { "format": "mso_mdoc", "doctype": DOC_TYPE, "issuer_signed": encoded },
     "device_key": { "kty": "EC", "crv": "P-256", "x": b64url(dx), "y": b64url(dy), "d": b64url(&device.to_bytes()) },
     "secret_seed": nym_vega::hex(&seed),
+  }))
+}
+
+fn run() -> Result<(), String> {
+  let a = args()?;
+  let valid_from = midnight(a.valid_from);
+  let until = |days: i64| -> Result<Time, String> { dates::from_unix(dates::unix(&valid_from)? + days * 86_400) };
+  let longest = a.holders.iter().map(|h| h.days.unwrap_or(a.days)).max().unwrap_or(a.days);
+  let cert_until = dates::from_unix(dates::unix(&until(longest)?)? + 365 * 86_400)?;
+
+  let issuer = SigningKey::random(&mut OsRng);
+  let ds = document_signer(&issuer, &valid_from, &cert_until)?;
+  let mut holders = Vec::new();
+  for (k, h) in a.holders.iter().enumerate() {
+    println!("holder {} (born {}):", k + 1, h.birth_date.text());
+    holders.push(issue(&issuer, ds.der(), &h.birth_date, &valid_from, &until(h.days.unwrap_or(a.days))?)?);
+  }
+
+  let wallet = json!({
+    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer): one credential per holder, all signed by the same Document Signer. No true holder binding: the device private keys and the secret seeds sit in the page.",
+    "holders": holders,
   });
   let text = serde_json::to_string_pretty(&wallet).map_err(|e| e.to_string())? + "\n";
   std::fs::write(&a.wallet_out, text).map_err(|e| format!("{}: {e}", a.wallet_out))?;
   std::fs::write(&a.trust_out, ds.pem()).map_err(|e| format!("{}: {e}", a.trust_out))?;
-  println!("IssuerSigned: {} B; validity {} to {}", issuer_signed.len(), valid_from.text(), valid_until.text());
+  let signer = x509::parse(ds.der())?;
   println!("Document Signer: {} (until {})", signer.subject, cert_until.text());
-  println!("ssc: {}", nym_vega::hex(&ssc));
   println!("wrote {} and {}", a.wallet_out, a.trust_out);
   Ok(())
 }
