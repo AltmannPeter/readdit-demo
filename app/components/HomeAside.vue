@@ -10,8 +10,8 @@ const wallet = useWallet()
       Sign up with your EU Digital Identity Wallet. Your account uses a pseudonym that is valid only on Readdit, with no email address or password.
     </p>
     <div class="mt-4 grid gap-2">
-      <button class="btn-primary w-full" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
-      <button class="btn-outline w-full" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
+      <button class="btn-outline w-full" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
+      <button class="btn-primary w-full" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
     </div>
   </div>
 

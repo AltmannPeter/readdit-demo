@@ -151,7 +151,7 @@ export interface ConsentView {
   /** The credential the presentation is made from: its position in the wallet and its label. */
   credential: { index: number; label: string }
   /** The request screen's "Requested Information", in product wording. */
-  fields: Array<{ name: string; value: string }>
+  fields: Array<{ kind: 'pseudonym' | 'age'; name: string; value: string; notes?: string[] }>
   /** The pseudonym this request discloses, computed by the wallet as the circuit will, with the
    *  rulebook's properties of the requested configuration. */
   pseudonym?: { handle: string; config: PseudonymConfig; verifierId: string; value: string; properties: string[] }
@@ -192,11 +192,13 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
           : `The issuer, ${cred.issuer.name}, cannot link the pseudonym to the holder.`,
       )
       out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, properties }
-      out.fields.push({ name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site' })
+      const notes = [`${view.verifierName} does not learn your real identity`]
+      if (p.issuerCanLink) notes.push('You can be deanonymized by the issuer')
+      out.fields.push({ kind: 'pseudonym', name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site', notes })
     } else {
       const text = ageText(item)
       out.age = { handle: item.handle, text, range: birthRangeText(item), ...(item.ge && { ge: item.ge }), ...(item.le && { le: item.le }) }
-      out.fields.push({ name: 'Age', value: capitalize(text) })
+      out.fields.push({ kind: 'age', name: 'Age proof', value: capitalize(text), notes: ['Your date of birth is not shared'] })
     }
   }
 

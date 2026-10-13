@@ -6,12 +6,12 @@ import { sidDate } from '~/wallet/holder'
 // "Request to Share Data", the requester's name and domain, the requested information in a box
 // headed by the credential, "Switch credential" with the number of other matching credentials
 // when there are any, and Share / Decline in a fixed bar. The fields come from the request
-// (app/wallet/engine.ts, consentFor). Under its header the box shows the chosen credential's birth
-// date, which tells two credentials of the same type apart; it stays on the phone, and is not among
-// the requested information.
-const props = defineProps<{ consent: ConsentView; credentialTitle: string; birthDate?: string; validUntil?: string; alternatives?: number }>()
+// (app/wallet/engine.ts, consentFor), one tile per item shared: the pseudonym, and the age range or
+// threshold when the site asks for one. The box header takes the chosen credential's card colour,
+// which tells two credentials of the same type apart; the birth date is not shown, as it is not shared.
+const props = defineProps<{ consent: ConsentView; credentialTitle: string; validUntil?: string; alternatives?: number; background?: string; text?: string }>()
 defineEmits<{ accept: []; cancel: []; switch: [] }>()
-const birth = computed(() => (props.birthDate ? sidDate(props.birthDate) : ''))
+const ICONS = { pseudonym: 'key-round', age: 'shield-check' } as const
 const expiry = computed(() => (props.validUntil ? sidDate(props.validUntil) : ''))
 </script>
 
@@ -31,20 +31,26 @@ const expiry = computed(() => (props.validUntil ? sidDate(props.validUntil) : ''
         <ul>
           <li class="mt-2">
             <div class="flex flex-col gap-4 rounded-md border border-sid-gray-700 p-4">
-              <div class="flex items-center justify-between rounded-md bg-sid-brand px-3 py-1 text-white">
+              <div
+                class="flex items-center justify-between rounded-md bg-sid-brand px-3 py-1 text-white"
+                :style="props.background ? { backgroundColor: props.background, color: props.text } : undefined"
+              >
                 <h3 class="font-bold" aria-live="polite">{{ props.credentialTitle }}</h3>
                 <WalletSirosIcon name="id-card" class="size-6" />
               </div>
-              <div v-if="birth || expiry" class="-mt-2 text-sm">
-                <p v-if="birth" class="font-semibold text-sid-gray-900">Birth Date: {{ birth }}</p>
-                <p v-if="expiry" class="text-xs text-sid-gray-700">Expiry Date: {{ expiry }}</p>
+              <p v-if="expiry" class="-mt-2 text-xs text-sid-gray-700">Expiry Date: {{ expiry }}</p>
+              <div class="flex flex-col gap-3">
+                <section v-for="f in props.consent.fields" :key="f.name" class="flex gap-3 rounded-md border border-sid-gray-400 bg-sid-gray-200 p-3">
+                  <WalletSirosIcon :name="ICONS[f.kind]" class="mt-0.5 size-5 shrink-0 text-sid-gray-700" />
+                  <div class="min-w-0">
+                    <h4 class="font-bold">{{ f.name }}</h4>
+                    <p class="mt-1 break-words font-medium">{{ f.value }}</p>
+                    <ul v-if="f.notes?.length" class="mt-2 space-y-1 text-sm text-sid-gray-700">
+                      <li v-for="n in f.notes" :key="n" class="break-words">{{ n }}</li>
+                    </ul>
+                  </div>
+                </section>
               </div>
-              <dl>
-                <template v-for="(f, i) in props.consent.fields" :key="f.name">
-                  <dt class="font-bold" :class="i > 0 && 'mt-2 pt-2'">{{ f.name }}</dt>
-                  <dd class="mt-2 break-words">{{ f.value }}</dd>
-                </template>
-              </dl>
               <div v-if="props.alternatives" class="-mx-4 border-t border-t-sid-gray-600 px-4 pt-4 pb-1">
                 <button
                   class="flex items-center gap-1 font-medium text-sid-brand underline-offset-2 hover:underline"

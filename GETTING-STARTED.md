@@ -66,8 +66,8 @@ Log in, sign up and age checks open a dialog with a QR code on the left and the 
 the right.
 
 Sign up and log in send the same wallet request, a pseudonym; Readdit applies it differently.
-**Sign up** creates the account, or logs in when the wallet already has one ("This wallet already
-has an account"). **Log in** only logs in: with no account for the wallet, the dialog says "No
+**Sign up** only creates an account: when the wallet already has one, the dialog says "Account
+already exists" and offers **Log in**. **Log in** only logs in: with no account for the wallet, the dialog says "No
 account" and offers **Sign up**.
 
 On the phone (SIROS ID), the screens and their wording follow the SIROS ID wallet:
@@ -97,8 +97,8 @@ The panel's button at the top right collapses it to a narrow strip; the browser 
 choice. Its footer links to the technical and moderation views.
 
 The wallet holds two "Age and pseudonym" credentials, told apart by the birth date on each card:
-the demo person's, 15 years old (born 14 March 2011), which every request uses first, and an
-adult's (born 20 May 1990). Each has its own secret seed, so
+the demo person's, 15 years old (born 14 March 2011), and an adult's (born 20 May 1990). A request
+uses the credential shown on the wallet's home screen. Each has its own secret seed, so
 each gives Readdit a different pseudonym and so a different account. When both match a request,
 **Switch credential** on the request screen, or on "Requirement Not Met", chooses the other one.
 
@@ -108,8 +108,10 @@ Communities:
 - **c/teenspace** is for ages 13–17. The demo person gets in; the adult credential meets
   "Requirement Not Met".
 - **c/afterdark** is for ages 18+. With the demo person's credential the wallet shows "Requirement
-  Not Met", and nothing is shared; with the adult credential (**Switch credential**) the account
-  gets in.
+  Not Met", and nothing is shared. With the adult credential (**Switch credential**, or shown on the
+  home screen before scanning) the wallet makes the proof, but Readdit rejects it when you are logged
+  in with the demo person's account ("Pseudonym does not match"). Logged out, or logged in with the
+  adult's account, you get in.
 - **Logged out**, an age-restricted community shows its age requirement and **Verify age with
   wallet**. That one request asks for the pseudonym and the age range together: it creates the
   account or logs in to it, and records the age. If the requirement is not met, nothing is shared
@@ -147,7 +149,7 @@ session; the chips under the service cards select earlier ones.
   presentation or Readdit computes it itself.
 - **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
 - **Estimates per step.** Setup, precompute, prove, send and verify, for Longfellow
-  and VegaMC (in use). Desktop times are measurements on Apple M5 and AMD Ryzen 9. Phone times are
+  and VegaMC. Desktop times are measurements on Apple M5 and AMD Ryzen 9. Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
 

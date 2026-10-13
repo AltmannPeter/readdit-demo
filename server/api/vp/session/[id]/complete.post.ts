@@ -4,9 +4,10 @@ import { findCommunity } from '#shared/data/communities'
  * Site: apply a verified session to the browser that started it.
  * The phone never sets the browser's login; only the owning browser can complete.
  *
- * Sign-in: `signup` creates the account or logs in to the existing one; `login` logs in only, and
- * answers `no_account` (creating nothing) when the pseudonym has no account. A banned account is
- * refused either way. A sign-in for an age-restricted community also records the proven age range
+ * Sign-in: `signup` creates the account, and answers `account_exists` (logging nothing in) when the
+ * pseudonym already has one; `login` logs in only, and answers `no_account` (creating nothing) when
+ * the pseudonym has no account. A banned account is refused either way. A sign-in for an
+ * age-restricted community creates the account or logs in to the existing one, and also records the proven age range
  * for the account it logs in to: the pseudonym and the age result come from one presentation.
  * Age check: the proven pseudonym must be the logged-in account's.
  */
@@ -24,6 +25,8 @@ export default defineEventHandler(async (event) => {
       s.completion = { ok: false, kind: 'banned', handle: existing.handle }
     } else if (!existing && s.purpose.intent === 'login') {
       s.completion = { ok: false, kind: 'no_account' }
+    } else if (existing && s.purpose.intent === 'signup' && !s.purpose.community) {
+      s.completion = { ok: false, kind: 'account_exists' }
     } else {
       const { account, created } = getOrCreateAccount(pseudonym)
       const gate = s.purpose.community ? findCommunity(s.purpose.community)?.gate : undefined

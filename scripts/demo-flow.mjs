@@ -128,12 +128,12 @@ try {
   await phone.getByText('Presentation sent successfully').waitFor({ timeout: 30_000 })
   await guide('proving', { settle: 0 })
   await shot('proof', { settle: 0 })
-  // The dialog closes 1.8 s after the account is created: capture the wallet's "Success!" as soon as
-  // its transition (200 ms) has run, with the dialog still open.
+  // The dialog stays open until Close on the phone's success screen.
   await phone.getByText('Success!').waitFor({ timeout: 30_000 })
   await shot('signup-success', { settle: 180 })
   if (!(await page.getByText(/^Account created: u\//).isVisible())) errors.push('the sign-up success screenshot missed the open dialog')
   await guide('account-created', { settle: 0 })
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
   await page.getByRole('banner').getByText(/^u\//).first().waitFor()
   await guide('account-created')
@@ -182,6 +182,8 @@ try {
   await shotScrolledIfLonger('teenspace-consent-scrolled')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
+  await phone.getByText('Success!').waitFor({ timeout: 30_000 })
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
   await guide('age-verified')
   await openDetails()

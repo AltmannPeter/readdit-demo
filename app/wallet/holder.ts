@@ -133,7 +133,7 @@ export function credentialLabel(c: CredentialView): string {
 export interface DisplayCredential {
   title: string
   issuer: string
-  /** Card colour; the issuer gives no display metadata, so the wallet uses its brand colour. */
+  /** Card colour; the issuer gives no display metadata, so the wallet picks one per credential. */
   background: string
   text: string
   /** The holder's birth date (YYYY-MM-DD), on the holder's own screens; the tell between two credentials. */
@@ -146,14 +146,14 @@ export interface DisplayCredential {
 export const sidDate = (iso: string) =>
   new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })
 
-/** Static card shown next to nym_auth so the wallet looks lived-in. Not used in any flow. */
-export const pidCard: DisplayCredential = { title: 'Personal ID', issuer: 'Demo Issuer', background: '#D3D3D3', text: '#000000' }
+/** Card colour per credential (holders[index]), so two nym_auth cards are easy to tell apart. */
+const CARD_COLOURS = ['#5B6573', '#8C2F39'] as const
 
 export function nymCard(c: CredentialView | null): DisplayCredential {
   return {
     title: c?.title ?? NYM_TITLE,
     issuer: c?.issuer.name ?? '',
-    background: '#1C4587',
+    background: CARD_COLOURS[(c?.index ?? 0) % CARD_COLOURS.length]!,
     text: '#FFFFFF',
     birthDate: c?.attributes.birth_date,
     validUntil: c && !neverExpires(c.validity.validUntil) ? c.validity.validUntil : undefined,

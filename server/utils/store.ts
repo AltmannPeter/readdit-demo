@@ -14,7 +14,7 @@ export type VpStatus = 'waiting' | 'scanned' | 'responded' | 'verified' | 'faile
 export type FailReason = 'denied' | 'invalid_request' | 'invalid' | 'unavailable' | 'expired' | 'cancelled'
 
 /** How a verified session was applied, or why it was not. */
-export type CompletionKind = 'created' | 'logged_in' | 'age' | 'banned' | 'mismatch' | 'no_account' | 'logged_out' | FailReason
+export type CompletionKind = 'created' | 'logged_in' | 'age' | 'banned' | 'mismatch' | 'no_account' | 'account_exists' | 'logged_out' | FailReason
 
 export interface TraceEvent {
   at: number

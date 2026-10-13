@@ -51,7 +51,7 @@ const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
           class="mx-0.5 my-2 flex h-10 w-9 items-center justify-center rounded-md border border-sid-gray-400 bg-sid-gray-200 text-lg text-sid-gray-900"
         >{{ i <= pin.length ? '•' : '' }}</span>
       </div>
-      <div class="flex justify-end gap-2 pt-4">
+      <div class="flex justify-center gap-2 pt-4">
         <WalletButton @click="emit('cancel')">Cancel</WalletButton>
         <WalletButton variant="primary" :disabled="pin.length !== LENGTH" @click="submit">Submit</WalletButton>
       </div>

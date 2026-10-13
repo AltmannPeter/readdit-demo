@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import type { CircuitEntry } from '#shared/registry/circuits'
-import { DESKTOP_MACHINES, PHONE_FACTOR, SYSTEMS, UPLINK_MBPS, phaseRange, presentationRange, systemForCircuit } from '#shared/benchmarks'
+import { DESKTOP_MACHINES, PHONE_FACTOR, SYSTEMS, UPLINK_MBPS, phaseRange, presentationRange } from '#shared/benchmarks'
 
 definePageMeta({ layout: false })
 useHead({ title: 'Technical view · Readdit' })
@@ -91,7 +91,6 @@ const services = computed((): Record<string, Service> => {
   const s = data.value?.services
   return s ? { prover: s.prover, verifier: s.verifier } : {}
 })
-const activeSystem = computed(() => systemForCircuit(session.value?.circuit?.circuit_id ?? prove.value?.circuit_id))
 
 /** "217–588 ms", "0.22–2.9 s" */
 function span(r: readonly [number, number] | null): string {
@@ -334,17 +333,16 @@ const statusTone = (s: string) =>
                   v-for="sys in SYSTEMS"
                   :key="sys.key"
                   colspan="2"
-                  class="px-3 py-2 font-semibold"
-                  :class="sys.key === activeSystem.key ? 'bg-brand-soft text-brand' : 'text-ink'"
+                  class="px-3 py-2 font-semibold text-ink"
                 >
-                  {{ sys.label }}<span v-if="sys.key === activeSystem.key" class="font-normal"> · in use</span>
+                  {{ sys.label }}
                 </th>
               </tr>
               <tr class="border-b border-line text-muted">
                 <th colspan="3" />
                 <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <th class="px-3 py-1 font-medium" :class="sys.key === activeSystem.key && 'bg-brand-soft'">Desktop</th>
-                  <th class="px-3 py-1 font-medium" :class="sys.key === activeSystem.key && 'bg-brand-soft'">Phone (est.)</th>
+                  <th class="px-3 py-1 font-medium">Desktop</th>
+                  <th class="px-3 py-1 font-medium">Phone (est.)</th>
                 </template>
               </tr>
             </thead>
@@ -354,12 +352,12 @@ const statusTone = (s: string) =>
                 <td class="px-3 py-2.5">{{ whereText(phase.where) }}</td>
                 <td class="px-3 py-2.5 text-muted">{{ phase.id === 'precompute' ? 'Once per attestation' : phase.frequency }}</td>
                 <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <td class="px-3 py-2.5 tabular-nums" :class="sys.key === activeSystem.key && 'bg-brand-soft/60'">
+                  <td class="px-3 py-2.5 tabular-nums">
                     <template v-if="sys.phases[i]!.id === 'transfer'">–</template>
                     <template v-else>{{ sys.phases[i]!.desktopMs ? span(sys.phases[i]!.desktopMs) : 'none' }}</template>
                     <p v-if="sys.phases[i]!.detail" class="mt-0.5 max-w-48 text-[11px] leading-snug text-muted">{{ sys.phases[i]!.detail }}</p>
                   </td>
-                  <td class="px-3 py-2.5 font-semibold tabular-nums" :class="sys.key === activeSystem.key && 'bg-brand-soft/60'">
+                  <td class="px-3 py-2.5 font-semibold tabular-nums">
                     {{ phase.where === 'circuit provider' ? 'not on phone' : sys.phases[i]!.desktopMs || sys.phases[i]!.id === 'transfer' ? span(phaseRange(sys, sys.phases[i]!)) : 'none' }}
                   </td>
                 </template>
@@ -367,8 +365,8 @@ const statusTone = (s: string) =>
               <tr class="bg-canvas/60 align-top">
                 <td class="px-5 py-2.5 font-semibold" colspan="3">Per presentation (prove, send, verify)</td>
                 <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <td class="px-3 py-2.5" :class="sys.key === activeSystem.key && 'bg-brand-soft/60'" />
-                  <td class="px-3 py-2.5 text-sm font-bold tabular-nums" :class="sys.key === activeSystem.key && 'bg-brand-soft/60'">
+                  <td class="px-3 py-2.5" />
+                  <td class="px-3 py-2.5 text-sm font-bold tabular-nums">
                     {{ span(presentationRange(sys)) }}
                   </td>
                 </template>

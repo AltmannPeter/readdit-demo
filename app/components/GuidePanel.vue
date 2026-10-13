@@ -2,6 +2,7 @@
 import { findCommunity } from '#shared/data/communities'
 import type { CredentialView } from '~/wallet/holder'
 import { loadCredentials } from '~/wallet/holder'
+import type { GuideStep } from '~/guide/steps'
 import { STAGES, guideStep } from '~/guide/steps'
 
 // The presenter's guide, docked beside the product. It is not part of Readdit or the wallet: it
@@ -50,11 +51,41 @@ const step = computed(() =>
   }),
 )
 
-const detailsOpen = ref(false)
+// History of the steps shown so far, so the presenter can go back to one that passed quickly.
+// Each new step (any interaction: on the phone, the site or the dialog) jumps back to the present.
+// A step that changes without becoming a new one (details filled in) updates its history entry.
+const MAX_HISTORY = 50
+const history = ref<Array<{ key: number; step: GuideStep }>>([])
+const viewing = ref<number | null>(null)
+let nextKey = 0
 watch(
-  () => step.value.id,
-  () => (detailsOpen.value = false),
+  step,
+  (s) => {
+    const snap = JSON.parse(JSON.stringify(s)) as GuideStep
+    const last = history.value.at(-1)
+    if (last && last.step.id === s.id && last.step.context === s.context) {
+      last.step = snap
+      return
+    }
+    history.value.push({ key: nextKey++, step: snap })
+    if (history.value.length > MAX_HISTORY) history.value.shift()
+    viewing.value = null
+  },
+  { immediate: true },
 )
+const position = computed(() => viewing.value ?? history.value.length - 1)
+const shown = computed(() => (viewing.value == null ? step.value : history.value[viewing.value]!.step))
+const shownKey = computed(() => history.value[position.value]?.key ?? 0)
+function back() {
+  if (position.value > 0) viewing.value = position.value - 1
+}
+function forward() {
+  if (viewing.value == null) return
+  viewing.value = viewing.value + 1 >= history.value.length - 1 ? null : viewing.value + 1
+}
+
+const detailsOpen = ref(false)
+watch(shownKey, () => (detailsOpen.value = false))
 </script>
 
 <template>
@@ -70,7 +101,28 @@ watch(
           <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z" />
         </svg>
         <span class="text-sm font-semibold text-white">Guide</span>
-        <button class="ml-auto rounded-md p-1.5 text-[#8b939e] hover:bg-white/10 hover:text-white" aria-label="Hide guide" title="Hide guide" @click="guide.toggle">
+        <div class="ml-auto flex items-center gap-1">
+          <button
+            class="rounded-md p-1.5 text-[#8b939e] hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
+            aria-label="Previous step"
+            title="Previous step"
+            :disabled="position === 0"
+            @click="back"
+          >
+            <svg viewBox="0 0 24 24" class="size-[18px]" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+          </button>
+          <span class="min-w-[3.25rem] text-center text-xs tabular-nums text-[#8b939e]">{{ position + 1 }} / {{ history.length }}</span>
+          <button
+            class="rounded-md p-1.5 text-[#8b939e] hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
+            aria-label="Next step"
+            title="Next step"
+            :disabled="viewing == null"
+            @click="forward"
+          >
+            <svg viewBox="0 0 24 24" class="size-[18px]" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+        <button class="ml-2 rounded-md p-1.5 text-[#8b939e] hover:bg-white/10 hover:text-white" aria-label="Hide guide" title="Hide guide" @click="guide.toggle">
           <svg viewBox="0 0 24 24" class="size-[18px]" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18M8 9l3 3-3 3" />
           </svg>
@@ -79,6 +131,10 @@ watch(
 
       <div class="relative min-h-0 flex-1">
         <div class="h-full overflow-y-auto px-5 pt-5 pb-10">
+          <div v-if="viewing != null" class="mb-4 flex items-center justify-between rounded-md bg-white/8 px-3 py-2 text-xs">
+            <span class="text-[#8b939e]">Earlier step</span>
+            <button class="font-semibold text-white hover:underline" @click="viewing = null">Back to current</button>
+          </div>
           <Transition
             mode="out-in"
             enter-active-class="transition duration-200 ease-out"
@@ -86,21 +142,21 @@ watch(
             leave-active-class="transition duration-100 ease-in"
             leave-to-class="opacity-0"
           >
-            <div :key="step.id">
-              <p class="font-mono text-[11px] tracking-[0.06em] text-[#8b939e] uppercase">{{ step.context }}</p>
+            <div :key="shownKey">
+              <p class="font-mono text-[11px] tracking-[0.06em] text-[#8b939e] uppercase">{{ shown.context }}</p>
 
-              <ol v-if="step.stage != null" class="mt-3 grid grid-cols-6 gap-1" aria-label="Request progress">
-                <li v-for="(s, k) in STAGES" :key="s" :aria-current="k === step.stage ? 'step' : undefined">
-                  <span class="block h-1 rounded-full" :class="k < step.stage ? 'bg-[#6b7480]' : k === step.stage ? 'bg-white' : 'bg-white/12'" />
-                  <span class="mt-1.5 block text-[10.5px] leading-tight" :class="k === step.stage ? 'font-semibold text-white' : 'text-[#6b7480]'">{{ s }}</span>
+              <ol v-if="shown.stage != null" class="mt-3 grid grid-cols-6 gap-1" aria-label="Request progress">
+                <li v-for="(s, k) in STAGES" :key="s" :aria-current="k === shown.stage ? 'step' : undefined">
+                  <span class="block h-1 rounded-full" :class="k < shown.stage ? 'bg-[#6b7480]' : k === shown.stage ? 'bg-white' : 'bg-white/12'" />
+                  <span class="mt-1.5 block text-[10.5px] leading-tight" :class="k === shown.stage ? 'font-semibold text-white' : 'text-[#6b7480]'">{{ s }}</span>
                 </li>
               </ol>
 
-              <h2 class="mt-4 text-[22px] leading-tight font-semibold text-white">{{ step.title }}</h2>
-              <p class="mt-3 text-[15px] leading-relaxed">{{ step.summary }}</p>
+              <h2 class="mt-4 text-[22px] leading-tight font-semibold text-white">{{ shown.title }}</h2>
+              <p class="mt-3 text-[15px] leading-relaxed">{{ shown.summary }}</p>
 
               <details
-                v-if="step.details.length"
+                v-if="shown.details.length"
                 class="group mt-6 border-t border-white/10 pt-4"
                 :open="detailsOpen"
                 @toggle="detailsOpen = ($event.target as HTMLDetailsElement).open"
@@ -112,7 +168,7 @@ watch(
                   Details
                 </summary>
                 <div class="mt-4 space-y-5">
-                  <section v-for="sec in step.details" :key="sec.heading">
+                  <section v-for="sec in shown.details" :key="sec.heading">
                     <h3 class="text-[12px] font-semibold text-[#8b939e]">{{ sec.heading }}</h3>
                     <dl v-if="sec.rows?.length && sec.stacked" class="mt-2 space-y-2">
                       <div v-for="r in sec.rows" :key="r.label">

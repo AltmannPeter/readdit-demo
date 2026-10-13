@@ -30,6 +30,8 @@ const props = withDefaults(
   }>(),
   { transport: () => httpTransport },
 )
+/** Close on the success screen: the person is done on the phone and goes back to the site. */
+const emit = defineEmits<{ finished: [] }>()
 
 // Titles and descriptions from the SIROS ID wallet's English strings (src/locales/en.json).
 const ERRORS = {
@@ -51,6 +53,8 @@ const consent = ref<ConsentView | null>(null)
 const credentials = ref<CredentialView[] | null>(null)
 /** The credential in focus: the one whose details are open, or the one the request uses. */
 const focus = ref(0)
+/** The credential shown on the home screen or opened last; the next request starts with it. */
+const selected = useState('siros-selected', () => 0)
 /** The credentials that match the current request's document type, and the "Switch credential" popup. */
 const matching = ref<CredentialView[]>([])
 const switching = ref(false)
@@ -150,11 +154,11 @@ async function onScanned() {
     })
     request.value = verified.request
     verifierSubject.value = verified.signer.subject
-    // Every credential of the requested document type matches; the first is chosen, and the
-    // request screen offers the others ("Switch credential").
+    // Every credential of the requested document type matches; the one selected on the home
+    // screen is used (else the first), and the request screen offers the others ("Switch credential").
     const doctype = verified.request.dcql_query?.credentials?.[0]?.meta?.doctype_value
     matching.value = credentials.value!.filter((c) => c.docType === doctype)
-    focus.value = matching.value[0]?.index ?? 0
+    focus.value = matching.value.find((c) => c.index === selected.value)?.index ?? matching.value[0]?.index ?? 0
     await analyze()
   } catch (e) {
     // An HTTP refusal from request_uri; anything else concerns the request's signature or certificate.
@@ -261,8 +265,14 @@ function reset() {
   screen.value = 'home'
 }
 
+function finish() {
+  reset()
+  emit('finished')
+}
+
 function openDetails(index: number) {
   focus.value = index
+  selected.value = index
   screen.value = 'detail'
 }
 
@@ -282,7 +292,16 @@ onBeforeUnmount(() => {
         leave-active-class="transition duration-150 ease-in"
         leave-to-class="opacity-0 -translate-x-3"
       >
-        <WalletHome v-if="screen === 'home'" key="home" :credentials="credentials" :history="history" @scan="startScan" @open="openDetails" />
+        <WalletHome
+          v-if="screen === 'home'"
+          key="home"
+          :credentials="credentials"
+          :history="history"
+          :selected="selected"
+          @select="selected = $event"
+          @scan="startScan"
+          @open="openDetails"
+        />
         <WalletDetail
           v-else-if="screen === 'detail' && current"
           key="detail"
@@ -304,8 +323,9 @@ onBeforeUnmount(() => {
           key="request"
           :consent="consent"
           :credential-title="current?.title ?? ''"
-          :birth-date="current?.attributes.birth_date"
           :valid-until="current ? nymCard(current).validUntil : undefined"
+          :background="current ? nymCard(current).background : undefined"
+          :text="current ? nymCard(current).text : undefined"
           :alternatives="alternatives.length"
           @accept="toPin"
           @cancel="refuse('declined', 'request')"
@@ -320,7 +340,7 @@ onBeforeUnmount(() => {
           kind="done"
           title="Success!"
           :text="`Your data has been shared with ${view?.verifierName}.`"
-          @close="reset"
+          @close="finish"
         />
         <WalletOutcome v-else-if="screen === 'declined'" key="declined" kind="declined" title="Sharing Cancelled" text="You cancelled sharing your credentials." @close="reset" />
         <WalletOutcome v-else key="error" kind="error" :title="error?.title ?? ''" :text="error?.description ?? ''" @close="reset" />

@@ -309,7 +309,7 @@ async function newSessionId(before) {
 }
 /** A dialog that starts afresh: a new session, the phone on its home screen, the QR step in the guide. */
 async function expectFresh(guideId, before) {
-  await site().getByText('Open SIROS ID on your phone').waitFor({ timeout: 15_000 })
+  await site().getByText('Open an EUDI Wallet App on your phone').waitFor({ timeout: 15_000 })
   check('a new session', !!(await newSessionId(before)), lastSession())
   check('phone on its home screen', await phone().getByRole('button', { name: 'Scan QR code' }).isVisible())
   check('dialog shows no earlier outcome', !(await site().getByText(/Not completed|No account|Account banned/).count()))
@@ -352,6 +352,12 @@ async function signIn(name, expectText) {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await site().getByText(expectText).waitFor({ timeout: 30_000 })
+  await closeFromPhone()
+}
+/** After a success the dialog stays open until Close on the phone's success screen. */
+async function closeFromPhone() {
+  await phone().getByText('Success!', { exact: true }).waitFor({ timeout: 30_000 })
+  await phone().getByRole('button', { name: 'Close', exact: true }).click()
   await dialog().waitFor({ state: 'detached', timeout: 10_000 })
 }
 async function goto(path) {
@@ -535,7 +541,9 @@ async function groupA() {
   await guideIs('account-created')
   check('the device key signed at the first PIN (200)', since(m).filter((e) => e.path === '/api/wallet/sign').map((e) => e.status).join() === '200')
   await expectVerification()
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await page.waitForTimeout(2500)
+  check('the dialog stays open until Close on the phone', await dialog().isVisible())
+  await closeFromPhone()
   const created = (await me()).account
   check('logged in', !!created?.handle, created?.handle)
   eq('one account', (await accounts()).length, 1)
@@ -566,14 +574,22 @@ async function groupA() {
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await dialogShows(`Logged in as u/${created.handle}`, 30_000)
-  await dialogShows('This wallet already has an account.')
-  await guideIs('logged-in')
-  await guideSays('creates no second account')
+  await dialogShows('Account already exists', 30_000)
+  await dialogShows('There is already an account associated with this user. Log in instead.')
+  await guideIs('account-exists')
   await expectVerification()
-  eq('server: the completion', (await complete(page.request, lastSession())).body, { ok: true, kind: 'logged_in', handle: created.handle })
+  eq('server: the completion', (await complete(page.request, lastSession())).body, { ok: false, kind: 'account_exists' })
   eq('still one account', (await accounts()).length, 1)
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  check('the browser is not logged in', (await me()).account === null)
+  // the dialog's Log in sends a new request and logs in
+  await dialog().getByRole('button', { name: 'Log in' }).click()
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows(`Logged in as u/${created.handle}`, 30_000)
+  eq('server: the completion', (await complete(page.request, lastSession())).body, { ok: true, kind: 'logged_in', handle: created.handle })
+  await closeFromPhone()
   return created
 }
 // ---- B. Communities, age gates, closing the dialog, comments ----
@@ -677,7 +693,7 @@ async function groupB(created) {
   await site().getByText('Age verified').waitFor({ timeout: 30_000 })
   await guideIs('age-verified')
   await expectVerification()
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
   check('posts shown', (await page.locator('a[href^="/c/teenspace/p"]').count()) > 0)
   check('the proven range is stored', !!(await me()).account.birthDateRange?.ge)
 
@@ -810,7 +826,7 @@ async function groupD(ttl) {
   await guideSays('born 20 May 1990')
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await dialogShows('The response belongs to a different account.', 30_000)
+  await dialogShows('The pseudonym in this proof does not match your account. The age proof was not applied.', 30_000)
   await guideIs('mismatch')
   await expectVerification()
   check('the adult credential proved 18+ (vp_token 200)', has(m, 'POST', '/api/vp/response/:id', 200, 'vp_token'))
@@ -1258,7 +1274,7 @@ async function groupH() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await visible('after the failure, the next request works', site().getByText(/^Account created: u\//), 30_000)
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
 }
 
 // ---- I. Logged out at an age-restricted community: one request logs in and checks the age ----
@@ -1311,7 +1327,7 @@ async function groupI() {
   const done = (await complete(page.request, lastSession())).body
   check('server: created, with the age recorded', done.ok === true && done.kind === 'created' && done.age === true, JSON.stringify(done))
   check('one wallet request for both', count(m, 'POST', '/api/vp/session') === 1 && count(m, 'POST', '/api/wallet/prove') === 1)
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
   check('posts shown', (await page.locator('a[href^="/c/teenspace/p"]').count()) > 0)
   const account = (await me()).account
   check('logged in, with the proven range stored', account?.handle === done.handle && !!account?.birthDateRange?.ge, JSON.stringify(account?.birthDateRange))
@@ -1334,7 +1350,7 @@ async function groupI() {
   await expectVerification()
   eq('server: the completion', (await complete(page.request, lastSession())).body, { ok: true, kind: 'logged_in', handle: account.handle, age: true })
   eq('still one account', (await accounts()).length, 1)
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
 
   begin('G4', 'a banned account is refused')
   const ctx = await client()
@@ -1415,7 +1431,7 @@ async function groupJ() {
   await enterPin(anyPin())
   await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
   await expectVerification()
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
   const adultAccount = (await me()).account
   check('a new account with another pseudonym', adultAccount.pseudonym !== teenAccount.pseudonym && adultAccount.handle !== teenAccount.handle, `u/${adultAccount.handle} vs u/${teenAccount.handle}`)
   eq('two accounts', (await accounts()).length, 2)
@@ -1434,7 +1450,7 @@ async function groupJ() {
   await enterPin(anyPin())
   await site().getByText('Age verified').waitFor({ timeout: 30_000 })
   await expectVerification()
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
   check('c/afterdark posts shown', (await page.locator('a[href^="/c/afterdark/p"]').count()) > 0)
   await guideIs('age-verified')
   await shot('29-afterdark-granted-adult')
@@ -1478,7 +1494,7 @@ async function groupJ() {
   await dialogShows('Age verified', 30_000)
   await dialogShows(`Logged in as u/${adultAccount.handle}`)
   await expectVerification()
-  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  await closeFromPhone()
   check('c/afterdark posts shown', (await page.locator('a[href^="/c/afterdark/p"]').count()) > 0)
 
   begin('C5', 'banning one account leaves the other')

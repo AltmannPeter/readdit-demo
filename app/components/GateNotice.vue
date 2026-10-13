@@ -16,17 +16,9 @@ const ageText = computed(() => {
 </script>
 
 <template>
-  <div class="card flex flex-col items-center px-6 py-12 text-center">
-    <template v-if="props.state === 'login'">
-      <span class="flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand">
-        <AppIcon name="lock" class="size-6" />
-      </span>
-      <h2 class="mt-4 text-lg font-semibold">Log in to view {{ name }}</h2>
-      <p class="mt-1 max-w-sm text-sm text-muted">Readdit accounts use a pseudonym from your EU Digital Identity Wallet.</p>
-      <button class="btn-primary mt-5" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in with wallet</button>
-    </template>
-
-    <template v-else-if="props.state === 'ask' || props.state === 'ask-signin'">
+  <LoginNotice v-if="props.state === 'login'" :title="`Log in to view ${name}`" />
+  <div v-else class="card flex flex-col items-center px-6 py-12 text-center">
+    <template v-if="props.state === 'ask' || props.state === 'ask-signin'">
       <span class="flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand">
         <AppIcon name="shield" class="size-6" />
       </span>

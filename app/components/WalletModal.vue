@@ -33,7 +33,6 @@ const failTitle = ref('Not completed')
 /** One phone per attempt: the wallet starts on its home screen for every new request. */
 const attempt = ref(0)
 let pollTimer: ReturnType<typeof setInterval> | undefined
-let closeTimer: ReturnType<typeof setTimeout> | undefined
 /** The request this dialog runs; a newer start or a close makes older answers stale. */
 let run = 0
 let activePurpose: WalletPurpose | null = null
@@ -63,7 +62,7 @@ const title = computed(() => {
   return p?.intent === 'signup' ? `Sign up for ${siteName}` : `Log in to ${siteName}`
 })
 const subtitle = computed(() => {
-  if (!community.value) return `Use the SIROS ID app on your phone. ${siteName} receives a pseudonym, not your name or email address.`
+  if (!community.value) return `Open an EUDI Wallet App. ${siteName} receives a pseudonym, not your name or email address.`
   const gated = `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
   return state.value.purpose?.kind === 'signin' ? `${gated} The same step logs you in with a pseudonym.` : gated
 })
@@ -77,16 +76,17 @@ const FAILURES: Record<string, string> = {
   cancelled: 'The request was cancelled. Try again.',
   gone: 'This code is no longer valid. Try again.',
   banned: `This wallet's ${siteName} account has been banned.`,
-  mismatch: 'The response belongs to a different account.',
+  mismatch: 'The pseudonym in this proof does not match your account. The age proof was not applied.',
   no_account: `There is no ${siteName} account for this wallet. Sign up to create one.`,
+  account_exists: 'There is already an account associated with this user. Log in instead.',
   logged_out: 'You are no longer logged in. Log in and try again.',
   login_required: 'Log in to verify your age.',
   age_refused: 'Your verified age does not meet this requirement.',
   age_verified: 'Your age is already verified for this community.',
 }
-const TITLES: Record<string, string> = { banned: 'Account banned', no_account: 'No account' }
+const TITLES: Record<string, string> = { mismatch: 'Pseudonym does not match', banned: 'Account banned', no_account: 'No account', account_exists: 'Account already exists' }
 /** Failures that a new request would not change. */
-const FINAL = new Set(['no_account', 'logged_out', 'login_required', 'age_refused', 'age_verified'])
+const FINAL = new Set(['no_account', 'account_exists', 'logged_out', 'login_required', 'age_refused', 'age_verified'])
 const retryable = computed(() => !failure.value || !FINAL.has(failure.value))
 
 /** The refusal code in an error body (`data.error`), and the HTTP status. */
@@ -97,7 +97,6 @@ function errorOf(e: unknown): { status?: number; code?: string } {
 
 function stop() {
   clearInterval(pollTimer)
-  clearTimeout(closeTimer)
 }
 
 function failWith(kind: string) {
@@ -117,6 +116,7 @@ async function start() {
   const mine = ++run
   attempt.value++
   activePurpose = p
+  phoneFinished = false
   phase.value = 'starting'
   failure.value = null
   completion.value = null
@@ -212,12 +212,24 @@ async function complete(id: string, mine: number) {
   }
   phase.value = 'success'
   if (activePurpose) lastOutcome.value = { purpose: activePurpose, ok: true, kind: c.kind, handle: c.handle }
-  closeTimer = setTimeout(close, 1800)
+  // The dialog stays open until Close on the phone's success screen (or the site's own close).
+  if (phoneFinished) close()
+}
+
+/** Close on the phone's success screen: back to the site once the site has applied the result. */
+let phoneFinished = false
+function onPhoneFinished() {
+  phoneFinished = true
+  if (phase.value === 'success') close()
 }
 
 /** "Sign up" after a log-in found no account: a new request, applied as a sign-up. */
 function signUpInstead() {
   state.value = { open: true, purpose: { kind: 'signin', intent: 'signup' } }
+  start()
+}
+function logInInstead() {
+  state.value = { open: true, purpose: { kind: 'signin', intent: 'login' } }
   start()
 }
 
@@ -317,11 +329,12 @@ onBeforeUnmount(() => {
               <div class="mt-6 flex h-24 items-start">
                 <div v-if="phase === 'failed'" class="flex gap-2">
                   <button v-if="failure === 'no_account'" class="btn-primary" @click="signUpInstead">Sign up</button>
+                  <button v-else-if="failure === 'account_exists'" class="btn-primary" @click="logInInstead">Log in</button>
                   <button v-else-if="retryable" class="btn-primary" @click="start">Try again</button>
                   <button class="btn-outline" @click="close">Close</button>
                 </div>
                 <ol v-else class="space-y-2 text-sm text-muted">
-                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open SIROS ID on your phone</li>
+                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open an EUDI Wallet App on your phone</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">2</span>Tap the scan button and point your phone at this code</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">3</span>Review the request and enter any 6-digit PIN</li>
                 </ol>
@@ -331,7 +344,7 @@ onBeforeUnmount(() => {
 
           <!-- the person's phone -->
           <section class="hidden items-center justify-center border-l border-line bg-canvas px-10 py-8 md:flex">
-            <WalletApp :key="attempt" :url="authUrl" />
+            <WalletApp :key="attempt" :url="authUrl" @finished="onPhoneFinished" />
           </section>
         </div>
       </div>

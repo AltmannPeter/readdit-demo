@@ -1,23 +1,26 @@
 <script setup lang="ts">
 import type { CredentialView } from '~/wallet/holder'
-import { nymCard, pidCard, sidDate } from '~/wallet/holder'
+import { nymCard, sidDate } from '~/wallet/holder'
 
 // SIROS ID home (src/pages/Home/Home.jsx): "Credentials" with the view toggle, the credential
 // cards (horizontal slider with stacked cards, or a list), and the recent history of the shown card.
-// The wallet's nym_auth credentials come first; the Personal ID card only makes the wallet look
-// lived-in and opens nothing.
-const props = defineProps<{ credentials: CredentialView[] | null; history: Array<{ audience: string; at: number; credential: number }> }>()
-const emit = defineEmits<{ scan: []; open: [index: number] }>()
+// The wallet's nym_auth credentials, each in its own colour.
+const props = defineProps<{ credentials: CredentialView[] | null; history: Array<{ audience: string; at: number; credential: number }>; selected?: number }>()
+const emit = defineEmits<{ scan: []; open: [index: number]; select: [index: number] }>()
 
 const view = ref<'slider' | 'list'>('slider')
-const index = ref(0)
-const cards = computed(() => [...(props.credentials ?? []).map((c) => ({ display: nymCard(c), credential: c })), { display: pidCard, credential: null }])
+/** The card shown in the slider; the wallet uses it for the next request (App.vue keeps it). */
+const index = computed({
+  get: () => Math.min(props.selected ?? 0, Math.max((props.credentials?.length ?? 1) - 1, 0)),
+  set: (v: number) => emit('select', v),
+})
+const cards = computed(() => (props.credentials ?? []).map((c) => ({ display: nymCard(c), credential: c })))
 const shown = computed(() => cards.value[index.value]!)
 const behind = computed(() => cards.value[(index.value + 1) % cards.value.length]!)
 /** The shown card's presentations in the slider; every credential's in the list. */
 const recent = computed(() => {
   if (view.value === 'list') return props.history.slice(0, 3)
-  const c = shown.value.credential
+  const c = cards.value[index.value]?.credential
   return c ? props.history.filter((h) => h.credential === c.index).slice(0, 3) : []
 })
 const born = (iso?: string) => (iso ? `, birth date ${sidDate(iso)}` : '')
@@ -39,6 +42,7 @@ const fmt = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit',
       </div>
 
       <p v-if="!props.credentials" class="px-6 py-4 text-center text-xs text-sid-gray-700">Loading...</p>
+      <p v-else-if="!cards.length" class="px-6 py-4 text-center text-xs text-sid-gray-700">No credentials</p>
 
       <!-- horizontal slider: the shown card on top, the next one stacked behind it -->
       <div v-else-if="view === 'slider'" class="overflow-hidden px-6 py-4">

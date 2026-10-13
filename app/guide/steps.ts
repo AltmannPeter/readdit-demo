@@ -601,6 +601,14 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
       return { ...base, id: 'expired', title: 'Request expired', summary: 'The request expired before the wallet answered. Its request_uri and response_uri now refuse with 410. Try again shows a new QR code.', details: [] }
     case 'gone':
       return { ...base, id: 'gone', title: 'Request no longer known', summary: `${i.siteName} no longer has this request, for example after a demo reset. Try again shows a new QR code.`, details: [] }
+    case 'account_exists':
+      return {
+        ...base,
+        id: 'account-exists',
+        title: 'Account already exists',
+        summary: `The wallet proved its pseudonym for ${i.siteHost}, and ${i.siteName} already has an account for it. A sign-up only creates an account; it logs nobody in. Log in sends the same wallet request and logs in to the account.`,
+        details: [i.wallet.consent ? pseudonymSection(i.wallet.consent) : null].filter((s): s is GuideSection => !!s),
+      }
     case 'no_account':
       return {
         ...base,
@@ -634,8 +642,8 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
       return {
         ...base,
         id: 'mismatch',
-        title: 'Different account',
-        summary: `The pseudonym in the age proof is not the logged-in account's, so ${i.siteName} does not apply it.`,
+        title: 'Pseudonym does not match',
+        summary: `The wallet made a valid proof, but with a different credential: its pseudonym for ${i.siteHost} is not the logged-in account's. ${i.siteName} binds every age result to the account's pseudonym, so it rejects the presentation and applies nothing.`,
         details: [],
       }
     default:
