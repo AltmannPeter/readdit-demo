@@ -1,3 +1,7 @@
+/* Inter, the SIROS ID wallet's font (weights 400, 500, 600), bundled so the demo needs no network. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
 @import "tailwindcss";
 
 @theme {
@@ -15,15 +19,29 @@
   --color-teen: #7c3aed;
   --color-adult: #c2410c;
 
-  /* EUDI Wallet App (grey-blue) */
-  --color-w-bg: #eef2f6;
-  --color-w-surface: #ffffff;
-  --color-w-primary: #3d5a78;
-  --color-w-strong: #2c4560;
-  --color-w-soft: #dde5ee;
-  --color-w-ink: #1d2733;
-  --color-w-muted: #637385;
-  --color-w-line: #d6dee7;
+  /* SIROS ID wallet look (sirosfoundation/wallet-frontend, BSD-2-Clause; see
+     app/components/wallet/THIRD-PARTY-NOTICES.txt). Brand: branding/default/theme.json. Grays and accents:
+     the light-mode lm-* tokens of src/index.css. */
+  --font-sid: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  --color-sid-brand: #1c4587;
+  --color-sid-brand-light: #3e66a8;
+  --color-sid-brand-lighter: #7d93b5;
+  --color-sid-brand-dark: #3e6198;
+  --color-sid-brand-darker: #566276;
+  --color-sid-gray-100: #ffffff;
+  --color-sid-gray-200: #f8f9f9;
+  --color-sid-gray-300: #ededef;
+  --color-sid-gray-400: #e0e1e4;
+  --color-sid-gray-500: #cacdd2;
+  --color-sid-gray-600: #a3a8b1;
+  --color-sid-gray-700: #6e7582;
+  --color-sid-gray-800: #32353a;
+  --color-sid-gray-900: #0c0e11;
+  --color-sid-green: #19712f;
+  --color-sid-red: #bc221a;
+  --color-sid-red-dark: #aa1f18;
+  --color-sid-red-light: #fbe1e0;
+  --color-sid-orange: #ff9500;
 }
 
 @layer base {
@@ -59,4 +77,22 @@
 }
 .animate-scanline {
   animation: scanline 1.6s ease-in-out infinite;
+}
+
+/* SIROS ID: "Sending..." text shimmer (src/index.css animate-text-shimmer). */
+@keyframes sid-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.sid-shimmer {
+  background-image: linear-gradient(90deg, var(--color-sid-brand) 40%, color-mix(in srgb, white 50%, var(--color-sid-brand)) 50%, var(--color-sid-brand) 60%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: sid-shimmer 2s linear infinite;
+}
+.sid-font {
+  font-family: var(--font-sid);
+  -webkit-font-smoothing: antialiased;
 }

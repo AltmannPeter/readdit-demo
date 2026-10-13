@@ -13,7 +13,12 @@ interface Service {
   version?: string
   stub?: boolean
   offline?: boolean
-  circuits?: Array<{ circuit_id: string; proof_system: string }>
+  circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null }>
+  load_ms?: number
+  threads?: number
+  trust_anchors?: Array<{ subject: string }>
+  proof_time_tolerance_s?: number
+  error?: string
 }
 interface Trace {
   at: number
@@ -38,7 +43,7 @@ interface Session {
   trace: Trace[]
 }
 interface Overview {
-  services: { mode: 'services' | 'offline'; phoneFactor: number; prover: Service; verifier: Service }
+  services: { mode: 'native' | 'offline'; phoneFactor: number; prover: Service; verifier: Service }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -70,6 +75,9 @@ const verify = computed(() => step('verify')?.data)
 
 const purposeText = (p: Session['purpose']) => (p.kind === 'signin' ? 'Log in' : `Age check, ${COMMUNITY_PREFIX}${p.community}`)
 const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(1)} kB` : `${n} B`)
+const mb = (n?: number | null) => (n == null ? '' : `${Math.round(n)} MB`)
+const values = (c?: { shared: number; precommitted: number; rest: number; public: number } | null) =>
+  c ? `${(c.shared + c.precommitted + c.rest).toLocaleString('en-GB')} values (shared ${c.shared}, precommitted ${c.precommitted.toLocaleString('en-GB')}, rest ${c.rest.toLocaleString('en-GB')}), ${c.public} public` : ''
 const ms = (n?: number | null) => (n == null ? '–' : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`)
 const time = (t: number) => new Date(t).toLocaleTimeString('en-GB')
 const since = (t: number) => (session.value ? `+${t - session.value.createdAt} ms` : '')
@@ -111,7 +119,7 @@ const statusTone = (s: string) =>
           class="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold"
           :class="offline ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'"
         >
-          {{ offline ? `Offline simulation · phone ×${data.services.phoneFactor}` : 'Backend services' }}
+          {{ offline ? `Offline simulation · phone ×${data.services.phoneFactor}` : 'Vega addon, in process' }}
         </span>
       </div>
     </header>
@@ -122,18 +130,25 @@ const statusTone = (s: string) =>
         <div v-for="(svc, name) in services" :key="name" class="card p-4">
           <div class="flex items-center gap-2">
             <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
-            <h2 class="text-sm font-semibold capitalize">{{ name }} service</h2>
+            <h2 class="text-sm font-semibold capitalize">{{ name }}</h2>
             <span v-if="svc.offline" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">OFFLINE</span>
             <span v-else-if="svc.stub" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">STUB</span>
           </div>
           <template v-if="svc.up">
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>
             <p class="text-xs text-muted">Version {{ svc.version }}</p>
+            <p v-if="svc.load_ms != null" class="text-xs text-muted">Keys built once at start: {{ ms(svc.load_ms) }} · {{ svc.threads }} threads</p>
+            <p v-if="svc.trust_anchors?.length" class="text-xs text-muted">
+              Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
+            </p>
             <ul class="mt-2 space-y-0.5 font-mono text-[11px] text-muted">
               <li v-for="c in svc.circuits" :key="c.circuit_id">{{ c.circuit_id }} · {{ c.proof_system }}</li>
             </ul>
           </template>
-          <p v-else class="mt-2 text-sm text-adult">Not reachable</p>
+          <template v-else>
+            <p class="mt-2 text-sm text-adult">Not available</p>
+            <p v-if="svc.error" class="mt-1 text-xs break-words text-muted">{{ svc.error }}</p>
+          </template>
         </div>
         <div class="card p-4">
           <h2 class="text-sm font-semibold">Request signing</h2>
@@ -207,15 +222,23 @@ const statusTone = (s: string) =>
                     {{ kb(t.data?.bytes) }} · wallet_metadata {{ t.data?.wallet_metadata ? 'received' : 'none' }} · offer
                     {{ t.data?.tailored ? 'tailored' : 'unchanged' }}
                   </p>
+                  <p v-else-if="t.step === 'sign' && t.data?.metrics" class="text-xs text-muted">
+                    sign {{ ms(t.data.metrics.sign_ms) }}<template v-if="t.data.challenge_digest"> · e2 {{ t.data.challenge_digest.slice(0, 16) }}…</template>
+                  </p>
+                  <p v-else-if="t.step === 'witness' && t.data?.metrics" class="text-xs text-muted">
+                    {{ ms(t.data.metrics.witness_ms) }}<template v-if="t.data.counts"> · {{ values(t.data.counts) }}</template> · proof_time {{ t.data.proof_time }}
+                  </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
-                    load {{ ms(t.data.metrics.load_ms) }} · witness {{ ms(t.data.metrics.witness_ms) }} · prove
-                    {{ ms(t.data.metrics.prove_ms) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak {{ t.data.metrics.peak_memory_mb }} MB</template>
+                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} threads</template>
                   </p>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
+                  <p v-else-if="t.step === 'verify' && t.data?.code" class="text-xs text-adult">
+                    {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
+                  </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · load {{ ms(t.data.metrics.load_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>

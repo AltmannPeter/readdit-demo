@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import type { AuthorizationResponse, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
 import type { WalletTransport } from '~/wallet/transport'
-import type { RequestView } from '~/wallet/engine'
+import type { ConsentView, RequestView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
-import { analyzeRequest, parseAuthorizationUrl } from '~/wallet/engine'
+import type { Step } from './Working.vue'
+import { analyzeRequest, consentFor, parseAuthorizationUrl } from '~/wallet/engine'
 import { httpTransport } from '~/wallet/transport'
-import { proveWithService } from '~/wallet/prover'
+import { loadCredential } from '~/wallet/holder'
+import { prove, unlockAndSign } from '~/wallet/prover'
 import { findCircuit } from '#shared/registry/circuits'
 
 /**
- * EUDI Wallet App (mock screens). Drives the holder side of OpenID4VP:
- * scan -> POST request_uri with wallet_metadata -> verify signed request -> check request and
- * pick a circuit -> consent -> PIN -> prover service -> POST response_uri.
+ * The SIROS ID wallet on the phone (mocked screens, real protocol). Drives the holder side of
+ * OpenID4VP: scan -> POST request_uri with wallet_metadata -> verify the signed request -> check
+ * it and pick a circuit -> consent -> PIN -> native steps (sign, witness and prove) -> POST response_uri.
  */
 const props = withDefaults(
   defineProps<{
@@ -22,25 +24,28 @@ const props = withDefaults(
   { transport: () => httpTransport },
 )
 
-type Screen = 'home' | 'scan' | 'request' | 'unmet' | 'pin' | 'working' | 'done' | 'declined' | 'error'
+type Screen = 'home' | 'detail' | 'scan' | 'request' | 'unmet' | 'pin' | 'working' | 'done' | 'declined' | 'error'
 
 const screen = ref<Screen>('home')
 const request = ref<RequestObject | null>(null)
 const view = ref<RequestView | null>(null)
+const consent = ref<ConsentView | null>(null)
 const credential = ref<CredentialView | null>(null)
 const circuitIds = ref<string[]>([])
+const detected = ref(false)
 const errorText = ref('')
 const pinError = ref('')
 const pinKey = ref(0)
+const workingTitle = ref('')
+const steps = ref<Step[]>([])
 const today = useToday()
-let scanTimer: ReturnType<typeof setTimeout> | undefined
+/** Presentations made from this page, for the home screen's Recent History. */
+const history = useState<Array<{ audience: string; at: number }>>('siros-history', () => [])
+const timers: Array<ReturnType<typeof setTimeout>> = []
 
 onMounted(async () => {
   try {
-    const [cred, caps] = await Promise.all([
-      $fetch<CredentialView>('/api/wallet/credential'),
-      $fetch<{ circuits: Array<{ circuit_id: string }> }>('/api/wallet/capabilities'),
-    ])
+    const [cred, caps] = await Promise.all([loadCredential(), $fetch<{ circuits: Array<{ circuit_id: string }> }>('/api/wallet/capabilities')])
     credential.value = cred
     circuitIds.value = caps.circuits.map((c) => c.circuit_id)
   } catch {
@@ -60,11 +65,18 @@ function fail(text: string) {
 
 function startScan() {
   screen.value = 'scan'
-  scanTimer = setTimeout(onScanned, 1500)
+  detected.value = false
+  timers.push(
+    setTimeout(() => {
+      if (screen.value !== 'scan') return
+      detected.value = true
+      timers.push(setTimeout(onScanned, 500))
+    }, 1500),
+  )
 }
 
 function cancelScan() {
-  clearTimeout(scanTimer)
+  timers.forEach(clearTimeout)
   screen.value = 'home'
 }
 
@@ -73,15 +85,20 @@ async function onScanned() {
   const parsed = props.url ? parseAuthorizationUrl(props.url) : null
   if (!parsed) return fail('No valid QR code found.')
   try {
-    const req = await props.transport.fetchRequest({
+    const verified = await props.transport.fetchRequest({
       requestUri: parsed.requestUri,
       method: parsed.method,
       clientId: parsed.clientId,
       walletMetadata: walletMetadata(),
     })
-    request.value = req
-    view.value = analyzeRequest(req, credential.value, today.value, circuitIds.value)
-    screen.value = view.value.satisfiable ? 'request' : 'unmet'
+    request.value = verified.request
+    view.value = analyzeRequest(verified.request, credential.value, today.value, circuitIds.value)
+    if (view.value.satisfiable) {
+      consent.value = await consentFor(view.value, credential.value, verified.signer.subject)
+      screen.value = 'request'
+    } else {
+      screen.value = 'unmet'
+    }
   } catch {
     fail('Could not load the request.')
   }
@@ -111,17 +128,46 @@ function toPin() {
   screen.value = 'pin'
 }
 
+const ms = (n?: number, simulated?: boolean) => (n == null ? undefined : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms${simulated ? ' (simulated)' : ''}`)
+
+/** How long the progress screen stays up at least, so its steps can be read; the times it shows are measured. */
+const MIN_PROGRESS_MS = 1500
+const wait = (ms: number) => new Promise((r) => timers.push(setTimeout(r, ms)))
+
 async function onPin(pin: string) {
-  screen.value = 'working'
   const req = request.value!
+  const host = view.value!.verifierHost
+  const shownAt = Date.now()
+  screen.value = 'working'
+  workingTitle.value = 'Creating presentation...'
+  steps.value = [
+    { label: 'PIN checked, device key signs the request', state: 'running' },
+    { label: 'Witness from your credential', state: 'waiting' },
+    { label: 'Zero-knowledge proof', state: 'waiting' },
+    { label: `Sending the response to ${host}`, state: 'waiting' },
+  ]
+  const set = (i: number, patch: Partial<Step>) => (steps.value[i] = { ...steps.value[i]!, ...patch })
   try {
-    const out = await proveWithService({ request: req, circuitId: view.value!.circuit!.circuit_id, pin })
+    const signed = await unlockAndSign({ request: req, pin })
+    set(0, { state: 'done', detail: ms(signed.metrics.sign_ms, signed.metrics.simulated) })
+    set(1, { state: 'running' })
+    set(2, { state: 'running' })
+    const out = await prove({ request: req, circuitId: view.value!.circuit!.circuit_id, deviceSignature: signed.device_signature })
+    const sim = out.metrics.simulated
+    set(1, { state: 'done', detail: ms(out.witness_ms ?? out.metrics.witness_ms, sim) })
+    set(2, { state: 'done', detail: `${ms(out.metrics.prove_ms, sim)} · proof ${((out.metrics.proof_bytes ?? 0) / 1000).toFixed(1)} kB` })
+    set(3, { state: 'running' })
+    workingTitle.value = 'Sending response...'
     await send({ state: req.state, vp_token: { [req.dcql_query.credentials[0]!.id]: [out.presentation] } })
+    set(3, { state: 'done' })
+    workingTitle.value = 'Presentation sent successfully'
+    history.value = [{ audience: host, at: Date.now() }, ...history.value]
+    await wait(Math.max(0, MIN_PROGRESS_MS - (Date.now() - shownAt)))
     screen.value = 'done'
   } catch (e) {
     const code = (e as Error).message
     if (code === 'invalid_pin') {
-      pinError.value = 'Wrong PIN. Try again.'
+      pinError.value = 'You have entered an incorrect PIN.'
       pinKey.value++
       screen.value = 'pin'
     } else if (code === 'unsatisfiable') {
@@ -136,45 +182,48 @@ async function onPin(pin: string) {
 function reset() {
   request.value = null
   view.value = null
+  consent.value = null
   screen.value = 'home'
 }
 
-onBeforeUnmount(() => clearTimeout(scanTimer))
+onBeforeUnmount(() => timers.forEach(clearTimeout))
 </script>
 
 <template>
-  <PhoneFrame :dark="screen === 'scan'">
-    <Transition
-      mode="out-in"
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0 translate-x-3"
-      leave-active-class="transition duration-150 ease-in"
-      leave-to-class="opacity-0 -translate-x-3"
-    >
-      <WalletHome v-if="screen === 'home'" key="home" :credential="credential" @scan="startScan" />
-      <WalletScan v-else-if="screen === 'scan'" key="scan" :url="url" @cancel="cancelScan" />
-      <WalletRequest
-        v-else-if="screen === 'request' && view"
-        key="request"
-        :view="view"
-        :credential-title="credential?.title ?? ''"
-        :issuer="credential?.issuer.name ?? ''"
-        @accept="toPin"
-        @cancel="refuse('declined')"
-      />
-      <WalletUnmet v-else-if="screen === 'unmet' && view" key="unmet" :view="view" @close="refuse('home')" />
-      <WalletPin
-        v-else-if="screen === 'pin' && view"
-        :key="`pin-${pinKey}`"
-        :verifier-name="view.verifierName"
-        :error="pinError"
-        @done="onPin"
-        @cancel="refuse('declined')"
-      />
-      <WalletWorking v-else-if="screen === 'working'" key="working" title="Creating proof" text="This can take a few seconds." />
-      <WalletOutcome v-else-if="screen === 'done'" key="done" kind="done" :verifier-name="view?.verifierName" @close="reset" />
-      <WalletOutcome v-else-if="screen === 'declined'" key="declined" kind="declined" @close="reset" />
-      <WalletOutcome v-else key="error" kind="error" :text="errorText" @close="reset" />
-    </Transition>
+  <PhoneFrame>
+    <div class="sid-font h-full">
+      <Transition
+        mode="out-in"
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 translate-x-3"
+        leave-active-class="transition duration-150 ease-in"
+        leave-to-class="opacity-0 -translate-x-3"
+      >
+        <WalletHome v-if="screen === 'home'" key="home" :credential="credential" :history="history" @scan="startScan" @open="screen = 'detail'" />
+        <WalletDetail v-else-if="screen === 'detail' && credential" key="detail" :credential="credential" @back="screen = 'home'" @scan="startScan" />
+        <WalletScan v-else-if="screen === 'scan'" key="scan" :url="url" :detected="detected" @cancel="cancelScan" />
+        <WalletRequest
+          v-else-if="screen === 'request' && consent"
+          key="request"
+          :consent="consent"
+          :credential-title="credential?.title ?? ''"
+          @accept="toPin"
+          @cancel="refuse('declined')"
+        />
+        <WalletUnmet v-else-if="screen === 'unmet' && view" key="unmet" :view="view" @close="refuse('home')" />
+        <WalletPin
+          v-else-if="screen === 'pin' && view"
+          :key="`pin-${pinKey}`"
+          :verifier-name="view.verifierName"
+          :error="pinError"
+          @done="onPin"
+          @cancel="refuse('declined')"
+        />
+        <WalletWorking v-else-if="screen === 'working'" key="working" :title="workingTitle" :steps="steps" />
+        <WalletOutcome v-else-if="screen === 'done'" key="done" kind="done" :verifier-name="view?.verifierName" @close="reset" />
+        <WalletOutcome v-else-if="screen === 'declined'" key="declined" kind="declined" @close="reset" />
+        <WalletOutcome v-else key="error" kind="error" :text="errorText" @close="reset" />
+      </Transition>
+    </div>
   </PhoneFrame>
 </template>

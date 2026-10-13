@@ -8,8 +8,14 @@ export interface WalletTransport {
     method: 'get' | 'post'
     clientId: string
     walletMetadata?: WalletMetadata
-  }): Promise<RequestObject>
+  }): Promise<VerifiedRequest>
   postResponse(responseUri: string, body: AuthorizationResponse): Promise<void>
+}
+
+/** A Request Object whose signature and certificate SAN checked out, with the signer's subject. */
+export interface VerifiedRequest {
+  request: RequestObject
+  signer: { subject: string }
 }
 
 const ES256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
@@ -19,7 +25,7 @@ const ES256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
  * x5c leaf, and a dNSName SAN equal to the client_id host. Trust-anchor validation of
  * the chain is not done in this demo wallet.
  */
-async function verifyRequestJws(jws: string, clientId: string): Promise<RequestObject> {
+async function verifyRequestJws(jws: string, clientId: string): Promise<VerifiedRequest> {
   // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
   await import('reflect-metadata')
   const x509 = await import('@peculiar/x509')
@@ -33,7 +39,7 @@ async function verifyRequestJws(jws: string, clientId: string): Promise<RequestO
   const { payload } = await compactVerify(jws, key)
   const request = JSON.parse(new TextDecoder().decode(payload)) as RequestObject
   if (request.client_id !== clientId) throw new Error('client_id mismatch')
-  return request
+  return { request, signer: { subject: leaf.subject } }
 }
 
 /** OpenID4VP over HTTP, as a phone would do it. */
@@ -50,9 +56,9 @@ export const httpTransport: WalletTransport = {
       res = await fetch(requestUri)
     }
     if (!res.ok) throw new Error(`request_uri ${res.status}`)
-    const request = await verifyRequestJws((await res.text()).trim(), clientId)
-    if (walletNonce && request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
-    return request
+    const verified = await verifyRequestJws((await res.text()).trim(), clientId)
+    if (walletNonce && verified.request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
+    return verified
   },
   async postResponse(responseUri, body) {
     const form = new URLSearchParams({ state: body.state })

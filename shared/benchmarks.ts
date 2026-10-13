@@ -187,20 +187,21 @@ export function systemForCircuit(circuitId?: string | null): SystemModel {
 }
 
 /**
- * Point values used by the offline simulation (Longfellow, Google Rust, 1 thread, with caches,
- * NYM-AUTH.md), scaled by the chosen phone factor for the phone-side steps.
+ * Point values used by the offline simulation: Vega on the nym_auth mdoc statement, 1 thread,
+ * AMD Ryzen 9 5950X, median of 7 (nym-auth-circuits README, "Benchmark"). The Vega backend builds
+ * its keys once at start, so a presentation costs the witness and the proof on the phone (scaled by
+ * the chosen phone factor) and the verification on the server.
  */
-export function simulatedLongfellow(phoneFactor: number) {
+export function simulatedVega(phoneFactor: number) {
   const f = phoneFactor
   return {
+    sign: { sign_ms: +(1 * f).toFixed(1) },
     prove: {
-      load_ms: +(37.9 * f).toFixed(1),
-      witness_ms: +(44.6 * f).toFixed(1),
-      prove_ms: +(276 * f).toFixed(1),
-      total_ms: +((37.9 + 44.6 + 276) * f).toFixed(1),
-      peak_memory_mb: 94,
-      proof_bytes: 345_608,
+      witness_ms: +(11.3 * f).toFixed(1),
+      prove_ms: +(758.1 * f).toFixed(1),
+      total_ms: +((11.3 + 758.1) * f).toFixed(1),
+      proof_bytes: 96_079,
     },
-    verify: { load_ms: 34.5, verify_ms: 131, total_ms: 165.5, proof_bytes: 345_608 },
+    verify: { verify_ms: 62.6, total_ms: 62.6, proof_bytes: 96_079 },
   }
 }

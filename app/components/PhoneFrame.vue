@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// Generic smartphone. No brand marks.
-const props = defineProps<{ dark?: boolean }>()
+// Generic smartphone. No brand marks; the SIROS ID wallet runs on it.
 const time = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 const tick = () => {
@@ -23,11 +22,9 @@ onBeforeUnmount(() => clearInterval(timer))
     <span class="absolute top-[180px] -right-[3px] h-20 w-[3px] rounded-r bg-neutral-700" />
 
     <div class="h-full w-full rounded-[52px] bg-neutral-900 p-[10px] shadow-2xl ring-1 ring-neutral-700">
-      <div :class="props.dark ? 'bg-[#0e151d]' : 'bg-w-bg'"
-        class="relative flex h-full w-full flex-col overflow-hidden rounded-[42px] transition-colors">
+      <div class="relative flex h-full w-full flex-col overflow-hidden rounded-[42px] bg-white">
         <!-- status bar -->
-        <div :class="props.dark ? 'text-white' : 'text-w-ink'"
-          class="relative z-20 flex h-11 shrink-0 items-center justify-between px-7 pt-1 text-[13px] font-semibold">
+        <div class="relative z-20 flex h-11 shrink-0 items-center justify-between bg-white px-7 pt-1 text-[13px] font-semibold text-sid-gray-900">
           <span class="w-12 tabular-nums">{{ time }}</span>
           <span class="absolute top-2.5 left-1/2 h-[26px] w-[92px] -translate-x-1/2 rounded-full bg-black" />
           <span class="flex w-12 items-center justify-end gap-1">
@@ -49,7 +46,7 @@ onBeforeUnmount(() => clearInterval(timer))
 
         <!-- home indicator -->
         <div class="pointer-events-none absolute inset-x-0 bottom-2 z-20 flex justify-center">
-          <span class="h-[5px] w-28 rounded-full" :class="props.dark ? 'bg-white/70' : 'bg-w-ink/70'" />
+          <span class="h-[5px] w-28 rounded-full bg-sid-gray-900/70" />
         </div>
       </div>
     </div>

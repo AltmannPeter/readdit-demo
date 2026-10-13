@@ -1,4 +1,4 @@
-export type BackendMode = 'services' | 'offline'
+export type BackendMode = 'native' | 'offline'
 
 interface ModeState {
   mode: BackendMode
@@ -12,7 +12,7 @@ export function backendMode(): ModeState {
   if (!g.__readditBackend) {
     const cfg = useRuntimeConfig()
     g.__readditBackend = {
-      mode: cfg.backendMode === 'offline' ? 'offline' : 'services',
+      mode: cfg.backendMode === 'offline' ? 'offline' : 'native',
       phoneFactor: clampFactor(Number(cfg.offlinePhoneFactor)),
     }
   }

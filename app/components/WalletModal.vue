@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
                   <button class="btn-outline" @click="close">Close</button>
                 </div>
                 <ol v-else class="space-y-2 text-sm text-muted">
-                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open the EUDI Wallet App on your phone</li>
+                  <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open the SIROS ID app on your phone</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">2</span>Tap Scan QR code and scan this code</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">3</span>Check the request and enter your PIN</li>
                 </ol>

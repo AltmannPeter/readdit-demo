@@ -27,7 +27,8 @@ export default defineEventHandler(async (event) => {
   let offer
   try {
     offer = await verifierOffer()
-  } catch {
+  } catch (e) {
+    console.error(`[vp] no offer: ${(e as Error).message}`)
     throw createError({ statusCode: 503, statusMessage: 'verifier unavailable' })
   }
 

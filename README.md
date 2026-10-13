@@ -6,15 +6,18 @@ Reddit-style demo site for pseudonymous sign-up, age-gated communities and bans,
 **Start here: `GETTING-STARTED.md`.** It covers starting the demo (Node or Docker) and the three
 views: the site (`/`), the technical view (`/tech`) and the moderation view (`/mod`).
 
-Quick start (Node `22.22.3+` or `24.15+`):
+Quick start (Node `22.22.3+` or `24.15+`, recent stable Rust; tested with 1.98):
 
 ```sh
 npm install
-npm run stubs     # terminal 1: stub prover :8081, stub verifier :8082
-npm run dev       # terminal 2: http://localhost:3000
+npm run build:native   # the Vega prover and verifier, a Rust Node addon
+npm run dev            # http://localhost:3000
 ```
 
-Wallet PIN: `123456`.
+Or with Docker: `docker compose up -d --build`.
+
+Wallet PIN: `123456`. The phone plays the SIROS ID wallet; proofs are real Vega proofs, made and
+verified in the site's server.
 
 - `AGENTS.md` – decisions, architecture, open work
 - `docs/backend-api.md` – prover and verifier contract

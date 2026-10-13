@@ -49,13 +49,13 @@ export default defineEventHandler(async (event) => {
       handover: handoverFor(s),
       now: new Date().toISOString(),
     })
-  } catch {
-    return fail('unavailable', 'verifier service')
+  } catch (e) {
+    return fail('unavailable', e instanceof ServiceError ? `verifier: ${e.detail ?? e.code}` : 'verifier')
   }
   const roundTripMs = Date.now() - t0
 
   if (!result.ok) {
-    addTrace(s, 'verify', 'Proof rejected', { reason: result.reason, metrics: result.metrics, round_trip_ms: roundTripMs })
+    addTrace(s, 'verify', 'Proof rejected', { reason: result.reason, code: result.code, input: result.input, metrics: result.metrics, round_trip_ms: roundTripMs })
     return fail('invalid', result.reason)
   }
 

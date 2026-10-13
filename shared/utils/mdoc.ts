@@ -1,0 +1,117 @@
+// Reads an ISO/IEC 18013-5 IssuerSigned (base64url) of the nym_auth attestation: the wallet shows
+// its own credential from it, and the offline simulation reads the birth date. It does not check
+// the issuer's signature; the prover does (native/vega/nym-vega/src/prover.rs).
+
+import { Decoder, Tag } from 'cbor-x'
+import { NYM_DOCTYPE } from '../types/oid4vp'
+
+const cbor = new Decoder({ mapsAsObjects: false, useRecords: false })
+
+export interface IssuerSignedView {
+  docType: string
+  namespace: string
+  /** The items in the order issued. */
+  items: Array<{ digestID: number; elementIdentifier: string; value: unknown; bytes: number }>
+  birthDate: string
+  ssc: Uint8Array
+  psc: Uint8Array | null
+  /** DER Document Signer certificate from x5chain. */
+  documentSigner: Uint8Array
+  validity: { signed: string; validFrom: string; validUntil: string }
+  deviceKey: { x: Uint8Array; y: Uint8Array }
+  digestAlgorithm: string
+  /** COSE alg of issuerAuth's protected header: -7 is ES256. */
+  signatureAlgorithm: string
+  version: string
+  /** Sizes, for the compact-profile view. */
+  bytes: { issuerSigned: number }
+}
+
+export function fromBase64url(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+}
+
+export function toBase64url(bytes: Uint8Array): string {
+  let s = ''
+  for (const b of bytes) s += String.fromCharCode(b)
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function fail(what: string): never {
+  throw new Error(`IssuerSigned: ${what}`)
+}
+
+function map(v: unknown, what: string): Map<unknown, unknown> {
+  return v instanceof Map ? v : fail(`${what} is not a map`)
+}
+
+function bytes(v: unknown, what: string): Uint8Array {
+  return v instanceof Uint8Array ? v : fail(`${what} is not a byte string`)
+}
+
+function embedded(v: unknown, what: string): unknown {
+  if (!(v instanceof Tag) || v.tag !== 24) fail(`${what} is not tag 24`)
+  return cbor.decode(bytes(v.value, what))
+}
+
+/** A tdate (tag 0) as written, YYYY-MM-DDThh:mm:ssZ. */
+function tdate(v: unknown, what: string): string {
+  if (v instanceof Date) return v.toISOString().replace(/\.\d{3}Z$/, 'Z')
+  if (v instanceof Tag && v.tag === 0 && typeof v.value === 'string') return v.value
+  if (typeof v === 'string') return v
+  return fail(`${what} is not a tdate`)
+}
+
+const COSE_ALGS: Record<number, string> = { [-7]: 'ES256', [-35]: 'ES384', [-36]: 'ES512' }
+
+export function readIssuerSigned(issuerSigned: string): IssuerSignedView {
+  const raw = fromBase64url(issuerSigned)
+  const root = map(cbor.decode(raw), 'IssuerSigned')
+  const auth = root.get('issuerAuth')
+  if (!Array.isArray(auth) || auth.length !== 4) fail('issuerAuth is not a COSE_Sign1')
+  const [protectedBytes, unprotected, payload] = auth as [unknown, unknown, unknown, unknown]
+  const protectedHeader = map(cbor.decode(bytes(protectedBytes, 'protected header')), 'protected header')
+  const x5chain = map(unprotected, 'unprotected header').get(33)
+  const documentSigner = Array.isArray(x5chain) ? bytes(x5chain[0], 'x5chain') : bytes(x5chain, 'x5chain')
+  const mso = map(embedded(cbor.decode(bytes(payload, 'payload')), 'payload'), 'MSO')
+  const validity = map(mso.get('validityInfo'), 'validityInfo')
+  const deviceKey = map(map(mso.get('deviceKeyInfo'), 'deviceKeyInfo').get('deviceKey'), 'deviceKey')
+
+  const nameSpaces = map(root.get('nameSpaces'), 'nameSpaces')
+  const list = nameSpaces.get(NYM_DOCTYPE)
+  if (!Array.isArray(list)) fail(`no namespace ${NYM_DOCTYPE}`)
+  const items = list.map((entry: unknown) => {
+    const item = map(embedded(entry, 'IssuerSignedItemBytes'), 'IssuerSignedItem')
+    return {
+      digestID: Number(item.get('digestID')),
+      elementIdentifier: String(item.get('elementIdentifier')),
+      value: item.get('elementValue'),
+      bytes: (entry as Tag).value instanceof Uint8Array ? ((entry as Tag).value as Uint8Array).length : 0,
+    }
+  })
+  const value = (id: string) => items.find((i) => i.elementIdentifier === id)?.value
+  const birth = value('birth_date')
+  if (!(birth instanceof Tag) || birth.tag !== 1004 || typeof birth.value !== 'string') fail('birth_date is not tag 1004')
+  const psc = value('psc')
+
+  return {
+    docType: String(mso.get('docType')),
+    namespace: NYM_DOCTYPE,
+    items,
+    birthDate: birth.value,
+    ssc: bytes(value('ssc'), 'ssc'),
+    psc: psc === undefined ? null : bytes(psc, 'psc'),
+    documentSigner,
+    validity: {
+      signed: tdate(validity.get('signed'), 'signed'),
+      validFrom: tdate(validity.get('validFrom'), 'validFrom'),
+      validUntil: tdate(validity.get('validUntil'), 'validUntil'),
+    },
+    deviceKey: { x: bytes(deviceKey.get(-2), 'deviceKey x'), y: bytes(deviceKey.get(-3), 'deviceKey y') },
+    digestAlgorithm: String(mso.get('digestAlgorithm')),
+    signatureAlgorithm: COSE_ALGS[Number(protectedHeader.get(1))] ?? `COSE ${protectedHeader.get(1)}`,
+    version: String(mso.get('version')),
+    bytes: { issuerSigned: raw.length },
+  }
+}

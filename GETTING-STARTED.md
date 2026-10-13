@@ -2,8 +2,9 @@
 
 Readdit is a small Reddit-style site. You sign up with a pseudonym from an EU Digital Identity
 Wallet, prove your age range without showing your date of birth, and stay banned if a moderator
-bans you. The phone on screen plays the wallet. The site and the phone are mocked. The OpenID4VP
-messages, the signed requests, the circuit negotiation and the proof calls are real.
+bans you. The phone on screen plays the SIROS ID wallet. The site and the phone are mocked. The
+OpenID4VP messages, the signed requests, the circuit negotiation and the zero-knowledge proofs are
+real: the site's server proves and verifies with Vega, compiled from Rust into a Node addon.
 
 The demo has three views, each in its own browser window:
 
@@ -19,15 +20,21 @@ Pick one of the two ways below. Both serve all three views.
 
 ### With Node.js (recommended)
 
-**Requires** Node.js `22.22.3` or later, or `24.15` or later. Check with `node -v`. Download from
-https://nodejs.org if needed.
+**Requires** Node.js `22.22.3` or later, or `24.15` or later (check with `node -v`;
+https://nodejs.org), and a recent stable Rust for the proof addon (tested with 1.98; check with `cargo --version`;
+https://rustup.rs).
 
 ```sh
 cd readdit-demo
 npm install
-npm run stubs        # terminal 1: backend services, leave running
-npm run dev          # terminal 2: the site
+npm run build:native   # builds the Vega addon (Rust), a few minutes the first time
+npm run dev            # the site
 ```
+
+`npm run build:native` compiles `native/vega` and copies the addon to
+`native/vega/readdit-vega.node`. Run it again after changing the Rust code. When the site starts,
+it builds the prover's and the verifier's keys once (about half a second) and logs
+`[vega] prover and verifier ready`.
 
 ### With Docker (no Node.js needed)
 
@@ -35,31 +42,42 @@ npm run dev          # terminal 2: the site
 
 ```sh
 cd readdit-demo
-docker compose --profile full up -d --build      # first run takes a few minutes
-docker compose --profile full down               # to stop
+docker compose up -d --build      # first run takes several minutes: it compiles the Rust addon
+docker compose down               # to stop
 ```
+
+The image builds the addon in a Rust stage and runs the site with it. There are no separate
+prover or verifier containers. On a shared machine, `docker compose build --build-arg JOBS=4`
+limits the Rust build's parallel jobs.
 
 Then open the three addresses above in three separate browser windows. A good layout: the site
 full screen on the projector, and the technical and moderation views on the laptop screen.
 
-**Backend services.** Proofs come from a **prover** and a **verifier** service. This package
-includes stub versions of both. They follow the real interface but do not create or check a
-zero-knowledge proof, and the technical view marks them **STUB**. To run the real Longfellow
-services, see the appendix.
+**Proof backend.** Proofs come from a **prover** and a **verifier**, both in the Vega addon that
+the site's server loads. The prover plays the phone's native steps: the PIN unlocks the device key,
+which signs the request; then the witness and the proof. The verifier checks the proof against
+Readdit's own request. The circuits are the nym_auth Vega circuits from the nym-auth-circuits
+archive (`native/vega`).
 
 ## 2. The site view
 
 **http://localhost:3000** is Readdit as the audience sees it. Log in, sign up and age checks open a
 dialog with a QR code on the left and the person's phone on the right.
 
-On the phone (EUDI Wallet App):
+On the phone (SIROS ID):
 
-- **Scan QR code** reads the code on screen.
-- **Continue** accepts the request. **Cancel** declines it, and nothing is shared.
+- **The round QR button** at the bottom reads the code on screen.
+- **Request to Share Data** shows who asks (name, domain, `client_id`, the certificate that signed
+  the request), exactly what the request discloses (the pseudonym for this site, which the wallet
+  computes and shows, and what the rulebook says about who can link it; the age range if asked),
+  what else the site sees (issuer, time of the proof, proof method), and what is not shared.
+  **Share** accepts; **Decline** declines, and nothing is shared.
 - **PIN:** `123456`. You can tap it or type it on the keyboard. A wrong PIN is rejected.
-- **The "Age and pseudonym" card** opens the credential details in a new window: date of birth,
-  seed commitment, issuer, validity, device key, and what a site receives. Allow pop-ups for
-  localhost if the browser blocks it.
+- While proving, the phone lists the steps with their measured times: device key signature,
+  witness, proof, sending.
+- **The "Age and pseudonym" card** opens the credential on the phone: date of birth, seed
+  commitment, issuer, validity, device key. **Dataset** opens the full details in a new window.
+  Allow pop-ups for localhost if the browser blocks it.
 
 The demo person is 15 years old (born 14 March 2011).
 
@@ -76,15 +94,19 @@ Logged-in users can vote, join communities and comment.
 **http://localhost:3000/tech** updates live while you use the site. It shows the newest wallet
 session; the chips under the service cards select earlier ones.
 
-- **Badge (top right).** "Backend services" or "Offline simulation".
-- **Service cards.** Whether the prover and verifier are reachable, their implementation and
-  version, and the circuits they support. **STUB** means no real proof. **OFFLINE** means the
-  built-in simulation. **Request signing** shows the certificate that signs Readdit's requests.
-- **Tiles.** Session status, prove time, verify time, proof size and presentation size, and the
-  size of the signed request. Values from the offline simulation are marked **simulated**.
+- **Badge (top right).** "Vega addon, in process" or "Offline simulation".
+- **Prover and verifier cards.** Whether they are loaded, their implementation and version, the
+  time they took to build their keys once at start, and the circuit they run. The verifier card
+  shows its trust anchor and the `proof_time` tolerance. **OFFLINE** means the built-in
+  simulation. **Request signing** shows the certificate that signs Readdit's requests.
+- **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
+  presentation size, and the size of the signed request. Values from the offline simulation are
+  marked **simulated**.
 - **Flow.** Each step with its time from the start of the session: session created, request
-  fetched (with or without wallet metadata), proof created, presentation received, proof verified
-  or rejected, and result applied to the account.
+  fetched (with or without wallet metadata), PIN checked and device key signed, witness built (its
+  size and `proof_time`), proof created (witness and prove times, the server process's peak
+  memory), presentation received, proof verified or rejected (with the rule and the public input
+  that failed), and result applied to the account.
 - **Request.** What Readdit asked for (pseudonym, age range). **Raw JSON** shows the full signed
   Request Object.
 - **Capability negotiation.** The circuits Readdit accepts, the circuits the wallet supports, the
@@ -93,7 +115,7 @@ session; the chips under the service cards select earlier ones.
   presentation or Readdit computes it itself.
 - **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
 - **What it takes: estimates per step.** Setup, precompute, prove, send and verify, for Longfellow
-  (in use) and VegaMC. Desktop times are measurements on Apple M5 and AMD Ryzen 9. Phone times are
+  and VegaMC (in use). Desktop times are measurements on Apple M5 and AMD Ryzen 9. Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
 
@@ -104,8 +126,8 @@ session; the chips under the service cards select earlier ones.
 - **Recent comments.** Each comment has a **Ban user** button.
 - **Accounts.** Every account with its pseudonym (all Readdit knows about it), join date, age checks
   passed and status, with **Ban** or **Unban**.
-- **Proof backend** (top). **Services** uses the prover and verifier services. **Offline** uses the
-  built-in simulation (see section 6). With Offline, **Simulated phone speed** sets how much slower
+- **Proof backend** (top). **Vega** uses the Vega addon. **Offline** uses the built-in simulation
+  (see section 6). With Offline, **Simulated phone speed** sets how much slower
   than a desktop the simulated phone is (×1 to ×5).
 - **Reset demo** (top right). Click it twice to clear all accounts, bans, comments and sessions.
   It does not change the proof backend.
@@ -132,8 +154,8 @@ gives Readdit the same pseudonym.
 
 ## 6. Offline backup
 
-If the services or the network fail during a presentation, switch to the built-in offline
-simulation. It needs no prover or verifier service and no network.
+If the addon fails (or cannot be built on the presentation laptop), switch to the built-in
+offline simulation. It needs no addon and no network.
 
 **During the demo:** in the moderation view, set **Proof backend** to **Offline**. If a wallet
 dialog shows "The verification service is not available", click **Try again**. The site looks and
@@ -150,10 +172,11 @@ npm run build && npm run start:offline # built site; more robust for a presentat
 With Docker, add `NUXT_BACKEND_MODE: offline` under `web: environment:` in `docker-compose.yml`,
 or switch in the moderation view.
 
-**What the simulation does.** It checks the PIN and the age range, derives the real pseudonym, and
-sends a presentation with a random proof of Longfellow's size (345.6 kB). It waits as long as
-Longfellow would on a phone: 0.36 s × the simulated phone speed to prove, 0.17 s to verify. It does
-not create or verify a zero-knowledge proof.
+**What the simulation does.** It checks the PIN, reads the birth date from the credential the
+wallet sends and checks the age range, derives the real pseudonym from the wallet's seed, and sends
+a presentation with a random proof of Vega's size (96.1 kB). It waits as long as Vega would on a
+phone, from the nym-auth-circuits benchmark (1 thread): 0.77 s × the simulated phone speed for the
+witness and the proof, 0.06 s to verify. It does not create or verify a zero-knowledge proof.
 
 **Before the event:**
 
@@ -165,25 +188,25 @@ not create or verify a zero-knowledge proof.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `NUXT_PROVER_URL` | `http://localhost:8081` | Prover service |
-| `NUXT_VERIFIER_URL` | `http://localhost:8082` | Verifier service |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:longfellow:nym_auth:v1` | Circuits the site accepts, in preference order |
+| `NUXT_VEGA_ADDON` | `native/vega/readdit-vega.node` | The Vega addon (`npm run build:native`) |
+| `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
+| `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
+| `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
+| `NUXT_WALLET_PIN` | `123456` | The wallet PIN, with the addon and in offline mode |
+| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1` | Circuits the site accepts, in preference order |
 | `NUXT_PUBLIC_SITE_HOST` | `readdit.example` | DNS name in `client_id` and the request-signing certificate |
-| `NUXT_BACKEND_MODE` | `services` | `offline` starts with the built-in simulation |
+| `NUXT_BACKEND_MODE` | `native` | `offline` starts with the built-in simulation |
 | `NUXT_OFFLINE_PHONE_FACTOR` | `2` | Simulated phone speed, desktop ×1–5 |
-| `NUXT_OFFLINE_PIN` | `123456` | PIN in offline mode |
-| `NUXT_OFFLINE_BIRTH_DATE` | `2011-03-14` | Birth date in offline mode |
 
-The stub prover reads `DEMO_PIN` (default `123456`) and `DEMO_BIRTH_DATE` (default `2011-03-14`).
-With Docker, change them in `docker-compose.yml`.
+The demo person's birth date is in the credential itself (`app/wallet/demo-wallet.json`); see
+"The demo credential" below to issue another. With Docker, set variables in `docker-compose.yml`.
 
 ## Troubleshooting
 
-- **"The wallet service is not available" on the phone.** The backend is not running. Start
-  `npm run stubs`, check `docker compose --profile full ps`, or switch to **Offline** in the
-  moderation view.
-- **Port already in use** (3000, 8081 or 8082). Stop whatever uses it. On macOS or Linux,
-  `lsof -i :3000` finds it.
+- **"The wallet service is not available" on the phone.** The Vega addon is not loaded. The
+  technical view's prover card says why. Run `npm run build:native` and restart the site, or switch
+  to **Offline** in the moderation view.
+- **Port already in use** (3000). Stop whatever uses it. On macOS or Linux, `lsof -i :3000` finds it.
 - **The credential window does not open.** Allow pop-ups for localhost.
 - **`npm install` warns about vulnerabilities.** They are in Nuxt's build and dev tools, not in the
   demo code. Do not run `npm audit fix --force`: it downgrades Nuxt and breaks the site.
@@ -191,23 +214,39 @@ With Docker, change them in `docker-compose.yml`.
   without them. If `npm run dev` fails on esbuild, run `npm install-scripts approve esbuild`, then
   `npm install` again.
 
-## Appendix: the Longfellow backend
+## The demo credential
 
-This needs Docker and the Longfellow prover and verifier images, which are not in this package.
-Both must implement `docs/backend-api.md` and listen on port 8080 inside the container.
+The phone carries a real `eu.europa.ec.eudi.nym_auth.1` mdoc (born 14 March 2011), its device key
+and its secret seed, in `app/wallet/demo-wallet.json`. The demo has no true holder binding: a real
+wallet keeps the device key in secure hardware. The verifier trusts the demo issuer's Document
+Signer certificate, `native/vega/demo/document-signer.pem`. Both come from `nym-issuer`, which
+issues under the nym-auth-circuits profile and checks its lengths before writing:
 
 ```sh
-export LONGFELLOW_PROVER_IMAGE=<prover image>
-export LONGFELLOW_VERIFIER_IMAGE=<verifier image>
-docker compose -f docker-compose.yml -f docker-compose.longfellow.yml --profile full up -d --build
+cd native/vega
+cargo run --release -p nym-issuer -- --birth-date 2011-03-14 \
+  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem
 ```
 
-On Windows PowerShell, set the variables with `$env:LONGFELLOW_PROVER_IMAGE="<prover image>"` and
-`$env:LONGFELLOW_VERIFIER_IMAGE="<verifier image>"`. On an Apple-chip Mac, images built only for
-Intel need Rosetta: turn it on in Docker Desktop, or run `colima start --vm-type vz --vz-rosetta`.
+The credential is valid from the day before issuing for 366 days (`--valid-from`, `--days`). Each
+run makes new keys and a new seed, so the pseudonym and the accounts change; restart the site after it.
 
-The technical view then shows the Longfellow services with no STUB badge, and the prove, verify and
-proof tiles show real times and sizes.
+## Checks
+
+```sh
+npm run vega:check                              # real proofs: pseudonym, refusals, PIN, 18+ (needs build:native)
+(cd native/vega && cargo test -p nym-vega)      # the OpenID4VP handover against the spec's example, age_check mapping
+(cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
+npx nuxi typecheck                              # first: npm i --no-save typescript@5 vue-tsc
+node scripts/demo-flow.mjs http://localhost:3000    # the presentation order, with screenshots
+```
+
+## Appendix: the Longfellow backend
+
+Readdit now proves and verifies with Vega in process. `docker-compose.longfellow.yml` is kept
+unchanged from the earlier design, in which the site called Longfellow prover and verifier images
+over HTTP. The site no longer makes those calls, so the override has no effect on it; a Longfellow
+backend would plug into `server/utils/services.ts` as the Vega addon does.
 
 ## More
 
@@ -215,7 +254,8 @@ proof tiles show real times and sizes.
   attestation, how pseudonyms and age checks are requested and proven, and how presentations are
   verified.
 - `AGENTS.md` – design decisions, architecture, open work. Written for developers and coding agents.
-- `docs/backend-api.md` – the prover and verifier HTTP interface.
+- `docs/backend-api.md` – the prover and verifier interface (the Vega addon).
 - `scripts/demo-flow.mjs` – runs the walkthrough headlessly and saves screenshots. Needs Playwright:
-  `npm i -D playwright && npx playwright install chromium`, then
-  `node scripts/demo-flow.mjs http://localhost:3000`.
+  `npm i --no-save playwright && npx playwright install chromium`, then
+  `node scripts/demo-flow.mjs http://localhost:3000`. The PR's screenshots are in
+  `docs/screenshots/vega-siros-wallet/`.

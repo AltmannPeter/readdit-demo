@@ -17,15 +17,15 @@ interface Overview {
 }
 
 const data = ref<Overview>({ accounts: [], comments: [] })
-const backend = ref<{ mode: 'services' | 'offline'; phoneFactor: number }>({ mode: 'services', phoneFactor: 2 })
+const backend = ref<{ mode: 'native' | 'offline'; phoneFactor: number }>({ mode: 'native', phoneFactor: 2 })
 const confirmReset = ref(false)
 const load = async () => {
   ;[data.value, backend.value] = await Promise.all([
     $fetch<Overview>('/api/mod/overview'),
-    $fetch<{ mode: 'services' | 'offline'; phoneFactor: number }>('/api/demo/backend'),
+    $fetch<{ mode: 'native' | 'offline'; phoneFactor: number }>('/api/demo/backend'),
   ])
 }
-async function setBackend(change: { mode?: 'services' | 'offline'; phoneFactor?: number }) {
+async function setBackend(change: { mode?: 'native' | 'offline'; phoneFactor?: number }) {
   backend.value = await $fetch('/api/demo/backend', { method: 'POST', body: change })
 }
 let timer: ReturnType<typeof setInterval> | undefined
@@ -75,18 +75,18 @@ const time = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-d
         <div>
           <h2 class="text-sm font-semibold">Proof backend</h2>
           <p class="text-xs text-muted">
-            {{ backend.mode === 'offline' ? 'Built-in simulation. Works without the services and without a network.' : 'Prover and verifier services.' }}
+            {{ backend.mode === 'offline' ? 'Built-in simulation. Works without the Vega addon and without a network.' : 'Vega prover and verifier, in the site\'s server (Rust addon).' }}
           </p>
         </div>
         <div class="flex rounded-full border border-line p-0.5 text-xs font-semibold" role="group" aria-label="Proof backend">
           <button
-            v-for="m in (['services', 'offline'] as const)"
+            v-for="m in (['native', 'offline'] as const)"
             :key="m"
             class="rounded-full px-3 py-1.5"
             :class="backend.mode === m ? (m === 'offline' ? 'bg-amber-500 text-white' : 'bg-brand text-white') : 'text-muted hover:text-ink'"
             @click="setBackend({ mode: m })"
           >
-            {{ m === 'services' ? 'Services' : 'Offline' }}
+            {{ m === 'native' ? 'Vega' : 'Offline' }}
           </button>
         </div>
         <label v-if="backend.mode === 'offline'" class="flex items-center gap-2 text-xs">
