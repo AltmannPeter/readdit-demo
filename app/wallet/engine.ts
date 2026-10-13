@@ -192,8 +192,13 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
           : `The issuer, ${cred.issuer.name}, cannot link the pseudonym to the holder.`,
       )
       out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, properties }
-      const notes = [`${view.verifierName} does not learn your real identity`]
-      if (p.issuerCanLink) notes.push('You can be deanonymized by the issuer')
+      // What the configuration means for the person (rulebook properties, CONFIG_PROPERTIES).
+      const notes: string[] = []
+      if (p.distinctPerVerifier) notes.push('You cannot be tracked across sites')
+      if (p.sameAcrossVerifiers) notes.push('Sites that receive it can link your visits')
+      notes.push(`${view.verifierName} recognizes your account at every visit`)
+      notes.push(`${view.verifierName} does not learn your real identity`)
+      notes.push(p.issuerCanLink ? 'The issuer can reveal your identity' : 'The issuer cannot reveal your identity')
       out.fields.push({ kind: 'pseudonym', name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site', notes })
     } else {
       const text = ageText(item)
@@ -201,6 +206,9 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
       out.fields.push({ kind: 'age', name: 'Age proof', value: capitalize(text), notes: ['Your date of birth is not shared'] })
     }
   }
+
+  // The age proof first, then the pseudonym.
+  out.fields.sort((a, b) => (a.kind === 'age' ? 0 : 1) - (b.kind === 'age' ? 0 : 1))
 
   for (const input of view.circuit?.public_inputs ?? []) {
     if (input.name === 'issuer_key_set') out.alsoSent.push({ label: 'Issuer certificate', value: cred.issuer.documentSigner })

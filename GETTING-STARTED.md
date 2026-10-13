@@ -16,7 +16,7 @@ The demo has three views, each in its own browser window:
 
 ## 1. Start it
 
-Pick one of the two ways below. Both serve all three views.
+Pick one of the ways below. All serve all three views.
 
 ### With Node.js (recommended)
 
@@ -50,6 +50,13 @@ The image builds the addon in a Rust stage and runs the site with it. There are 
 prover or verifier containers. On a shared machine, `docker compose build --build-arg JOBS=4`
 limits the Rust build's parallel jobs.
 
+### In GitHub Codespaces (nothing to install)
+
+Open the repository on GitHub and click **Open in GitHub Codespaces** in the README. The codespace
+builds the same image as Docker and opens Readdit in a browser tab. Instead of `localhost:3000`,
+the three views are at the codespace's address (`https://<name>-3000.app.github.dev`, plus `/tech`
+and `/mod`). Step by step, for people who do not code: `TRY-IT.md`.
+
 Then open the three addresses above in three separate browser windows. A good layout: the site
 full screen on the projector, and the technical and moderation views on the laptop screen.
 
@@ -65,6 +72,9 @@ archive (`native/vega`).
 Log in, sign up and age checks open a dialog with a QR code on the left and the person's phone on
 the right.
 
+Logged out, the home page and the open communities show no posts, only a short note on how
+Readdit accounts work, with **Sign up** and **Log in**.
+
 Sign up and log in send the same wallet request, a pseudonym; Readdit applies it differently.
 **Sign up** only creates an account: when the wallet already has one, the dialog says "Account
 already exists" and offers **Log in**. **Log in** only logs in: with no account for the wallet, the dialog says "No
@@ -74,13 +84,16 @@ On the phone (SIROS ID), the screens and their wording follow the SIROS ID walle
 
 - **The round QR button** at the bottom reads the code on screen.
 - **Request to Share Data** shows the requester (name and domain) and the requested information
-  in the credential's box: a pseudonym specific to the site, and the age range when the site asks
-  for one. **Share** accepts; **Decline** declines, and nothing is shared. **Switch credential**
+  in the credential's box, in the credential's colour, one card per item: **Age proof**, when the
+  site asks (the range or threshold; the date of birth is not shared), and **Pseudonym** (specific
+  to the site, with what that means: no tracking across sites, Readdit recognizes the account,
+  Readdit does not learn the real identity, the issuer can reveal it).
+  **Share** accepts; **Decline** declines, and nothing is shared. **Switch credential**
   chooses the wallet's other credential (see below).
 - **Enter the Pin:** any 6 digits, then **Submit**. You can tap the digits or type them. Any PIN
   unlocks the wallet in this demo, and none leaves the phone.
 - While proving and sending, the phone shows "Creating presentation...", then "Sending
-  response...", then "Success!".
+  response...", then "Success!". The dialog stays open until you press **Close** on the phone.
 - **Cancel** at the PIN declines as **Decline** does: "Sharing Cancelled", and nothing is shared.
 - A QR code works once and for 10 minutes. Scanning it again, or after it expired, shows
   "Request Expired"; the dialog's **Try again** shows a new one.
@@ -96,7 +109,8 @@ it, all on this machine), and what Readdit checks. All of it is derived from the
 The panel's button at the top right collapses it to a narrow strip; the browser remembers the
 choice. Its footer links to the technical and moderation views.
 
-The wallet holds two "Age and pseudonym" credentials, told apart by the birth date on each card:
+The wallet holds two "Age and pseudonym" credentials, told apart by colour (grey and red) and by
+the birth date on each card:
 the demo person's, 15 years old (born 14 March 2011), and an adult's (born 20 May 1990). A request
 uses the credential shown on the wallet's home screen. Each has its own secret seed, so
 each gives Readdit a different pseudonym and so a different account. When both match a request,
@@ -136,7 +150,7 @@ session; the chips under the service cards select earlier ones.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
   presentation size, and the size of the signed request.
 - **Flow.** Each step with its time from the start of the session: session created, request
-  fetched (with or without wallet metadata), PIN checked and device key signed, witness built (its
+  fetched (with or without wallet metadata), device key signed, witness built (its
   size and `proof_time`), proof created (witness and prove times, the server process's peak
   memory), presentation received, proof verified or rejected (with the rule and the public input
   that failed), result applied to the account, or why not (cancelled, expired, no account,
@@ -169,7 +183,8 @@ gives Readdit the same pseudonym.
 
 ## 5. A full run through all three views
 
-1. **Site:** sign up (scan, **Share**, any 6-digit PIN). You get a pseudonym such as `u/golden-lynx-8604`.
+1. **Site:** sign up (scan, **Share**, any 6-digit PIN, **Close** on the phone). You get a pseudonym
+   such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
 2. **Site:** open c/afterdark. The phone says the requirement is not met. **Technical:** the
    session ends with an error response, and no proof is created.
@@ -277,13 +292,6 @@ Requests then expire after 40 s, so the expiry paths take a minute. `READDIT_TES
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 29).
 
-## Appendix: the Longfellow backend
-
-Readdit now proves and verifies with Vega in process. `docker-compose.longfellow.yml` is kept
-unchanged from the earlier design, in which the site called Longfellow prover and verifier images
-over HTTP. The site no longer makes those calls, so the override has no effect on it; a Longfellow
-backend would plug into `server/utils/services.ts` as the Vega addon does.
-
 ## More
 
 - `docs/nym_auth_rulebook.md` – the Nym-authentication Attestation Specification and Rulebook: the
@@ -294,7 +302,6 @@ backend would plug into `server/utils/services.ts` as the Vega addon does.
 - `scripts/demo-flow.mjs` – runs the walkthrough headlessly, checks that the guide panel follows
   each step, and saves a viewport screenshot of each step. Needs Playwright:
   `npm i --no-save playwright && npx playwright install chromium`, then
-  `node scripts/demo-flow.mjs http://localhost:3000`. The PR's screenshots are in
-  `docs/screenshots/vega-siros-wallet/`.
+  `node scripts/demo-flow.mjs http://localhost:3000` (screenshots in `demo-shots/`).
 - `scripts/flows-check.mjs` – drives every flow, happy and unhappy, and checks the product, the
   guide and the servers' answers (see "Checks").

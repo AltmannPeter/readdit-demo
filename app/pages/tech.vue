@@ -11,7 +11,6 @@ interface Service {
   service?: string
   implementation?: string
   version?: string
-  stub?: boolean
   circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null }>
   load_ms?: number
   threads?: number
@@ -131,7 +130,6 @@ const statusTone = (s: string) =>
           <div class="flex items-center gap-2">
             <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
             <h2 class="text-sm font-semibold capitalize">{{ name }}</h2>
-            <span v-if="svc.stub" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">STUB</span>
           </div>
           <template v-if="svc.up">
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>

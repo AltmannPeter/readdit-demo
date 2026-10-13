@@ -27,7 +27,6 @@ export interface ServiceInfo {
   service: string
   implementation: string
   version: string
-  stub?: boolean
   circuits: ServiceCircuit[]
   load_ms?: number
   threads?: number

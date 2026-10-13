@@ -15,7 +15,7 @@
 // For example:
 //   NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 node .output/server/index.mjs > /tmp/server.log 2>&1 &
 //   node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log \
-//     [--startup .output/server/index.mjs] [--shots docs/screenshots/vega-siros-wallet]
+//     [--startup .output/server/index.mjs] [--shots demo-shots]
 //
 // --server-log  the server's output: each refused presentation must be logged with its rule
 // --startup     also starts the built server without the addon and checks that it refuses to run

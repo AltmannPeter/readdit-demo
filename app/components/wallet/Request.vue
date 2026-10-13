@@ -11,7 +11,7 @@ import { sidDate } from '~/wallet/holder'
 // which tells two credentials of the same type apart; the birth date is not shown, as it is not shared.
 const props = defineProps<{ consent: ConsentView; credentialTitle: string; validUntil?: string; alternatives?: number; background?: string; text?: string }>()
 defineEmits<{ accept: []; cancel: []; switch: [] }>()
-const ICONS = { pseudonym: 'key-round', age: 'shield-check' } as const
+const ICONS = { pseudonym: 'hat-glasses', age: 'scroll-text' } as const
 const expiry = computed(() => (props.validUntil ? sidDate(props.validUntil) : ''))
 </script>
 
@@ -40,15 +40,22 @@ const expiry = computed(() => (props.validUntil ? sidDate(props.validUntil) : ''
               </div>
               <p v-if="expiry" class="-mt-2 text-xs text-sid-gray-700">Expiry Date: {{ expiry }}</p>
               <div class="flex flex-col gap-3">
-                <section v-for="f in props.consent.fields" :key="f.name" class="flex gap-3 rounded-md border border-sid-gray-400 bg-sid-gray-200 p-3">
-                  <WalletSirosIcon :name="ICONS[f.kind]" class="mt-0.5 size-5 shrink-0 text-sid-gray-700" />
-                  <div class="min-w-0">
-                    <h4 class="font-bold">{{ f.name }}</h4>
-                    <p class="mt-1 break-words font-medium">{{ f.value }}</p>
-                    <ul v-if="f.notes?.length" class="mt-2 space-y-1 text-sm text-sid-gray-700">
-                      <li v-for="n in f.notes" :key="n" class="break-words">{{ n }}</li>
-                    </ul>
+                <section v-for="f in props.consent.fields" :key="f.name" class="rounded-xl border border-sid-gray-400 bg-white p-3.5">
+                  <div class="flex items-center gap-3">
+                    <span class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-sid-gray-300 text-sid-brand">
+                      <WalletSirosIcon :name="ICONS[f.kind]" :stroke-width="1.75" class="size-6" />
+                    </span>
+                    <div class="min-w-0">
+                      <h4 class="leading-tight font-bold">{{ f.name }}</h4>
+                      <p class="mt-0.5 break-words">{{ f.value }}</p>
+                    </div>
                   </div>
+                  <template v-if="f.notes?.length">
+                    <hr class="my-3 border-sid-gray-300" />
+                    <ul class="space-y-1.5 text-sm text-sid-gray-800">
+                      <li v-for="n in f.notes" :key="n" class="flex gap-1.5"><span aria-hidden="true">-</span><span class="min-w-0 break-words">{{ n }}</span></li>
+                    </ul>
+                  </template>
                 </section>
               </div>
               <div v-if="props.alternatives" class="-mx-4 border-t border-t-sid-gray-600 px-4 pt-4 pb-1">

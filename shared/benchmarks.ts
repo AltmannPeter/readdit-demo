@@ -181,7 +181,3 @@ export function presentationRange(sys: SystemModel): Range {
   }
   return [lo, hi]
 }
-
-export function systemForCircuit(circuitId?: string | null): SystemModel {
-  return SYSTEMS.find((s) => circuitId?.includes(`:${s.key}:`)) ?? SYSTEMS[0]!
-}

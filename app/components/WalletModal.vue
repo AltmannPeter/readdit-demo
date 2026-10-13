@@ -62,7 +62,7 @@ const title = computed(() => {
   return p?.intent === 'signup' ? `Sign up for ${siteName}` : `Log in to ${siteName}`
 })
 const subtitle = computed(() => {
-  if (!community.value) return `Open an EUDI Wallet App. ${siteName} receives a pseudonym, not your name or email address.`
+  if (!community.value) return ''
   const gated = `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
   return state.value.purpose?.kind === 'signin' ? `${gated} The same step logs you in with a pseudonym.` : gated
 })
@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h2 class="text-xl font-semibold">{{ title }}</h2>
-                <p class="mt-1 text-sm text-muted">{{ subtitle }}</p>
+                <p v-if="subtitle" class="mt-1 text-sm text-muted">{{ subtitle }}</p>
               </div>
               <button class="-mt-1 -mr-2 rounded-full p-1.5 text-muted hover:bg-canvas" aria-label="Close" @click="close">
                 <AppIcon name="close" class="size-5" />
