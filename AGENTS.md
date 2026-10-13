@@ -74,8 +74,8 @@ are quoted in them.
 
 ### Presentation order (not hardcoded)
 
-1. Log in / sign up with QR, scan, consent and PIN. Optionally open the credential window from the
-   phone's "Age and pseudonym" card.
+1. Log in / sign up with QR, scan, consent and PIN. Optionally open the phone's "Age and pseudonym"
+   card, and from it the credential window (Dataset).
 2. Browse the open communities.
 3. Open `c/afterdark` (18+). The wallet says "Requirement not met" and the site shows "Not completed".
 4. Open `c/teenspace` (13–17). Access is granted. `c/afterdark` is now refused by the site itself.
