@@ -15,9 +15,11 @@ hop on the server side.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and peak memory are its own.
 
-In offline mode (`NUXT_BACKEND_MODE=offline` or the switch in `/mod`) the site uses a built-in
-simulation instead (`server/utils/offline-backend.ts`). It follows the same contract, sends a random
-proof of Vega's size (96,079 bytes) and marks its metrics `"simulated": true`.
+There is no other backend. When the addon cannot load, the built server stops at start with the
+reason and `Build the Vega addon with npm run build:native, then start the site again.` (exit code
+1, `server/plugins/vega.ts`); the development server keeps running and answers 503 `unavailable`.
+An addon call that fails at runtime (it throws, or its result is not JSON) is `500 backend_error`
+(`services.ts`), logged as `[vega] <step> failed: <reason>`.
 
 Configuration (Nuxt runtime config, environment variables):
 
@@ -27,7 +29,6 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The verifier's trust anchors (PEM) |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far `proof_time` may lie from the verifier's clock |
-| `NUXT_WALLET_PIN` | `123456` | The PIN that unlocks the device key (prover and offline simulation) |
 | `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1` | Circuits Readdit accepts, comma-separated, in preference order |
 
 ## The circuit
@@ -86,7 +87,7 @@ The device key signs `message` with ES256; the circuit verifies that signature o
 ## The addon
 
 ```ts
-loadProver(shapes: string, pin: string): Promise<Prover>
+loadProver(shapes: string): Promise<Prover>
 loadVerifier(shapes: string, trustAnchorsPem: string, toleranceS: number): Promise<Verifier>
 
 Prover.info: string                                       // JSON
@@ -126,13 +127,14 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
 The verifier's adds `trust_anchors` (subject, not_after) and `proof_time_tolerance_s`. `load_ms` is
 the one-time key build at start. The mocked phone sends `circuits` as `wallet_metadata` and selects from it.
 
-### Prover step 1: unlock and sign
+### Prover step 1: sign
 
-The PIN unlocks the device key, which signs DeviceAuthentication over the SessionTranscript of the handover.
+The device key signs DeviceAuthentication over the SessionTranscript of the handover. The phone's
+PIN screen stands for the unlock, and any PIN unlocks; the prover takes no PIN, and an input field
+it does not know (such as a `pin`) is ignored.
 
 ```json
 {
-  "pin": "123456",
   "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" },
   "doc_type": "eu.europa.ec.eudi.nym_auth.1",
   "handover": { "client_id": "x509_san_dns:readdit.example", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null }
@@ -199,11 +201,11 @@ Prover refusals:
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| 401 | `invalid_pin` | Wrong PIN. The phone asks again. |
 | 422 | `unsatisfiable` | A predicate does not hold for the holder's data (birth date outside [E, C], credential not valid now). The phone shows "Requirement Not Met" and sends `access_denied`. |
 | 400 | `unsupported_circuit`, `unsupported_request`, `unsupported_config`, `unsupported_function` | The request cannot be proven with this circuit. |
 | 400 | `bad_credential`, `bad_request` | The credential material or the call is malformed or inconsistent. |
-| 503 | `unavailable` | The addon is not built or could not load (`services.ts`). |
+| 500 | `backend_error` | The addon call failed (`services.ts`). The phone shows "Signing Failed". |
+| 503 | `unavailable` | The addon is not built or could not load (`services.ts`). The phone shows "Connection Error". |
 
 ### Verifier: verify
 
@@ -242,3 +244,50 @@ The verifier takes only `issuer_key_set`, `proof_time` and `results` from the pr
 | `public_input` | the proof's public values differ from the verifier's; `input` names the first one that differs |
 
 Readdit repeats the circuit and results-key checks after the call, as a second line of defence.
+
+## Readdit's routes and their refusals
+
+Every refusal carries a plain status text and a code in the error body's `data.error`.
+
+| Route | Status and code | When |
+| --- | --- | --- |
+| `POST /api/vp/session` | 400 `bad_request` | No JSON object, an unknown purpose or intent, an age check (or a sign-in with `community`) for a community without an age requirement |
+| | 401 `login_required` | An age check without a logged-in (and not banned) account |
+| | 403 `age_refused` | The ages already proven for the account do not overlap the community's requirement |
+| | 409 `age_verified` | The ages already proven already meet it: no new request |
+| | 503 `unavailable` | The verifier could not make an offer |
+| request_uri | 404 `unknown_session` | |
+| | 405 `method_not_allowed` | Not GET or POST |
+| | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `circuit_zk` values are not lists of strings |
+| | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
+| response_uri | 404 `unknown_session` | |
+| | 400 `state_mismatch` | `state` is not the session's; checked first |
+| | 410 `expired`, `cancelled` | |
+| | 400 `not_requested` | The request was never fetched |
+| | 400 `already_answered` | A second response, for example a replay; logged as `[vp] <id>: refused a second response` |
+| | 200 | The response was processed. A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
+| | 503 `unavailable` | The verifier failed; the session ends as `unavailable` |
+| `GET /api/vp/session/:id`, `…/complete`, `…/cancel` | 404 `unknown_session`, 403 `other_browser` | Only the browser that started the session |
+| `POST …/complete` | 409 `not_verified` | Before a verified presentation |
+| `POST /api/wallet/sign`, `/prove` | 400 `bad_request` | Missing or mistyped fields; the prover's refusals above otherwise |
+| `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
+| `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
+
+`{ purpose: 'signin', intent, community }` is the request of a logged-out visitor at an
+age-restricted community: one presentation of the pseudonym and the community's age range, which
+logs in (or signs up) and records the age. `GET /api/vp/session/:id` answers `{ status, failure?,
+completion?, verification? }`; `verification` holds the verifier's `decode_ms`, `verify_ms` and
+`total_ms` and the response route's `round_trip_ms` around the call, once a presentation was
+verified or refused.
+
+A completed session answers `POST …/complete` with `{ ok, kind, handle?, age? }`. `kind` is `created`,
+`logged_in` or `age` when applied (`age: true` when a sign-in also recorded the age); otherwise `no_account` (a log-in for a pseudonym without an
+account; nothing is created), `banned`, `mismatch` (an age proof for another pseudonym than the
+logged-in account's), `logged_out` (the browser was logged out meanwhile), or the reason the session
+failed: `denied`, `invalid_request`, `invalid`, `unavailable`, `expired`, `cancelled`.
+
+**Test only.** With `READDIT_TEST_FAULTS=1` in the server's environment, `POST /api/test/fault
+{ "step": "prover.info" | "prover.sign" | "prover.prove" | "verifier.info" | "verifier.verify" }`
+makes the next addon call of that step fail as a failing addon would (`server/utils/test-faults.ts`).
+Without the variable the route answers 404 and no call is failed. `scripts/flows-check.mjs` uses it
+for the "backend failing" paths.

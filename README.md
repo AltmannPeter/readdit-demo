@@ -16,8 +16,8 @@ npm run dev            # http://localhost:3000
 
 Or with Docker: `docker compose up -d --build`.
 
-Wallet PIN: `123456`. The phone plays the SIROS ID wallet; proofs are real Vega proofs, made and
-verified in the site's server. A guide panel beside the site summarises each step of the flow, with
+Any 6-digit PIN unlocks the wallet. The phone plays the SIROS ID wallet, with two credentials;
+proofs are real Vega proofs, made and verified in the site's server. A guide panel beside the site summarises each step of the flow, with
 the technical details of the step on request.
 
 - `AGENTS.md` – decisions, architecture, open work

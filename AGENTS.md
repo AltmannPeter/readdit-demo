@@ -28,9 +28,9 @@ over cross-device OpenID4VP (QR code).
 
 The phone on screen is part of the website UI. It plays the person's wallet, the SIROS ID wallet.
 In the real world the wallet would build the proof on the phone. Here the Vega prover in the site's
-server builds it. There is no true holder binding: the mocked wallet carries the credential, the
-device key and the seed outright (`app/wallet/demo-wallet.json`) and sends what each native step
-needs; the prover keeps none of it.
+server builds it. There is no true holder binding: the mocked wallet carries its two credentials,
+their device keys and seeds outright (`app/wallet/demo-wallet.json`) and sends what each native step
+needs from the credential the person chose; the prover keeps none of it.
 
 ### Source documents
 
@@ -62,17 +62,20 @@ current decisions; the replaced ones are quoted in them.
 | Consent | **Replaced 2026-10-13 (Frédéric):** the wallet's request screen is the SIROS ID one: the requester (name and domain) and the requested information in product wording, derived from the request: a pseudonym specific to the site and, only when asked, the age range computed from the request's bounds. The technical account of the same request (the pseudonym and the rulebook's properties of its configuration, what is not shared, the other values the verifier receives, `client_id` and the signing certificate) is in the guide panel's Details. All of it comes from `consentFor` (`app/wallet/engine.ts`). Was: "The wallet's request screen shows what the request actually discloses: the verifier (name, host, `client_id`, signing certificate), the pseudonym the wallet computes for this site with the rulebook's properties, the age range if asked, the other public inputs, and what is not shared." |
 | Audience | **Replaced 2026-10-13 (Frédéric):** the main window shows the product (Readdit and the SIROS ID wallet) with product copy only, and the guide panel beside it. Technical detail lives in the guide's Details and in the operator pages `/tech` and `/mod`. The credential window `/wallet/credential` is gone. Was: "Technical detail lives only in separate windows: `/tech`, `/mod`, and the credential window `/wallet/credential`." |
 | Copy | Tight and plain. It must not sound like marketing or AI-written text. The wallet uses the SIROS ID wallet's English strings (`src/locales/en.json`) wherever one exists; screens the real wallet lacks ("Requirement Not Met") are written in the same style. |
-| Guide | **Added 2026-10-13 (Frédéric):** a guide panel docked at the right edge, styled apart from the product, collapsible. It follows the flow state by itself (`app/guide/steps.ts`): for the current step a title and a neutral summary of 1 to 3 sentences, and optional Details with the technical facts, each derived from the request, the credential, the circuit's registry entry, the rulebook properties (`app/wallet/rulebook.ts`) and the measured metrics. It claims nothing the rulebook or the code does not. |
+| Guide | **Added 2026-10-13 (Frédéric):** a guide panel docked at the right edge, styled apart from the product, collapsible. It follows the flow state by itself (`app/guide/steps.ts`): for the current step a title and a neutral summary of 1 to 3 sentences, and optional Details with the technical facts, each derived from the request, the credential, the circuit's registry entry, the rulebook properties (`app/wallet/rulebook.ts`) and the measured metrics (the prover's and, apart, the verifier's). It claims nothing the rulebook or the code does not. |
 | Flow | Nothing is scripted. Each community has a gate `{ minAge?, maxAge? }` and the site reacts to any click order. |
-| Credential | One `nym_auth` attestation covers both pseudonym and age. |
+| Credential | **Changed 2026-10-13 (Frédéric):** the wallet holds two `nym_auth` credentials from one Document Signer: the teen's (born 2011-03-14, the default for every request) and an adult's (born 1990-05-20). Each covers both pseudonym and age, with its own seed, so each gives its own pseudonym and account. When both match a request, the request screen offers "Switch credential", as the SIROS ID app does. Was: "One `nym_auth` attestation covers both pseudonym and age." |
 | Pseudonym config | `known-offender-matching-ssc` with `verifier_id_type: x509_san_dns`. `client_id = x509_san_dns:<siteHost>` is also the `verifier_id`. |
 | Age binding | Every age request also asks for the pseudonym in the same `req`. The site accepts the age result only if the pseudonym equals the logged-in account's pseudonym. |
-| 2FA | Every proof needs the device key and the wallet PIN (6 digits, default `123456`, `NUXT_WALLET_PIN`). A wrong PIN is rejected by the prover before the device key signs. |
+| Logged-out gated community | **Changed 2026-10-13 (Frédéric's report "the after dark is locked without having verified the age"):** a logged-out visitor at an age-restricted community sees its age requirement and one button, which starts one request for the pseudonym and the age range: it creates the account or logs in to it, and records the age. Plain log-in and sign-up still ask for the pseudonym only. Was: "Log in to view" with a lock, then a second request for the age. |
+| 2FA | **Replaced 2026-10-13 (Frédéric):** any PIN unlocks the device key. The PIN screen stays as the phone's unlock (the SIROS ID app unlocks with a passkey); no PIN reaches the server, and the prover takes none. Was: every proof needed the device key and the wallet PIN (6 digits, set by `NUXT_WALLET_PIN`), and the prover refused a wrong PIN before the device key signed. |
 | Unsatisfiable age | The wallet shows "Requirement Not Met" and sends `access_denied` with no description. The site cannot tell this apart from the user cancelling. |
 | Errors independent of holder data | Unsupported request or no common circuit → the wallet sends `invalid_request` (rulebook allows `invalid_request` here). |
 | Gate logic | The site stores the intersection of proven birth-date intervals and decides per gate: `allow`, `deny` (no overlap, so it refuses without asking the wallet), or `ask` (`shared/utils/age.ts`). |
 | Ban | A ban is keyed by pseudonym. It ends the login, hides the account's comments, and blocks sign-up and age checks. |
-| Offline backup | A built-in simulation of the prover and verifier (`server/utils/offline-backend.ts`) for when the addon fails. Switch in `/mod` or start with `NUXT_BACKEND_MODE=offline`. It checks the PIN and the age predicate (from the credential the wallet sends), derives the real pseudonym, sends a random proof of Vega's size (96,079 bytes), waits as long as the nym-auth-circuits benchmark says, and labels every metric simulated. No external requests at runtime. |
+| Offline backup | **Removed 2026-10-13 (Frédéric):** there is no fallback backend. The Vega addon is built into the site's server; when it cannot load, the built site refuses to start and says to run `npm run build:native`. A failing prove or verify call is the "backend unavailable" path (500 `backend_error` or 503 `unavailable`). Was: "A built-in simulation of the prover and verifier (`server/utils/offline-backend.ts`) for when the addon fails. Switch in `/mod` or start with `NUXT_BACKEND_MODE=offline`. …" |
+| Sign-up and log-in | **Changed 2026-10-13, while handling every flow (Frédéric's request):** both send the same wallet request. Sign-up creates the account or logs in to the existing one ("This wallet already has an account"); log-in only logs in, and with no account answers "No account" and offers Sign up, creating nothing. Was: the same request created the account or logged in to it, whatever the button; the button only set the dialog's title. |
+| Refusals | A refusal names its code in the error body (`data.error`); docs/backend-api.md lists them per route. response_uri answers 200 once a response is processed, accepted or refused; the rule of a refused presentation goes to the server log and the session trace, not to the caller. Closing the site's dialog cancels the session, so a later answer is refused with 410. |
 | Estimates | `/tech` shows per-step estimates from `shared/benchmarks.ts`. Desktop figures are measurements on Apple M5 and AMD Ryzen 9 (`NYM-AUTH.md`, `vega-caching-analysis.md`). Phone = desktop × 1–5, not measured; only phone-side steps are scaled. |
 
 ### Presentation order (not hardcoded)
@@ -101,9 +104,9 @@ app/
                                  check request + select circuit -> consent -> PIN -> sign -> witness and prove ->
                                  POST response_uri
   components/wallet/*.vue        SIROS ID screens (home, credential, presentations, scan, request, PIN, progress,
-                                 outcome), with the wallet's own strings
+                                 outcome, Switch credential), with the wallet's own strings
   components/wallet/THIRD-PARTY-NOTICES.txt  BSD-2-Clause (SIROS ID), ISC (lucide), OFL (Inter)
-  wallet/demo-wallet.json        the holder's mdoc, device key and seed (issued by nym-issuer)
+  wallet/demo-wallet.json        two holders' mdocs, device keys and seeds (issued by nym-issuer under one signer)
   wallet/holder.ts               the holder material and the credential decoded for the screens
   wallet/engine.ts               wallet-side rulebook checks, circuit selection, the consent model (product fields
                                  for the request screen, the technical account for the guide)
@@ -114,23 +117,24 @@ app/
   pages/tech.vue                 technical view (separate window)
   pages/mod.vue                  moderation: comments, accounts, ban/unban, reset demo (separate window)
 server/
-  utils/services.ts              THE ONLY CODE THAT CALLS THE PROOF BACKEND (the Vega addon, or the offline simulation)
-  plugins/vega.ts                builds both sides' keys when the server starts
-  utils/offline-backend.ts       built-in offline simulation of prover and verifier
-  utils/backend-mode.ts          native | offline, phone factor (runtime switch, /api/demo/backend)
+  utils/services.ts              THE ONLY CODE THAT CALLS THE PROOF BACKEND (the Vega addon)
+  plugins/vega.ts                builds both sides' keys when the server starts; stops the built server without the addon
+  utils/test-faults.ts           test only (READDIT_TEST_FAULTS=1): fails the next call of one addon step
+  utils/errors.ts                refusals with a code in data.error; body parsing
   utils/request-signer.ts        signs Request Objects (ES256, x5c); self-signed cert unless PEMs configured
   utils/store.ts                 in-memory sessions, accounts, comments (reset with /api/demo/reset)
   utils/vp.ts                    verifier offer (config ∩ registry ∩ verifier, checked against the registry entry)
   api/vp/session.post.ts         create session → { id, authorizationUrl }
   api/vp/request/[id].ts         request_uri, GET or POST (wallet_metadata, wallet_nonce), returns signed JWT
   api/vp/response/[id].post.ts   response_uri (direct_post), calls the verifier
-  api/vp/session/[id]*.ts        status polling and completion (login / age proof / ban / mismatch)
+  api/vp/session/[id]*.ts        status polling, completion (login / no account / age proof / ban / mismatch), cancel
+  api/test/fault.post.ts         test only (READDIT_TEST_FAULTS=1), 404 otherwise
   api/wallet/*.ts                mocked phone → prover (capabilities, sign, prove)
   api/me, logout, notice, comments, mod/*, demo/reset, tech/overview
 shared/
-  benchmarks.ts                  timing/size model for /tech estimates and the offline simulation
+  benchmarks.ts                  timing/size model for /tech estimates
   registry/circuits.ts           approved circuit registry: Vega (as the addon loads it) and Longfellow entries
-  utils/mdoc.ts                  reads an IssuerSigned (wallet screens, offline simulation)
+  utils/mdoc.ts                  reads an IssuerSigned (wallet screens)
   utils/negotiation.ts           tailorFormats (verifier side), selectCircuit (wallet side)
   utils/dcql.ts                  credential query, Request Object, authorization URL (request_uri_method=post)
   utils/pseudonym.ts             pseudonym-v1-sha256, all four configs
@@ -139,13 +143,14 @@ native/vega/                     Rust workspace: the proof backend
   vega-age/, circuits/           nym-auth-circuits circuits and shapes, vendored unchanged (VENDOR-SHA256SUMS)
   nym-vega/                      prover steps and verifier around vega-age (OpenID4VP handover, presentation, checks)
   node/                          the napi-rs addon (Prover, Verifier)
-  issuer/                        nym-issuer: the demo credential, keys and trust anchor
+  issuer/                        nym-issuer: the demo credentials (one per --holder), keys and trust anchor
   demo/document-signer.pem       the verifier's trust anchor
 Dockerfile                       the site with the addon (Rust build stage); docker-compose.yml runs it
 docker-compose.longfellow.yml    kept from the HTTP design; has no effect on the addon-based site
 scripts/build-native.mjs         npm run build:native
 scripts/vega-check.mjs           npm run vega:check: real proofs, pseudonym, refusals
 scripts/demo-flow.mjs            headless run of the presentation order: guide steps, phone traffic, screenshots
+scripts/flows-check.mjs          every flow, happy and unhappy, in the browser and over HTTP; screenshots 19-29
 ```
 
 All of the flow is real: the OpenID4VP request/response, signed Request Objects, capability
@@ -197,12 +202,25 @@ Checks, after every change:
 ```sh
 npx nuxi typecheck                                  # needs: npm i --no-save typescript@5 vue-tsc
 node scripts/demo-flow.mjs http://localhost:3000    # needs: npm i --no-save playwright && npx playwright install chromium
+node scripts/flows-check.mjs http://localhost:3000  # every flow; start the built server as GETTING-STARTED, "Checks", says
 npm run vega:check                                  # after changing native/vega
 (cd native/vega && cargo test -p nym-vega)
 ```
 
 `scripts/demo-flow.mjs` runs the presentation order headlessly against the running site, including
-the wrong PIN, the ban and the second sign-up. At each step it checks that the guide panel shows the
+the ban and the second sign-up, with a different PIN at each unlock. At each step it checks that the guide panel shows the
 matching step, and it saves a viewport screenshot of the page: Readdit, the phone in the dialog and
 the guide (`node scripts/demo-flow.mjs <base> <dir>`; the PR's set is in
 `docs/screenshots/vega-siros-wallet/`).
+
+`scripts/flows-check.mjs` drives every flow of the inventory (the PR lists them): sign-up, log-in
+and log-out, the communities and age gates, the one request at a gated community when logged out,
+comments, bans, both credentials and Switch credential, the wallet's refusals (decline, cancel at
+the PIN, requirement not met, unsupported and untrusted requests), closing the dialog, expired and
+used QR codes, an age proof from the other credential, a ban or a log-out during a request, a demo
+reset, and over HTTP the verifier's refusals (replay, another state or nonce, tampered
+presentations, malformed bodies, another browser) and the backend failing through the test-only
+hook. It checks the product, the guide step (with the verifier's measured times after each
+verified presentation) and every server answer, and that nothing carries over into the next path.
+It needs the built server with `NUXT_VP_SESSION_TTL_S=40` and `READDIT_TEST_FAULTS=1`
+(GETTING-STARTED, "Checks").
