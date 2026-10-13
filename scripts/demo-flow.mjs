@@ -1,5 +1,7 @@
 // Runs the presentation order headlessly against the running site and saves a screenshot of each
-// step, in flow order, to ./demo-shots (or the directory given as the second argument).
+// step, in flow order, to ./demo-shots (or the directory given as the second argument). Every
+// screenshot is the browser viewport as the person sees it: Readdit, the phone in the wallet
+// dialog, and the guide panel.
 // Needs the site with its proof backend (npm run build:native, then npm run dev).
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
 //        (needs: npm i --no-save playwright && npx playwright install chromium)
@@ -7,6 +9,7 @@
 // Order: sign-up (QR, credential, scan, consent, wrong PIN, proving, success), an open community,
 // c/afterdark (requirement not met), c/teenspace (age range granted), c/afterdark refused by the
 // site, a comment, the ban from /mod, the second sign-up ending in "Account banned", and /tech.
+// At each step it checks that the guide panel shows the matching step.
 // Exits 1 on a console error or when a step does not reach its expected state.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -42,13 +45,14 @@ page.on('response', (r) => {
 })
 
 const phone = page.locator('[role=dialog] section').nth(1)
+const guidePanel = page.getByRole('complementary', { name: 'Guide' })
 let n = 0
-const shot = async (name, target = page, { settle = 400 } = {}) => {
-  const p = 'screenshot' in target && 'goto' in target ? target : page
-  await p.waitForTimeout(settle)
+/** A viewport capture of the page as it is on screen. */
+const shot = async (name, { settle = 400 } = {}) => {
+  await page.waitForTimeout(settle)
   n += 1
   const file = join(OUT, `${String(n).padStart(2, '0')}-${name}.png`)
-  await target.screenshot({ path: file })
+  await page.screenshot({ path: file })
   console.log(`  ${file}`)
 }
 const step = (s) => console.log(s)
@@ -58,38 +62,32 @@ const ready = async (p) => {
   await p.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
   await p.waitForTimeout(300)
 }
-// The whole content of the phone's scrolling screen in one image: the phone frame is let grow to
-// the content's height for the shot, then put back.
-const fullPhoneShot = async (name) => {
-  await phone.locator('.overflow-y-auto').first().evaluate((el) => {
-    const frame = el.closest('.select-none')
-    for (let e = el; e && e !== frame.parentElement; e = e.parentElement) {
-      e.dataset.saved = e.getAttribute('style') ?? ''
-      e.style.height = 'auto'
-      e.style.maxHeight = 'none'
-      e.style.overflow = 'visible'
-      e.style.flex = 'none'
-    }
-  })
-  await shot(name, phone)
-  await phone.locator('.overflow-y-auto').first().evaluate((el) => {
-    const frame = el.closest('.select-none')
-    for (let e = el; e && e !== frame.parentElement; e = e.parentElement) {
-      e.setAttribute('style', e.dataset.saved)
-      delete e.dataset.saved
-    }
-  })
+/** The guide panel shows this step. */
+const guide = async (id, { settle = 250 } = {}) => {
+  await page.locator(`aside[data-guide-step="${id}"]`).waitFor({ timeout: 10_000 })
+  await page.waitForTimeout(settle) // the guide's transition
 }
-const scrollPhone = async (to) => {
-  await phone.locator('.overflow-y-auto').first().evaluate((el, where) => el.scrollTo({ top: where === 'bottom' ? el.scrollHeight : 0 }), to)
+const openDetails = async () => {
+  await guidePanel.locator('summary', { hasText: 'Details' }).click()
+  await guidePanel.locator('details[open] section').first().waitFor()
+}
+const phoneScroller = () => phone.locator('.overflow-y-auto').first()
+/** When the phone's screen is taller than the phone, a second capture scrolled to its end. */
+const shotScrolledIfLonger = async (name) => {
+  const longer = await phoneScroller().evaluate((el) => el.scrollHeight > el.clientHeight + 1)
+  if (!longer) return
+  await phoneScroller().evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
+  await shot(name)
+  await phoneScroller().evaluate((el) => el.scrollTo({ top: 0 }))
 }
 const scan = async () => {
   await phone.getByRole('button', { name: 'Scan QR code' }).click()
   await phone.getByText('Scan the QR Code').waitFor()
 }
-const readRequest = async () => phone.getByText(/Request to Share Data|Requirement not met|Request not supported/).waitFor({ timeout: 20_000 })
-const typePin = async (pin) => {
+const readRequest = async () => phone.getByText(/Request to Share Data|Requirement Not Met|Unsupported Request/).waitFor({ timeout: 20_000 })
+const enterPin = async (pin) => {
   for (const d of pin) await phone.getByRole('button', { name: d, exact: true }).click()
+  await phone.getByRole('button', { name: 'Submit' }).click()
 }
 
 try {
@@ -99,59 +97,77 @@ try {
   step('1. sign up')
   await page.goto(BASE)
   await ready(page)
+  await guide('start')
   await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await phone.getByText('Age and pseudonym').first().waitFor()
-  await shot('signup-qr-and-wallet-home')
+  await guide('signin-qr')
+  await shot('signup-qr')
   await phone.getByRole('button', { name: 'Open Age and pseudonym details' }).first().click()
-  await phone.getByText('Date of birth:').waitFor()
-  await shot('wallet-credential-detail', phone)
-  const [details] = await Promise.all([context.waitForEvent('page'), phone.getByRole('button', { name: 'Open the credential details in a new window' }).click()])
-  watch(details)
-  await details.setViewportSize({ width: 560, height: 1250 })
-  await ready(details)
-  await details.getByText('What this credential contains').waitFor()
-  await details.screenshot({ path: join(OUT, `${String(++n).padStart(2, '0')}-credential-window.png`), fullPage: true })
-  await details.close()
+  await phone.getByText('Birth Date:').waitFor()
+  await guide('credential')
+  await openDetails()
+  await guidePanel.getByText('Document type').waitFor()
+  await shot('wallet-credential')
   await phone.getByRole('button', { name: 'Back' }).click()
   await phone.getByRole('heading', { name: 'Credentials' }).waitFor()
   await page.waitForTimeout(400) // the screen transition
   await scan()
+  await guide('scan')
   await phone.locator('svg.text-green-600').waitFor({ timeout: 5_000 })
-  await shot('wallet-scan', phone, { settle: 0 })
+  await shot('wallet-scan', { settle: 0 })
   await readRequest()
+  await guide('consent')
+  await openDetails()
   await shot('signup-consent')
-  await fullPhoneShot('signup-consent-full')
+  await shotScrolledIfLonger('signup-consent-scrolled')
   await phone.getByRole('button', { name: 'Share' }).click()
-  await typePin('000000')
-  await phone.getByText('You have entered an incorrect PIN').waitFor({ timeout: 10_000 })
-  await shot('wrong-pin', phone)
-  await typePin(PIN)
+  await guide('pin')
+  await enterPin('000000')
+  await phone.getByText('You have entered an incorrect pin').waitFor({ timeout: 10_000 })
+  await guide('wrong-pin')
+  await shot('wrong-pin')
+  await enterPin(PIN)
   await phone.getByText('Presentation sent successfully').waitFor({ timeout: 30_000 })
-  await shot('wallet-proof-steps', phone, { settle: 0 })
+  await guide('proving', { settle: 0 })
+  await shot('proof', { settle: 0 })
+  // The dialog closes 1.8 s after the account is created: capture the wallet's "Success!" as soon as
+  // its transition (200 ms) has run, with the dialog still open.
   await phone.getByText('Success!').waitFor({ timeout: 30_000 })
-  await shot('wallet-success', page, { settle: 100 })
+  await shot('signup-success', { settle: 180 })
+  if (!(await page.getByText(/^Account created: u\//).isVisible())) errors.push('the sign-up success screenshot missed the open dialog')
+  await guide('account-created', { settle: 0 })
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
   await page.getByRole('banner').getByText(/^u\//).first().waitFor()
-  await shot('logged-in')
+  await guide('account-created')
+  await openDetails()
+  await shot('account-created')
 
   // 2. An open community needs only the login: no age request.
   step('2. open community')
   await page.click('a[href="/c/photography"]')
   await ready(page)
   await page.getByRole('heading', { name: 'c/photography' }).waitFor()
-  await shot('open-community-no-age-check')
+  await guide('open-community')
+  await shot('open-community')
 
   // 3. 18+: the wallet cannot meet the requirement; the site shows "Not completed".
   step('3. c/afterdark')
   await page.click('a[href="/c/afterdark"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).waitFor()
+  await guide('age-ask')
+  await openDetails()
+  await shot('afterdark-age-required')
   await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await guide('age-qr')
   await scan()
   await readRequest()
-  await phone.getByText('Requirement not met').waitFor()
+  await phone.getByText('Requirement Not Met').waitFor()
+  await guide('unmet')
   await shot('afterdark-requirement-not-met')
   await phone.getByRole('button', { name: 'Close' }).click()
   await page.getByText('Not completed').waitFor()
+  await guide('not-completed')
   await shot('afterdark-not-completed')
   await page.keyboard.press('Escape')
   await page.getByRole('dialog').waitFor({ state: 'detached' })
@@ -162,24 +178,31 @@ try {
   await page.getByRole('button', { name: 'Verify age with wallet' }).click()
   await scan()
   await readRequest()
-  await phone.getByText('You are between 13 and 17').waitFor()
+  await phone.getByText('Between 13 and 17').waitFor()
+  await guide('age-consent')
+  await openDetails()
   await shot('teenspace-consent')
-  await fullPhoneShot('teenspace-consent-full')
+  await shotScrolledIfLonger('teenspace-consent-scrolled')
   await phone.getByRole('button', { name: 'Share' }).click()
-  await typePin(PIN)
+  await enterPin(PIN)
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
-  await shot('teenspace-granted')
+  await guide('age-verified')
+  await openDetails()
+  await shot('teenspace-age-verified')
 
   // 5. 18+ is now refused by the site itself, without asking the wallet.
   step('5. c/afterdark refused by the site')
   await page.click('a[href="/c/afterdark"]')
   await page.getByText("You can't enter").waitFor()
-  await shot('afterdark-refused-by-site')
+  await guide('age-refused')
+  await openDetails()
+  await shot('afterdark-refused-by-readdit')
 
   // 6. A comment, then the moderator bans the account.
   step('6. comment and ban')
   await page.goto(`${BASE}/c/teenspace/p10`)
   await ready(page)
+  await guide('age-granted')
   await page.getByPlaceholder(/Comment as/).fill('Anyone want to swap phone numbers?')
   await page.getByRole('button', { name: 'Comment', exact: true }).click()
   await page.getByText('Anyone want to swap phone numbers?').waitFor()
@@ -197,29 +220,33 @@ try {
   await ready(mod)
   await mod.getByRole('button', { name: 'Ban user' }).first().click()
   await mod.getByText('Banned', { exact: true }).first().waitFor()
-  await shot('mod-ban', mod)
 
   await page.bringToFront()
   await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await guide('banned')
+  await openDetails()
   await shot('user-banned')
 
   // 7. The same wallet signs up again: the same pseudonym, so "Account banned".
   step('7. second sign-up')
   await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await guide('signin-qr')
+  await guidePanel.getByText('Sign-up after the ban').waitFor()
   await scan()
   await readRequest()
+  await guide('consent')
   await phone.getByRole('button', { name: 'Share' }).click()
-  await typePin(PIN)
+  await enterPin(PIN)
   await page.getByText('Account banned').waitFor({ timeout: 30_000 })
+  await guide('signup-refused')
+  await openDetails()
   await shot('signup-again-account-banned')
 
   // 8. The technical view: the teenspace session, with the real metrics.
   step('8. /tech')
   await tech.bringToFront()
-  await tech.setViewportSize({ width: 1440, height: 2100 })
   await tech.getByRole('button', { name: /Age check, c\/teenspace/ }).click()
   await tech.getByText('Proof verified').first().waitFor()
-  await shot('tech-teenspace', tech, { settle: 1200 })
 } catch (e) {
   // Leave the state the run stopped in.
   await page.screenshot({ path: join(OUT, 'failure.png') })
