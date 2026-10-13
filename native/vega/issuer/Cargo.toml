@@ -1,0 +1,27 @@
+[package]
+name = "nym-issuer"
+version = "0.1.0"
+edition = "2024"
+description = "Issues Readdit's demo nym_auth mdoc (SPEC.md §2.1 profile), device key, secret seed and trust anchor"
+publish = false
+
+[[bin]]
+name = "nym-issuer"
+path = "src/main.rs"
+
+[dependencies]
+nym-vega = { path = "../nym-vega" }
+vega-age = { path = "../vega-age" }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rcgen = { version = "0.13", features = ["pem"] }
+time = "0.3"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+let_underscore_must_use = "deny"
+let_underscore_untyped = "deny"
