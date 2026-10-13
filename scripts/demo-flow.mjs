@@ -6,7 +6,7 @@
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
 //        (needs: npm i --no-save playwright && npx playwright install chromium)
 //
-// Order: sign-up (QR, credential, scan, consent, wrong PIN, proving, success), an open community,
+// Order: sign-up (QR, credential, scan, consent, PIN, proving, success), an open community,
 // c/afterdark (requirement not met), c/teenspace (age range granted), c/afterdark refused by the
 // site, a comment, the ban from /mod, the second sign-up ending in "Account banned", and /tech.
 // At each step it checks that the guide panel shows the matching step.
@@ -17,7 +17,8 @@ import { chromium } from 'playwright'
 
 const BASE = process.argv[2] ?? 'http://localhost:3000'
 const OUT = process.argv[3] ?? 'demo-shots'
-const PIN = process.env.DEMO_PIN ?? '123456'
+// Any 6 digits unlock the wallet: each PIN entry is a different one.
+const anyPin = () => String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
 mkdirSync(OUT, { recursive: true })
 for (const f of readdirSync(OUT)) if (f.endsWith('.png')) rmSync(join(OUT, f))
 
@@ -26,8 +27,8 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 900 
 const page = await context.newPage()
 const errors = []
 const watch = (p) => {
-  // The wrong-PIN step returns 401 and the unmet age check 422 on purpose; the browser logs them.
-  p.on('console', (m) => m.type() === 'error' && !/\b(401|422)\b/.test(m.text()) && errors.push(`${p.url()}: ${m.text()}`))
+  // The unmet age check may return 422 on purpose; the browser logs it.
+  p.on('console', (m) => m.type() === 'error' && !/\b422\b/.test(m.text()) && errors.push(`${p.url()}: ${m.text()}`))
   p.on('pageerror', (e) => errors.push(`${p.url()}: ${e}`))
 }
 watch(page)
@@ -93,7 +94,7 @@ const enterPin = async (pin) => {
 try {
   await page.request.post(`${BASE}/api/demo/reset`)
 
-  // 1. Sign up: QR, the credential, scan, consent, a wrong PIN, proving, success.
+  // 1. Sign up: QR, the credential, scan, consent, PIN, proving, success.
   step('1. sign up')
   await page.goto(BASE)
   await ready(page)
@@ -123,11 +124,7 @@ try {
   await shotScrolledIfLonger('signup-consent-scrolled')
   await phone.getByRole('button', { name: 'Share' }).click()
   await guide('pin')
-  await enterPin('000000')
-  await phone.getByText('You have entered an incorrect pin').waitFor({ timeout: 10_000 })
-  await guide('wrong-pin')
-  await shot('wrong-pin')
-  await enterPin(PIN)
+  await enterPin(anyPin())
   await phone.getByText('Presentation sent successfully').waitFor({ timeout: 30_000 })
   await guide('proving', { settle: 0 })
   await shot('proof', { settle: 0 })
@@ -184,7 +181,7 @@ try {
   await shot('teenspace-consent')
   await shotScrolledIfLonger('teenspace-consent-scrolled')
   await phone.getByRole('button', { name: 'Share' }).click()
-  await enterPin(PIN)
+  await enterPin(anyPin())
   await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
   await guide('age-verified')
   await openDetails()
@@ -236,7 +233,7 @@ try {
   await readRequest()
   await guide('consent')
   await phone.getByRole('button', { name: 'Share' }).click()
-  await enterPin(PIN)
+  await enterPin(anyPin())
   await page.getByText('Account banned').waitFor({ timeout: 30_000 })
   await guide('signup-refused')
   await openDetails()
@@ -259,7 +256,7 @@ console.log(`phone traffic:\n  ${net.join('\n  ')}`)
 // The use cases, as the phone's traffic shows them.
 const count = (line) => net.filter((l) => l === line).length
 const expect = [
-  ['a wrong PIN is refused with 401', count('/api/wallet/sign 401') === 1],
+  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 3],
   ['c/afterdark: the wallet answers access_denied, once', count('response_uri error=access_denied 200') === 1],
   ['three presentations proved: sign-up, c/teenspace, the second sign-up', count('/api/wallet/prove 200') === 3],
   ['three vp_token responses', count('response_uri vp_token 200') === 3],
