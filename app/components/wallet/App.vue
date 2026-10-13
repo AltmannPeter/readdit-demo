@@ -130,8 +130,10 @@ function toPin() {
 
 const ms = (n?: number, simulated?: boolean) => (n == null ? undefined : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms${simulated ? ' (simulated)' : ''}`)
 
-/** How long the progress screen stays up at least, so its steps can be read; the times it shows are measured. */
+/** How long the progress screen stays up at least, and the completed list after the last step, so the
+ *  steps can be read; the times it shows are measured. */
 const MIN_PROGRESS_MS = 1500
+const MIN_COMPLETED_MS = 600
 const wait = (ms: number) => new Promise((r) => timers.push(setTimeout(r, ms)))
 
 async function onPin(pin: string) {
@@ -162,7 +164,7 @@ async function onPin(pin: string) {
     set(3, { state: 'done' })
     workingTitle.value = 'Presentation sent successfully'
     history.value = [{ audience: host, at: Date.now() }, ...history.value]
-    await wait(Math.max(0, MIN_PROGRESS_MS - (Date.now() - shownAt)))
+    await wait(Math.max(MIN_COMPLETED_MS, MIN_PROGRESS_MS - (Date.now() - shownAt)))
     screen.value = 'done'
   } catch (e) {
     const code = (e as Error).message

@@ -29,6 +29,18 @@ const watch = (p) => {
 }
 watch(page)
 
+// What the phone sends: the prover routes' statuses and what it posts to response_uri.
+const net = []
+page.on('response', (r) => {
+  const u = new URL(r.url())
+  const req = r.request()
+  if (u.pathname.startsWith('/api/wallet/sign') || u.pathname.startsWith('/api/wallet/prove')) net.push(`${u.pathname} ${r.status()}`)
+  if (u.pathname.startsWith('/api/vp/response/')) {
+    const form = new URLSearchParams(req.postData() ?? '')
+    net.push(`response_uri ${form.get('error') ? `error=${form.get('error')}` : 'vp_token'} ${r.status()}`)
+  }
+})
+
 const phone = page.locator('[role=dialog] section').nth(1)
 let n = 0
 const shot = async (name, target = page, { settle = 400 } = {}) => {
@@ -216,6 +228,19 @@ try {
   process.exit(1)
 }
 
-console.log(errors.length ? `console errors:\n${errors.join('\n')}` : 'ok, no console errors')
+console.log(`phone traffic:\n  ${net.join('\n  ')}`)
+// The use cases, as the phone's traffic shows them.
+const count = (line) => net.filter((l) => l === line).length
+const expect = [
+  ['a wrong PIN is refused with 401', count('/api/wallet/sign 401') === 1],
+  ['c/afterdark: the wallet answers access_denied, once', count('response_uri error=access_denied 200') === 1],
+  ['three presentations proved: sign-up, c/teenspace, the second sign-up', count('/api/wallet/prove 200') === 3],
+  ['three vp_token responses', count('response_uri vp_token 200') === 3],
+]
+for (const [what, ok] of expect) {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)
+  if (!ok) errors.push(`expected: ${what}`)
+}
+console.log(errors.length ? `errors:\n${errors.join('\n')}` : 'ok, no console errors')
 await browser.close()
 process.exit(errors.length ? 1 : 0)
