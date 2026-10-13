@@ -10,7 +10,7 @@ The demo has three views, each in its own browser window:
 
 | View | Address | Who it is for |
 | --- | --- | --- |
-| **Site** | http://localhost:3000 | The audience: Readdit and the phone |
+| **Site** | http://localhost:3000 | The audience: Readdit, the phone and the guide panel |
 | **Technical** | http://localhost:3000/tech | Anyone who wants to see what happens underneath |
 | **Moderation** | http://localhost:3000/mod | The moderator: bans and demo reset |
 
@@ -61,23 +61,29 @@ archive (`native/vega`).
 
 ## 2. The site view
 
-**http://localhost:3000** is Readdit as the audience sees it. Log in, sign up and age checks open a
-dialog with a QR code on the left and the person's phone on the right.
+**http://localhost:3000** is Readdit as the audience sees it, with the guide panel on the right.
+Log in, sign up and age checks open a dialog with a QR code on the left and the person's phone on
+the right.
 
-On the phone (SIROS ID):
+On the phone (SIROS ID), the screens and their wording follow the SIROS ID wallet:
 
 - **The round QR button** at the bottom reads the code on screen.
-- **Request to Share Data** shows who asks (name, domain, `client_id`, the certificate that signed
-  the request), exactly what the request discloses (the pseudonym for this site, which the wallet
-  computes and shows, and what the rulebook says about who can link it; the age range if asked),
-  what else the site sees (issuer, time of the proof, proof method), and what is not shared.
-  **Share** accepts; **Decline** declines, and nothing is shared.
-- **PIN:** `123456`. You can tap it or type it on the keyboard. A wrong PIN is rejected.
-- While proving, the phone lists the steps with their measured times: device key signature,
-  witness, proof, sending.
-- **The "Age and pseudonym" card** opens the credential on the phone: date of birth, seed
-  commitment, issuer, validity, device key. **Dataset** opens the full details in a new window.
-  Allow pop-ups for localhost if the browser blocks it.
+- **Request to Share Data** shows the requester (name and domain) and the requested information
+  in the credential's box: a pseudonym specific to the site, and the age range when the site asks
+  for one. **Share** accepts; **Decline** declines, and nothing is shared.
+- **Enter the Pin:** `123456`, then **Submit**. You can tap the digits or type them. A wrong PIN is
+  rejected and the wallet asks again.
+- While proving and sending, the phone shows "Creating presentation...", then "Sending
+  response...", then "Success!".
+- **The "Age and pseudonym" card** opens the credential: birth date, issuance and expiry dates,
+  and **Presentations**, the list of presentations made with it.
+
+**The guide panel** follows the flow by itself. For the current step it shows a title and a short
+summary; **Details** opens the technical facts of that step: the request, the pseudonym's properties
+under `known-offender-matching-ssc`, what is and is not shared, the proof's measured time and size,
+and what Readdit checks. All of it is derived from the actual request, credential and metrics.
+The panel's button at the top right collapses it to a narrow strip; the browser remembers the
+choice. Its footer links to the technical and moderation views.
 
 The demo person is 15 years old (born 14 March 2011).
 
@@ -85,7 +91,7 @@ Communities:
 
 - **Open communities** (c/photography, c/cooking and others) need only a login.
 - **c/teenspace** is for ages 13–17. The demo person gets in.
-- **c/afterdark** is for ages 18+. The wallet says the requirement is not met, and nothing is shared.
+- **c/afterdark** is for ages 18+. The wallet shows "Requirement Not Met", and nothing is shared.
 
 Logged-in users can vote, join communities and comment.
 
@@ -114,7 +120,7 @@ session; the chips under the service cards select earlier ones.
 - **Circuit.** The circuit's public inputs in order, and for each one whether it comes from the
   presentation or Readdit computes it itself.
 - **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
-- **What it takes: estimates per step.** Setup, precompute, prove, send and verify, for Longfellow
+- **Estimates per step.** Setup, precompute, prove, send and verify, for Longfellow
   and VegaMC (in use). Desktop times are measurements on Apple M5 and AMD Ryzen 9. Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
@@ -138,7 +144,7 @@ gives Readdit the same pseudonym.
 
 ## 5. A full run through all three views
 
-1. **Site:** log in (Scan, Continue, PIN `123456`). You get a pseudonym such as `u/golden-lynx-8604`.
+1. **Site:** sign up (scan, **Share**, PIN `123456`). You get a pseudonym such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
 2. **Site:** open c/afterdark. The phone says the requirement is not met. **Technical:** the
    session ends with an error response, and no proof is created.
@@ -158,7 +164,7 @@ If the addon fails (or cannot be built on the presentation laptop), switch to th
 offline simulation. It needs no addon and no network.
 
 **During the demo:** in the moderation view, set **Proof backend** to **Offline**. If a wallet
-dialog shows "The verification service is not available", click **Try again**. The site looks and
+dialog shows "Verification is not available right now", click **Try again**. The site looks and
 behaves the same. The technical view shows **Offline simulation** and marks its numbers as
 simulated.
 
@@ -166,7 +172,7 @@ simulated.
 
 ```sh
 npm run dev:offline                    # development server
-npm run build && npm run start:offline # built site; more robust for a presentation
+npm run build && npm run start:offline # built site, without the development server
 ```
 
 With Docker, add `NUXT_BACKEND_MODE: offline` under `web: environment:` in `docker-compose.yml`,
@@ -203,11 +209,10 @@ The demo person's birth date is in the credential itself (`app/wallet/demo-walle
 
 ## Troubleshooting
 
-- **"The wallet service is not available" on the phone.** The Vega addon is not loaded. The
-  technical view's prover card says why. Run `npm run build:native` and restart the site, or switch
-  to **Offline** in the moderation view.
+- **"Connection Error" on the phone.** The Vega addon is not loaded. The technical view's prover
+  card says why. Run `npm run build:native` and restart the site, or switch to **Offline** in the
+  moderation view.
 - **Port already in use** (3000). Stop whatever uses it. On macOS or Linux, `lsof -i :3000` finds it.
-- **The credential window does not open.** Allow pop-ups for localhost.
 - **`npm install` warns about vulnerabilities.** They are in Nuxt's build and dev tools, not in the
   demo code. Do not run `npm audit fix --force`: it downgrades Nuxt and breaks the site.
 - **`npm install` warns about install scripts** (esbuild, fsevents, cbor-extract). The demo works
@@ -255,7 +260,8 @@ backend would plug into `server/utils/services.ts` as the Vega addon does.
   verified.
 - `AGENTS.md` – design decisions, architecture, open work. Written for developers and coding agents.
 - `docs/backend-api.md` – the prover and verifier interface (the Vega addon).
-- `scripts/demo-flow.mjs` – runs the walkthrough headlessly and saves screenshots. Needs Playwright:
+- `scripts/demo-flow.mjs` – runs the walkthrough headlessly, checks that the guide panel follows
+  each step, and saves a viewport screenshot of each step. Needs Playwright:
   `npm i --no-save playwright && npx playwright install chromium`, then
   `node scripts/demo-flow.mjs http://localhost:3000`. The PR's screenshots are in
   `docs/screenshots/vega-siros-wallet/`.

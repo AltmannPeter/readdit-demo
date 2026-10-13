@@ -101,6 +101,8 @@ Verifier.verify(input: string): Promise<string>
 `services.ts` runs step 2 and step 3 within one call (`prover.prove`), so a witness never outlives
 the request that made it. The phone's routes are `POST /api/wallet/sign` (step 1) and
 `POST /api/wallet/prove` (steps 2 and 3); they record each step in the session's trace for `/tech`.
+A refusal comes back with its HTTP status, a plain status text (`proverMessage` in `services.ts`)
+and the code in the error body's `data.error`, which the phone reads (`app/wallet/prover.ts`).
 
 ### `info`
 
@@ -198,7 +200,7 @@ Prover refusals:
 | Status | Code | Meaning |
 | --- | --- | --- |
 | 401 | `invalid_pin` | Wrong PIN. The phone asks again. |
-| 422 | `unsatisfiable` | A predicate does not hold for the holder's data (birth date outside [E, C], credential not valid now). The phone shows "Requirement not met" and sends `access_denied`. |
+| 422 | `unsatisfiable` | A predicate does not hold for the holder's data (birth date outside [E, C], credential not valid now). The phone shows "Requirement Not Met" and sends `access_denied`. |
 | 400 | `unsupported_circuit`, `unsupported_request`, `unsupported_config`, `unsupported_function` | The request cannot be proven with this circuit. |
 | 400 | `bad_credential`, `bad_request` | The credential material or the call is malformed or inconsistent. |
 | 503 | `unavailable` | The addon is not built or could not load (`services.ts`). |
