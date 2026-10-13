@@ -22,9 +22,10 @@ export interface ProveOutput {
 
 export type ProveError = 'invalid_pin' | 'unsatisfiable' | 'unavailable' | 'error'
 
+/** The route's refusal code (`data.error` in the error body), or the HTTP status class. */
 function failure(e: unknown): Error {
-  const err = e as { statusCode?: number; data?: { statusMessage?: string } }
-  const code = err.data?.statusMessage
+  const err = e as { statusCode?: number; data?: { data?: { error?: string } } }
+  const code = err.data?.data?.error
   return new Error(code === 'invalid_pin' || code === 'unsatisfiable' ? code : err.statusCode === 503 ? 'unavailable' : 'error')
 }
 

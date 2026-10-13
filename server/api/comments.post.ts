@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
   const { postId, body } = await readBody<{ postId?: string; body?: string }>(event)
   const b = await browserSession(event)
   const account = b.data.pseudonym ? store().accounts.get(b.data.pseudonym) : undefined
-  if (!account || account.banned) throw createError({ statusCode: 401, statusMessage: 'log in first' })
+  if (!account || account.banned) throw createError({ statusCode: 401, statusMessage: 'Log in to comment.' })
   const post = findPost(String(postId))
   const text = String(body ?? '').trim()
   if (!post || !text || text.length > 2000) throw createError({ statusCode: 400 })

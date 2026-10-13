@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   const method = event.method
   if (method !== 'GET' && method !== 'POST') throw createError({ statusCode: 405 })
   const s = getVpSession(getRouterParam(event, 'id')!)
-  if (s.status !== 'waiting') throw createError({ statusCode: 410, statusMessage: 'request already used' })
+  if (s.status !== 'waiting') throw createError({ statusCode: 410, statusMessage: 'This request has already been used.' })
 
   let walletMetadata: WalletMetadata | undefined
   let walletNonce: string | undefined
@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
       try {
         walletMetadata = JSON.parse(form.wallet_metadata)
       } catch {
-        throw createError({ statusCode: 400, statusMessage: 'invalid wallet_metadata' })
+        throw createError({ statusCode: 400, statusMessage: 'wallet_metadata is not valid.' })
       }
     }
     walletNonce = form?.wallet_nonce || undefined

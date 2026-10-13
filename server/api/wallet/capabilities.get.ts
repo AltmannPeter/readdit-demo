@@ -4,6 +4,6 @@ export default defineEventHandler(async () => {
     const info = await prover.info()
     return { circuits: info.circuits }
   } catch {
-    throw createError({ statusCode: 503, statusMessage: 'prover unavailable' })
+    throw createError({ statusCode: 503, statusMessage: 'The prover is not available.' })
   }
 })

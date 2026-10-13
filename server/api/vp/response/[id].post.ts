@@ -10,8 +10,8 @@ export default defineEventHandler(async (event) => {
   const raw = (await readRawBody(event, 'utf8')) ?? ''
   const form = Object.fromEntries(new URLSearchParams(raw))
 
-  if (s.status !== 'scanned' || !s.request) throw createError({ statusCode: 400, statusMessage: 'unexpected response' })
-  if (form.state !== s.state) throw createError({ statusCode: 400, statusMessage: 'state mismatch' })
+  if (s.status !== 'scanned' || !s.request) throw createError({ statusCode: 400, statusMessage: 'This session is not waiting for a response.' })
+  if (form.state !== s.state) throw createError({ statusCode: 400, statusMessage: 'state does not match this session.' })
   s.status = 'responded'
 
   const fail = (reason: 'denied' | 'invalid_request' | 'invalid' | 'unavailable', detail?: string) => {

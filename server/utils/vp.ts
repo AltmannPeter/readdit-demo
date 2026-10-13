@@ -35,7 +35,7 @@ export async function verifierOffer(): Promise<CircuitZkFormats> {
 
 export function getVpSession(id: string) {
   const s = store().sessions.get(id)
-  if (!s) throw createError({ statusCode: 404, statusMessage: 'unknown session' })
+  if (!s) throw createError({ statusCode: 404, statusMessage: 'Unknown session.' })
   if (Date.now() > s.expiresAt && s.status !== 'completed' && s.status !== 'failed') {
     s.status = 'failed'
     s.outcome = { ok: false, reason: 'expired' }
@@ -47,7 +47,7 @@ export function getVpSession(id: string) {
 export async function getOwnedVpSession(event: H3Event, id: string) {
   const s = getVpSession(id)
   const b = await browserSession(event)
-  if (s.ownerSid !== b.data.sid) throw createError({ statusCode: 403, statusMessage: 'not your session' })
+  if (s.ownerSid !== b.data.sid) throw createError({ statusCode: 403, statusMessage: 'This session belongs to another browser.' })
   return { s, b }
 }
 

@@ -46,6 +46,6 @@ export default defineEventHandler(async (event) => {
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : 'error'
     if (s) addTrace(s, 'prove', 'Proof not created', { error: code, ...(e instanceof ServiceError && e.detail && { detail: e.detail }) })
-    throw createError({ statusCode: e instanceof ServiceError ? e.status : 500, statusMessage: code, data: { error: code } })
+    throw createError({ statusCode: e instanceof ServiceError ? e.status : 500, statusMessage: proverMessage(code), data: { error: code } })
   }
 })

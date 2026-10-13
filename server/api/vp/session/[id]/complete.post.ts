@@ -8,7 +8,7 @@ export default defineEventHandler(async (event) => {
   const { s, b } = await getOwnedVpSession(event, getRouterParam(event, 'id')!)
   if (s.completion) return s.completion
   if (s.status === 'failed' && s.outcome && !s.outcome.ok) return (s.completion = { ok: false, kind: s.outcome.reason })
-  if (s.status !== 'verified' || !s.outcome?.ok) throw createError({ statusCode: 409, statusMessage: 'not verified yet' })
+  if (s.status !== 'verified' || !s.outcome?.ok) throw createError({ statusCode: 409, statusMessage: 'The presentation has not been verified yet.' })
 
   const { pseudonym } = s.outcome
   if (s.purpose.kind === 'signin') {

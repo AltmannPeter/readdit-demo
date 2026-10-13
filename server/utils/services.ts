@@ -127,6 +127,17 @@ export type VerifyResult =
   | { ok: true; circuit_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
   | { ok: false; reason: string; code?: string; input?: string | null; metrics?: VerifyMetrics }
 
+/** The HTTP status text for a prover refusal code (docs/backend-api.md, "Prover refusals"). The code
+ *  itself travels in the error body as `data.error`. */
+export function proverMessage(code: string): string {
+  if (code === 'invalid_pin') return 'The PIN is not correct.'
+  if (code === 'unsatisfiable') return 'The credential does not meet the request.'
+  if (code.startsWith('unsupported_')) return 'The request cannot be proven with this circuit.'
+  if (code === 'bad_credential' || code === 'bad_request') return 'The credential or the call is not valid.'
+  if (code === 'unavailable') return 'The prover is not available.'
+  return 'The prover could not complete the request.'
+}
+
 export class ServiceError extends Error {
   constructor(
     public service: 'prover' | 'verifier',
