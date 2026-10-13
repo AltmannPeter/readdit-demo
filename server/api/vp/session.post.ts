@@ -6,14 +6,15 @@ import type { VpPurpose, VpSessionRecord } from '../../utils/store'
 
 /**
  * Site: start a cross-device OpenID4VP session.
- * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community }.
+ * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community },
+ * and optionally `origin`, the page's address, for request_uri and response_uri (see publicOrigin).
  * signin with `community` (a logged-out visitor at an age-restricted community): one request for
  * the pseudonym and the community's age range, which logs in (or signs up) and records the age.
  * An age check alone needs a logged-in account, and only when the site cannot decide from the ages
  * already proven (shared/utils/age.ts, decideGate): a settled gate gets no wallet request.
  */
 export default defineEventHandler(async (event) => {
-  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown }>(event)
+  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown; origin: unknown }>(event)
   const b = await browserSession(event)
 
   let purpose: VpPurpose
@@ -52,7 +53,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const cfg = useRuntimeConfig(event)
-  const origin = publicOrigin(event)
+  const origin = publicOrigin(event, body.origin)
   const id = randomHex(16)
   const ttl = sessionTtlMs()
   const query = buildCredentialQuery(gate ? gateRange(gate, todayISO()) : undefined)
@@ -80,17 +81,19 @@ export default defineEventHandler(async (event) => {
 
 /**
  * The site's address as the browser sees it, for request_uri and response_uri. Behind a proxy that
- * rewrites the Host header (GitHub Codespaces forwards to localhost:3000), the browser's Origin
- * header is the reliable one; without it (a script, not a browser), the forwarded host and protocol.
+ * rewrites the request (GitHub Codespaces forwards to localhost:3000 and does not keep the public
+ * address), the server cannot tell it from the request, so the page sends its own
+ * (`location.origin`). Then the browser's Origin header; without either (a script), the request's
+ * forwarded host and protocol. The address only decides where this session's own wallet requests go.
  */
-function publicOrigin(event: Parameters<typeof getRequestURL>[0]): string {
-  const header = getRequestHeader(event, 'origin')
-  if (header) {
+function publicOrigin(event: Parameters<typeof getRequestURL>[0], fromPage: unknown): string {
+  for (const candidate of [fromPage, getRequestHeader(event, 'origin')]) {
+    if (typeof candidate !== 'string') continue
     try {
-      const u = new URL(header)
+      const u = new URL(candidate)
       if (u.protocol === 'https:' || u.protocol === 'http:') return u.origin
     } catch {
-      /* not a URL: fall back */
+      /* not a URL: try the next */
     }
   }
   return getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin

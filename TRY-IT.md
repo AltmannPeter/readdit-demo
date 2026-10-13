@@ -1,7 +1,6 @@
 # Try Readdit in your browser
 
-Readdit runs in a GitHub Codespace: a computer in the cloud that GitHub starts for you. You need a
-GitHub account and nothing else. It is free within GitHub's monthly Codespaces allowance.
+Readdit runs in a GitHub Codespace.
 
 ## Start it
 
@@ -22,7 +21,7 @@ You can ignore the code editor that opens. Everything happens in the Readdit tab
 
 `GETTING-STARTED.md` describes the views and a full run through the demo.
 
-Your codespace is yours alone: other people trying the demo do not see your accounts or bans.
+Other people cannot see your codespace.
 
 ## When you are done
 

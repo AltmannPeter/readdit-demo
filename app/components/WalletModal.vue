@@ -131,8 +131,8 @@ async function start() {
       method: 'POST',
       body:
         p.kind === 'signin'
-          ? { purpose: 'signin', intent: p.intent, ...(p.community && { community: p.community }) }
-          : { purpose: 'age', community: p.community },
+          ? { purpose: 'signin', intent: p.intent, ...(p.community && { community: p.community }), origin: window.location.origin }
+          : { purpose: 'age', community: p.community, origin: window.location.origin },
     })
   } catch (e) {
     if (mine !== run) return
