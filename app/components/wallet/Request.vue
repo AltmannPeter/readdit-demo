@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import type { ConsentView } from '~/wallet/engine'
+import { sidDate } from '~/wallet/holder'
 
 // SIROS ID presentation request (src/components/flows/PresentCredentialsFlow, PresentationOverviewScreen):
 // "Request to Share Data", the requester's name and domain, the requested information in a box
 // headed by the credential, "Switch credential" with the number of other matching credentials
 // when there are any, and Share / Decline in a fixed bar. The fields come from the request
-// (app/wallet/engine.ts, consentFor). With several matching credentials, the box also shows the
-// chosen one's expiry date, which tells two credentials of the same type apart.
-const props = defineProps<{ consent: ConsentView; credentialTitle: string; validUntil?: string; alternatives?: number }>()
+// (app/wallet/engine.ts, consentFor). Under its header the box shows the chosen credential's birth
+// date, which tells two credentials of the same type apart; it stays on the phone, and is not among
+// the requested information.
+const props = defineProps<{ consent: ConsentView; credentialTitle: string; birthDate?: string; validUntil?: string; alternatives?: number }>()
 defineEmits<{ accept: []; cancel: []; switch: [] }>()
-const expiry = computed(() =>
-  props.validUntil ? new Date(props.validUntil).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '',
-)
+const birth = computed(() => (props.birthDate ? sidDate(props.birthDate) : ''))
+const expiry = computed(() => (props.validUntil ? sidDate(props.validUntil) : ''))
 </script>
 
 <template>
@@ -34,7 +35,10 @@ const expiry = computed(() =>
                 <h3 class="font-bold" aria-live="polite">{{ props.credentialTitle }}</h3>
                 <WalletSirosIcon name="id-card" class="size-6" />
               </div>
-              <p v-if="props.alternatives && expiry" class="-mt-2 text-sm text-sid-gray-700">Expiry Date: {{ expiry }}</p>
+              <div v-if="birth || expiry" class="-mt-2 text-sm">
+                <p v-if="birth" class="font-semibold text-sid-gray-900">Birth Date: {{ birth }}</p>
+                <p v-if="expiry" class="text-xs text-sid-gray-700">Expiry Date: {{ expiry }}</p>
+              </div>
               <dl>
                 <template v-for="(f, i) in props.consent.fields" :key="f.name">
                   <dt class="font-bold" :class="i > 0 && 'mt-2 pt-2'">{{ f.name }}</dt>

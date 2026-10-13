@@ -13,7 +13,7 @@ import type { WalletPurpose } from '~/composables/useWallet'
 import type { CommunityAccess } from '~/composables/useCommunityAccess'
 import type { ConsentView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
-import { credentialLabel } from '~/wallet/holder'
+import { credentialLabel, neverExpires } from '~/wallet/holder'
 import { ageText, birthRangeText, fmtDate, parseAuthorizationUrl } from '~/wallet/engine'
 
 export interface GuideRow {
@@ -209,7 +209,7 @@ function credentialSection(c: CredentialView | null): GuideSection | null {
       { label: 'Issuer', value: c.issuer.country ? `${c.issuer.name} (${c.issuer.country})` : c.issuer.name },
       { label: 'Issuer signature', value: `${c.mso.signatureAlgorithm}, ${c.issuer.documentSigner}` },
       { label: 'Attribute digests', value: c.mso.digestAlgorithm },
-      { label: 'Valid', value: `${fmtDate(c.validity.validFrom)} to ${fmtDate(c.validity.validUntil)}` },
+      { label: 'Valid', value: `From ${fmtDate(c.validity.validFrom)}; ${neverExpires(c.validity.validUntil) ? 'no expiry (9999-12-31)' : `until ${fmtDate(c.validity.validUntil)}`}` },
       { label: 'Device key', value: `${c.deviceKey.kty} ${c.deviceKey.crv}` },
       { label: 'Size', value: `${c.sizes.issuerSigned.toLocaleString('en-GB')} bytes` },
     ],

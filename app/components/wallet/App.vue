@@ -7,7 +7,7 @@ import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
 import { analyzeRequest, consentFor, parseAuthorizationUrl } from '~/wallet/engine'
 import { TransportError, httpTransport } from '~/wallet/transport'
-import { loadCredentials } from '~/wallet/holder'
+import { loadCredentials, nymCard } from '~/wallet/holder'
 import { ProverError, prove, unlockAndSign } from '~/wallet/prover'
 import { findCircuit } from '#shared/registry/circuits'
 
@@ -304,7 +304,8 @@ onBeforeUnmount(() => {
           key="request"
           :consent="consent"
           :credential-title="current?.title ?? ''"
-          :valid-until="current?.validity.validUntil"
+          :birth-date="current?.attributes.birth_date"
+          :valid-until="current ? nymCard(current).validUntil : undefined"
           :alternatives="alternatives.length"
           @accept="toPin"
           @cancel="refuse('declined', 'request')"

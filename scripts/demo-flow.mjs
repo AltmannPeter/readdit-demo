@@ -105,7 +105,7 @@ try {
   await guide('signin-qr')
   await shot('signup-qr')
   await phone.getByRole('button', { name: 'Open Age and pseudonym details' }).first().click()
-  await phone.getByText('Birth Date:').waitFor()
+  await phone.getByText('Birth Date:', { exact: true }).waitFor()
   await guide('credential')
   await openDetails()
   await guidePanel.getByText('Document type').waitFor()

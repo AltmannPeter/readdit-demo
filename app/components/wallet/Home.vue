@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CredentialView } from '~/wallet/holder'
-import { nymCard, pidCard } from '~/wallet/holder'
+import { nymCard, pidCard, sidDate } from '~/wallet/holder'
 
 // SIROS ID home (src/pages/Home/Home.jsx): "Credentials" with the view toggle, the credential
 // cards (horizontal slider with stacked cards, or a list), and the recent history of the shown card.
@@ -20,7 +20,7 @@ const recent = computed(() => {
   const c = shown.value.credential
   return c ? props.history.filter((h) => h.credential === c.index).slice(0, 3) : []
 })
-const expiry = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '')
+const born = (iso?: string) => (iso ? `, birth date ${sidDate(iso)}` : '')
 const fmt = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 </script>
 
@@ -49,7 +49,7 @@ const fmt = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit',
           <button
             v-if="shown.credential"
             class="relative block w-full rounded-xl text-left shadow-md transition-shadow hover:shadow-lg"
-            :aria-label="`Open ${shown.display.title} details, expiry date ${expiry(shown.display.validUntil)}`"
+            :aria-label="`Open ${shown.display.title} details${born(shown.display.birthDate)}`"
             @click="emit('open', shown.credential.index)"
           >
             <WalletCard :credential="shown.display" />
@@ -83,7 +83,7 @@ const fmt = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit',
           <button
             v-if="card.credential"
             class="block rounded-xl text-left shadow-md hover:shadow-lg"
-            :aria-label="`Open ${card.display.title} details, expiry date ${expiry(card.display.validUntil)}`"
+            :aria-label="`Open ${card.display.title} details${born(card.display.birthDate)}`"
             @click="emit('open', card.credential.index)"
           >
             <WalletCard :credential="card.display" />

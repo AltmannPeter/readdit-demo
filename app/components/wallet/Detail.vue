@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { CredentialView } from '~/wallet/holder'
-import { nymCard } from '~/wallet/holder'
+import { neverExpires, nymCard } from '~/wallet/holder'
 
 // SIROS ID credential page on a phone (src/pages/Home/Credential.jsx, CredentialInfo.jsx): back
 // arrow and name, the card, the claims as "label: value" rows with the wallet's own labels
 // (Birth Date, Issuance Date, Expiry Date), and the Presentations button. The wallet's Dataset
 // button, which shows the raw claims, is left out.
+// A credential that does not expire (validUntil 9999-12-31) has no Expiry Date row, as the
+// wallet shows no expiry for it.
 const props = defineProps<{ credential: CredentialView }>()
 const emit = defineEmits<{ back: []; scan: []; presentations: [] }>()
 
@@ -16,7 +18,7 @@ const rows = computed(() => {
   return [
     { label: 'Birth Date', value: date(c.attributes.birth_date) },
     { label: 'Issuance Date', value: date(c.validity.signed) },
-    { label: 'Expiry Date', value: date(c.validity.validUntil) },
+    ...(neverExpires(c.validity.validUntil) ? [] : [{ label: 'Expiry Date', value: date(c.validity.validUntil) }]),
   ]
 })
 </script>

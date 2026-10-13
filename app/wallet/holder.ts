@@ -121,10 +121,13 @@ async function decode(holder: WalletMaterial, index: number): Promise<Credential
   }
 }
 
-/** A credential in the guide's words: its type, birth date and expiry, which tell the two apart. */
+/** validUntil 9999-12-31T23:59:59Z, the farthest a tdate holds: the credential does not expire. */
+export const neverExpires = (validUntil: string) => validUntil.startsWith('9999-12-31')
+
+/** A credential in the guide's words: its type and birth date, which tell the two apart, and its expiry if it has one. */
 export function credentialLabel(c: CredentialView): string {
   const d = (iso: string) => new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
-  return `${c.title}, born ${d(c.attributes.birth_date)}, expires ${d(c.validity.validUntil)}`
+  return `${c.title}, born ${d(c.attributes.birth_date)}${neverExpires(c.validity.validUntil) ? '' : `, expires ${d(c.validity.validUntil)}`}`
 }
 
 export interface DisplayCredential {
@@ -133,12 +136,26 @@ export interface DisplayCredential {
   /** Card colour; the issuer gives no display metadata, so the wallet uses its brand colour. */
   background: string
   text: string
+  /** The holder's birth date (YYYY-MM-DD), on the holder's own screens; the tell between two credentials. */
+  birthDate?: string
+  /** Absent when the credential does not expire. */
   validUntil?: string
 }
+
+/** DD/MM/YYYY, as the SIROS ID wallet shows dates. */
+export const sidDate = (iso: string) =>
+  new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })
 
 /** Static card shown next to nym_auth so the wallet looks lived-in. Not used in any flow. */
 export const pidCard: DisplayCredential = { title: 'Personal ID', issuer: 'Demo Issuer', background: '#D3D3D3', text: '#000000' }
 
 export function nymCard(c: CredentialView | null): DisplayCredential {
-  return { title: c?.title ?? NYM_TITLE, issuer: c?.issuer.name ?? '', background: '#1C4587', text: '#FFFFFF', validUntil: c?.validity.validUntil }
+  return {
+    title: c?.title ?? NYM_TITLE,
+    issuer: c?.issuer.name ?? '',
+    background: '#1C4587',
+    text: '#FFFFFF',
+    birthDate: c?.attributes.birth_date,
+    validUntil: c && !neverExpires(c.validity.validUntil) ? c.validity.validUntil : undefined,
+  }
 }

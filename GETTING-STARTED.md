@@ -84,8 +84,9 @@ On the phone (SIROS ID), the screens and their wording follow the SIROS ID walle
 - **Cancel** at the PIN declines as **Decline** does: "Sharing Cancelled", and nothing is shared.
 - A QR code works once and for 10 minutes. Scanning it again, or after it expired, shows
   "Request Expired"; the dialog's **Try again** shows a new one.
-- **The "Age and pseudonym" cards** open each credential: birth date, issuance and expiry dates,
-  and **Presentations**, the list of presentations made with it.
+- **The "Age and pseudonym" cards** show each holder's birth date, and open the credential: birth
+  date, issuance date, and **Presentations**, the list of presentations made with it. The
+  credentials do not expire, so no expiry date is shown.
 
 **The guide panel** follows the flow by itself. For the current step it shows a title and a short
 summary; **Details** opens the technical facts of that step: the request, the pseudonym's properties
@@ -95,9 +96,9 @@ it, all on this machine), and what Readdit checks. All of it is derived from the
 The panel's button at the top right collapses it to a narrow strip; the browser remembers the
 choice. Its footer links to the technical and moderation views.
 
-The wallet holds two "Age and pseudonym" credentials, told apart by their expiry dates: the demo
-person's, 15 years old (born 14 March 2011, expires 13 October 2027), which every request uses
-first, and an adult's (born 20 May 1990, expires 11 October 2028). Each has its own secret seed, so
+The wallet holds two "Age and pseudonym" credentials, told apart by the birth date on each card:
+the demo person's, 15 years old (born 14 March 2011), which every request uses first, and an
+adult's (born 20 May 1990). Each has its own secret seed, so
 each gives Readdit a different pseudonym and so a different account. When both match a request,
 **Switch credential** on the request screen, or on "Requirement Not Met", chooses the other one.
 
@@ -237,15 +238,17 @@ them before writing:
 
 ```sh
 cd native/vega
-cargo run --release -p nym-issuer -- --holder 2011-03-14:366 --holder 1990-05-20:730 \
+cargo run --release -p nym-issuer -- --holder 2011-03-14 --holder 1990-05-20 \
+  --valid-from 2026-10-13 --valid-until 9999-12-31T23:59:59Z --keep ../../app/wallet/demo-wallet.json \
   --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem
 ```
 
-Each credential is valid from the day before issuing (`--valid-from`) for the number of days after
-its birth date (`:366`), or `--days` (default 366); the different validities give the two cards
-different expiry dates.
-The issuer's key is written nowhere. Each run makes new keys and seeds, so the pseudonyms and the
-accounts change; restart the site after it.
+The credentials do not expire: `validUntil` is `9999-12-31T23:59:59Z`, the farthest an mdoc tdate
+holds, and the Document Signer certificate's `notAfter` is `99991231235959Z`, RFC 5280's value for
+no well-defined expiration. `--keep` reuses each holder's device key and secret seed from the
+current wallet file, so the pseudonyms and the accounts stay the same; without it, each run makes
+new keys and seeds, and the pseudonyms change. `--days N` (or `--holder DATE:N`) gives a validity of
+N days instead. The issuer's key is written nowhere. Restart the site after a re-issue.
 
 ## Checks
 
