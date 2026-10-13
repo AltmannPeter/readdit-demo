@@ -20,11 +20,16 @@
 //!
 //! ```text
 //! nym-issuer --holder YYYY-MM-DD[:DAYS] [--holder ...] --wallet-out <file.json> --trust-out <file.pem>
-//!            [--valid-from YYYY-MM-DD] [--days N]
+//!            [--valid-from YYYY-MM-DD] [--days N | --valid-until YYYY-MM-DDThh:mm:ssZ] [--keep <file.json>]
 //! ```
 //! Each holder's validity runs from `--valid-from` (default: yesterday, UTC) 00:00:00Z for DAYS days
-//! (default `--days`, 366); the certificate runs one year longer than the longest. `--birth-date`
-//! is accepted for `--holder`.
+//! (default `--days`, 366), or to `--valid-until` for every holder; `9999-12-31T23:59:59Z` is the
+//! farthest a tdate holds, for a credential that does not expire. The certificate runs one year
+//! longer than the longest validity, and to 9999-12-31T23:59:59Z at most (RFC 5280 §4.1.2.5: no
+//! well-defined expiration). `--keep` reuses each holder's device key and secret_seed from an
+//! earlier wallet file, in order, so that the seed commitments, and so the pseudonyms, stay the
+//! same; only the issuer, the signatures and the dates change. `--birth-date` is accepted for
+//! `--holder`.
 
 use std::process::ExitCode;
 
@@ -58,6 +63,8 @@ struct Args {
   trust_out: String,
   valid_from: Date,
   days: i64,
+  valid_until: Option<Time>,
+  keep: Option<String>,
 }
 
 fn holder(value: &str) -> Result<Holder, String> {
@@ -71,6 +78,7 @@ fn holder(value: &str) -> Result<Holder, String> {
 fn args() -> Result<Args, String> {
   let mut it = std::env::args().skip(1);
   let (mut holders, mut wallet_out, mut trust_out, mut valid_from, mut days) = (Vec::new(), None, None, None, 366);
+  let (mut valid_until, mut keep) = (None, None);
   while let Some(flag) = it.next() {
     let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
     match flag.as_str() {
@@ -79,6 +87,8 @@ fn args() -> Result<Args, String> {
       "--trust-out" => trust_out = Some(value),
       "--valid-from" => valid_from = Some(dates::date(&value)?),
       "--days" => days = value.parse().map_err(|_| format!("--days: not a number: {value}"))?,
+      "--valid-until" => valid_until = Some(dates::date_time(&value)?),
+      "--keep" => keep = Some(value),
       other => return Err(format!("unknown option {other}")),
     }
   }
@@ -95,6 +105,8 @@ fn args() -> Result<Args, String> {
     trust_out: trust_out.ok_or("--trust-out is required")?,
     valid_from: valid_from.unwrap_or(yesterday),
     days,
+    valid_until,
+    keep,
   })
 }
 
@@ -132,13 +144,34 @@ fn document_signer(issuer: &SigningKey, not_before: &Time, not_after: &Time) -> 
   params.self_signed(&key_pair).map_err(|e| e.to_string())
 }
 
+/// A holder's device key and secret_seed from an earlier wallet file, checked to be consistent.
+fn kept(holder: &serde_json::Value, k: usize) -> Result<(SigningKey, [u8; 16]), String> {
+  let field = |path: &[&str]| -> Result<String, String> {
+    let mut v = holder;
+    for p in path {
+      v = v.get(p).ok_or_else(|| format!("--keep: holder {}: no {}", k + 1, path.join(".")))?;
+    }
+    v.as_str().map(str::to_string).ok_or_else(|| format!("--keep: holder {}: {} is not text", k + 1, path.join(".")))
+  };
+  let d: [u8; 32] = nym_vega::unb64url("device_key.d", &field(&["device_key", "d"])?)?
+    .try_into()
+    .map_err(|_| format!("--keep: holder {}: device_key.d is not 32 bytes", k + 1))?;
+  let device = SigningKey::from_bytes(&d.into()).map_err(|e| format!("--keep: holder {}: device_key.d: {e}", k + 1))?;
+  let point = device.verifying_key().to_encoded_point(false);
+  if b64url(point.x().ok_or("x")?) != field(&["device_key", "x"])? || b64url(point.y().ok_or("y")?) != field(&["device_key", "y"])? {
+    return Err(format!("--keep: holder {}: device_key.x and y are not the public key of d", k + 1));
+  }
+  let seed = nym_vega::unhex::<16>("secret_seed", &field(&["secret_seed"])?)?;
+  Ok((device, seed))
+}
+
 /// One holder's credential, device key and seed, signed by `issuer` with the Document Signer `ds`;
-/// checked against the profile's lengths and read back as the prover reads it.
-fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time) -> Result<serde_json::Value, String> {
-  let device = SigningKey::random(&mut OsRng);
+/// checked against the profile's lengths and read back as the prover reads it. `keep` reuses a
+/// device key and seed; without it both are fresh.
+fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time, keep: Option<(SigningKey, [u8; 16])>) -> Result<serde_json::Value, String> {
+  let (device, seed) = keep.unwrap_or_else(|| (SigningKey::random(&mut OsRng), random()));
   let device_point = device.verifying_key().to_encoded_point(false);
   let (dx, dy) = (device_point.x().ok_or("device x")?, device_point.y().ok_or("device y")?);
-  let seed: [u8; 16] = random();
   let ssc = sha256(&seed);
 
   let birth_item = item_bytes(0, &random::<16>(), BIRTH_DATE, full_date(birth_date));
@@ -225,16 +258,46 @@ fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, v
 fn run() -> Result<(), String> {
   let a = args()?;
   let valid_from = midnight(a.valid_from);
-  let until = |days: i64| -> Result<Time, String> { dates::from_unix(dates::unix(&valid_from)? + days * 86_400) };
-  let longest = a.holders.iter().map(|h| h.days.unwrap_or(a.days)).max().unwrap_or(a.days);
-  let cert_until = dates::from_unix(dates::unix(&until(longest)?)? + 365 * 86_400)?;
+  let until = |h: &Holder| -> Result<Time, String> {
+    match &a.valid_until {
+      Some(t) => Ok(*t),
+      None => dates::from_unix(dates::unix(&valid_from)? + h.days.unwrap_or(a.days) * 86_400),
+    }
+  };
+  let untils = a.holders.iter().map(until).collect::<Result<Vec<_>, _>>()?;
+  let from = dates::unix(&valid_from)?;
+  let mut longest = from;
+  for t in &untils {
+    let u = dates::unix(t)?;
+    if u <= from {
+      return Err("a validity must end after --valid-from".into());
+    }
+    longest = longest.max(u);
+  }
+  // One year past the longest validity, and at most 9999-12-31T23:59:59Z.
+  let farthest = dates::unix(&dates::date_time("9999-12-31T23:59:59Z")?)?;
+  let cert_until = dates::from_unix((longest + 365 * 86_400).min(farthest))?;
+
+  let previous: Vec<serde_json::Value> = match &a.keep {
+    Some(path) => {
+      let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+      let file: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
+      let list = file.get("holders").and_then(|h| h.as_array()).ok_or_else(|| format!("{path}: no holders list"))?.clone();
+      if list.len() != a.holders.len() {
+        return Err(format!("--keep: {path} has {} holders, --holder gives {}", list.len(), a.holders.len()));
+      }
+      list
+    }
+    None => Vec::new(),
+  };
 
   let issuer = SigningKey::random(&mut OsRng);
   let ds = document_signer(&issuer, &valid_from, &cert_until)?;
   let mut holders = Vec::new();
   for (k, h) in a.holders.iter().enumerate() {
-    println!("holder {} (born {}):", k + 1, h.birth_date.text());
-    holders.push(issue(&issuer, ds.der(), &h.birth_date, &valid_from, &until(h.days.unwrap_or(a.days))?)?);
+    println!("holder {} (born {}){}:", k + 1, h.birth_date.text(), if a.keep.is_some() { ", device key and seed kept" } else { "" });
+    let keep = previous.get(k).map(|p| kept(p, k)).transpose()?;
+    holders.push(issue(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], keep)?);
   }
 
   let wallet = json!({
