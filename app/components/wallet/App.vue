@@ -3,7 +3,8 @@ import type { AuthorizationResponse, RequestObject, WalletMetadata } from '#shar
 import type { WalletTransport } from '~/wallet/transport'
 import type { ConsentView, RequestView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
-import type { Step } from './Working.vue'
+import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
+import type { ProveOutput } from '~/wallet/prover'
 import { analyzeRequest, consentFor, parseAuthorizationUrl } from '~/wallet/engine'
 import { httpTransport } from '~/wallet/transport'
 import { loadCredential } from '~/wallet/holder'
@@ -14,6 +15,7 @@ import { findCircuit } from '#shared/registry/circuits'
  * The SIROS ID wallet on the phone (mocked screens, real protocol). Drives the holder side of
  * OpenID4VP: scan -> POST request_uri with wallet_metadata -> verify the signed request -> check
  * it and pick a circuit -> consent -> PIN -> native steps (sign, witness and prove) -> POST response_uri.
+ * It publishes its state for the guide panel (useWalletFlow).
  */
 const props = withDefaults(
   defineProps<{
@@ -24,24 +26,48 @@ const props = withDefaults(
   { transport: () => httpTransport },
 )
 
-type Screen = 'home' | 'detail' | 'scan' | 'request' | 'unmet' | 'pin' | 'working' | 'done' | 'declined' | 'error'
+// Titles and descriptions from the SIROS ID wallet's English strings (src/locales/en.json).
+const ERRORS = {
+  connection: { title: 'Connection Error', description: 'The connection to the wallet service was lost. Please try again.' }, // openIdCallback.errorCodes.WEBSOCKET_ERROR
+  qr: { title: 'Unsupported QR code', description: 'This QR code is not supported by the wallet. Please scan a credential offer or presentation request.' }, // qrCodeScanner.unsupported*
+  expired: { title: 'Request Expired', description: 'This request has expired. Please start again.' }, // FLOW_EXPIRED
+  network: { title: 'Network Error', description: 'A network error occurred while sharing your credentials. Please try again.' }, // HTTP_ERROR
+  untrusted: { title: 'Verifier is not Trusted', description: 'Verifier did not provide valid data for verification.' }, // UNTRUSTED_VERIFIER
+  response: { title: 'Response Error', description: 'An error occurred while sending the presentation response.' }, // RESPONSE_ERROR
+  signing: { title: 'Signing Failed', description: 'The wallet could not create a signed presentation. Please try again.' }, // SIGNING_FAILED
+} as const
 
-const screen = ref<Screen>('home')
+const screen = ref<WalletScreen>('home')
 const request = ref<RequestObject | null>(null)
 const view = ref<RequestView | null>(null)
 const consent = ref<ConsentView | null>(null)
 const credential = ref<CredentialView | null>(null)
 const circuitIds = ref<string[]>([])
 const detected = ref(false)
-const errorText = ref('')
+const error = ref<{ title: string; description: string } | null>(null)
 const pinError = ref('')
 const pinKey = ref(0)
 const workingTitle = ref('')
-const steps = ref<Step[]>([])
+const metrics = ref<ProofMetrics | null>(null)
+const sentError = ref<'access_denied' | 'invalid_request' | null>(null)
 const today = useToday()
 /** Presentations made from this page, for the home screen's Recent History. */
 const history = useState<Array<{ audience: string; at: number }>>('siros-history', () => [])
 const timers: Array<ReturnType<typeof setTimeout>> = []
+
+const flow = useWalletFlow()
+watchEffect(() => {
+  flow.value = {
+    screen: screen.value,
+    pinRejected: !!pinError.value,
+    walletCircuits: circuitIds.value,
+    view: view.value,
+    consent: consent.value,
+    metrics: metrics.value,
+    sentError: sentError.value,
+    error: error.value,
+  }
+})
 
 onMounted(async () => {
   try {
@@ -49,7 +75,7 @@ onMounted(async () => {
     credential.value = cred
     circuitIds.value = caps.circuits.map((c) => c.circuit_id)
   } catch {
-    fail('The wallet service is not available.')
+    fail(ERRORS.connection)
   }
 })
 
@@ -58,8 +84,8 @@ function walletMetadata(): WalletMetadata {
   return { vp_formats_supported: { circuit_zk: { circuit_proof_system_values: systems, circuit_id_values: circuitIds.value } } }
 }
 
-function fail(text: string) {
-  errorText.value = text
+function fail(e: { title: string; description: string }) {
+  error.value = e
   screen.value = 'error'
 }
 
@@ -83,7 +109,7 @@ function cancelScan() {
 async function onScanned() {
   if (screen.value !== 'scan' || !credential.value) return
   const parsed = props.url ? parseAuthorizationUrl(props.url) : null
-  if (!parsed) return fail('No valid QR code found.')
+  if (!parsed) return fail(ERRORS.qr)
   try {
     const verified = await props.transport.fetchRequest({
       requestUri: parsed.requestUri,
@@ -99,8 +125,11 @@ async function onScanned() {
     } else {
       screen.value = 'unmet'
     }
-  } catch {
-    fail('Could not load the request.')
+  } catch (e) {
+    // The transport reports an HTTP failure as "request_uri <status>"; anything else concerns the
+    // request's signature or certificate.
+    const status = /^request_uri (\d+)$/.exec((e as Error).message)?.[1]
+    fail(status === '410' ? ERRORS.expired : status ? ERRORS.network : ERRORS.untrusted)
   }
 }
 
@@ -112,13 +141,15 @@ async function send(body: AuthorizationResponse) {
  * Rulebook: data-dependent failure or decline -> access_denied without description;
  * a cause independent of holder data may use invalid_request.
  */
-async function refuse(next: Screen) {
+async function refuse(next: WalletScreen) {
   const independent = view.value?.problem === 'unsupported' || view.value?.problem === 'no_circuit'
+  const code = independent ? 'invalid_request' : 'access_denied'
   try {
-    await send({ state: request.value!.state, error: independent ? 'invalid_request' : 'access_denied' })
+    await send({ state: request.value!.state, error: code })
+    sentError.value = code
     screen.value = next
   } catch {
-    fail('Could not reach the website.')
+    fail(ERRORS.response)
   }
 }
 
@@ -128,10 +159,7 @@ function toPin() {
   screen.value = 'pin'
 }
 
-const ms = (n?: number, simulated?: boolean) => (n == null ? undefined : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms${simulated ? ' (simulated)' : ''}`)
-
-/** How long the progress screen stays up at least, and the completed list after the last step, so the
- *  steps can be read; the times it shows are measured. */
+/** How long the progress screen stays up at least, and the completion status after the last step. */
 const MIN_PROGRESS_MS = 1500
 const MIN_COMPLETED_MS = 600
 const wait = (ms: number) => new Promise((r) => timers.push(setTimeout(r, ms)))
@@ -142,43 +170,44 @@ async function onPin(pin: string) {
   const shownAt = Date.now()
   screen.value = 'working'
   workingTitle.value = 'Creating presentation...'
-  steps.value = [
-    { label: 'PIN checked, device key signs the request', state: 'running' },
-    { label: 'Witness from your credential', state: 'waiting' },
-    { label: 'Zero-knowledge proof', state: 'waiting' },
-    { label: `Sending the response to ${host}`, state: 'waiting' },
-  ]
-  const set = (i: number, patch: Partial<Step>) => (steps.value[i] = { ...steps.value[i]!, ...patch })
+  metrics.value = null
+  let out: ProveOutput
   try {
     const signed = await unlockAndSign({ request: req, pin })
-    set(0, { state: 'done', detail: ms(signed.metrics.sign_ms, signed.metrics.simulated) })
-    set(1, { state: 'running' })
-    set(2, { state: 'running' })
-    const out = await prove({ request: req, circuitId: view.value!.circuit!.circuit_id, deviceSignature: signed.device_signature })
-    const sim = out.metrics.simulated
-    set(1, { state: 'done', detail: ms(out.witness_ms ?? out.metrics.witness_ms, sim) })
-    set(2, { state: 'done', detail: `${ms(out.metrics.prove_ms, sim)} · proof ${((out.metrics.proof_bytes ?? 0) / 1000).toFixed(1)} kB` })
-    set(3, { state: 'running' })
-    workingTitle.value = 'Sending response...'
-    await send({ state: req.state, vp_token: { [req.dcql_query.credentials[0]!.id]: [out.presentation] } })
-    set(3, { state: 'done' })
-    workingTitle.value = 'Presentation sent successfully'
-    history.value = [{ audience: host, at: Date.now() }, ...history.value]
-    await wait(Math.max(MIN_COMPLETED_MS, MIN_PROGRESS_MS - (Date.now() - shownAt)))
-    screen.value = 'done'
+    metrics.value = { sign_ms: signed.metrics.sign_ms, simulated: signed.metrics.simulated }
+    out = await prove({ request: req, circuitId: view.value!.circuit!.circuit_id, deviceSignature: signed.device_signature })
+    metrics.value = {
+      ...metrics.value,
+      witness_ms: out.witness_ms ?? out.metrics.witness_ms,
+      prove_ms: out.metrics.prove_ms,
+      proof_bytes: out.metrics.proof_bytes,
+      presentation_bytes: out.metrics.presentation_bytes,
+      simulated: out.metrics.simulated || signed.metrics.simulated,
+    }
   } catch (e) {
     const code = (e as Error).message
     if (code === 'invalid_pin') {
-      pinError.value = 'You have entered an incorrect PIN.'
+      pinError.value = 'You have entered an incorrect pin'
       pinKey.value++
       screen.value = 'pin'
     } else if (code === 'unsatisfiable') {
       view.value = { ...view.value!, satisfiable: false, problem: 'age' }
       screen.value = 'unmet'
     } else {
-      fail(code === 'unavailable' ? 'The wallet service is not available.' : 'The proof could not be created.')
+      fail(code === 'unavailable' ? ERRORS.connection : ERRORS.signing)
     }
+    return
   }
+  try {
+    workingTitle.value = 'Sending response...'
+    await send({ state: req.state, vp_token: { [req.dcql_query.credentials[0]!.id]: [out.presentation] } })
+  } catch {
+    return fail(ERRORS.response)
+  }
+  workingTitle.value = 'Presentation sent successfully'
+  history.value = [{ audience: host, at: Date.now() }, ...history.value]
+  await wait(Math.max(MIN_COMPLETED_MS, MIN_PROGRESS_MS - (Date.now() - shownAt)))
+  screen.value = 'done'
 }
 
 function reset() {
@@ -202,7 +231,15 @@ onBeforeUnmount(() => timers.forEach(clearTimeout))
         leave-to-class="opacity-0 -translate-x-3"
       >
         <WalletHome v-if="screen === 'home'" key="home" :credential="credential" :history="history" @scan="startScan" @open="screen = 'detail'" />
-        <WalletDetail v-else-if="screen === 'detail' && credential" key="detail" :credential="credential" @back="screen = 'home'" @scan="startScan" />
+        <WalletDetail
+          v-else-if="screen === 'detail' && credential"
+          key="detail"
+          :credential="credential"
+          @back="screen = 'home'"
+          @scan="startScan"
+          @presentations="screen = 'presentations'"
+        />
+        <WalletPresentations v-else-if="screen === 'presentations'" key="presentations" :history="history" @back="screen = 'detail'" @scan="startScan" />
         <WalletScan v-else-if="screen === 'scan'" key="scan" :url="url" :detected="detected" @cancel="cancelScan" />
         <WalletRequest
           v-else-if="screen === 'request' && consent"
@@ -218,13 +255,21 @@ onBeforeUnmount(() => timers.forEach(clearTimeout))
           :key="`pin-${pinKey}`"
           :verifier-name="view.verifierName"
           :error="pinError"
+          @input="pinError = ''"
           @done="onPin"
           @cancel="refuse('declined')"
         />
-        <WalletWorking v-else-if="screen === 'working'" key="working" :title="workingTitle" :steps="steps" />
-        <WalletOutcome v-else-if="screen === 'done'" key="done" kind="done" :verifier-name="view?.verifierName" @close="reset" />
-        <WalletOutcome v-else-if="screen === 'declined'" key="declined" kind="declined" @close="reset" />
-        <WalletOutcome v-else key="error" kind="error" :text="errorText" @close="reset" />
+        <WalletWorking v-else-if="screen === 'working'" key="working" :title="workingTitle" />
+        <WalletOutcome
+          v-else-if="screen === 'done'"
+          key="done"
+          kind="done"
+          title="Success!"
+          :text="`Your data has been shared with ${view?.verifierName}.`"
+          @close="reset"
+        />
+        <WalletOutcome v-else-if="screen === 'declined'" key="declined" kind="declined" title="Sharing Cancelled" text="You cancelled sharing your credentials." @close="reset" />
+        <WalletOutcome v-else key="error" kind="error" :title="error?.title ?? ''" :text="error?.description ?? ''" @close="reset" />
       </Transition>
     </div>
   </PhoneFrame>

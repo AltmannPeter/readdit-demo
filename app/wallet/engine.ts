@@ -121,6 +121,8 @@ export function ageText(item: { minAge?: number; maxAge?: number }): string {
   return `under ${item.maxAge! + 1}`
 }
 
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
 export function fmtDate(iso: string): string {
   return new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
@@ -132,19 +134,26 @@ export function birthRangeText(item: { ge?: string; le?: string }): string {
   return `Born on or after ${fmtDate(item.ge!)}`
 }
 
-/** What the consent screen shows, all of it derived from the request, the circuit and the credential. */
+/**
+ * A request, in two forms, both derived from the request, the circuit's registry entry and the
+ * credential: `fields` is what the wallet's request screen lists; the rest is the technical
+ * account of the same request, which the guide panel shows.
+ */
 export interface ConsentView {
   verifier: { name: string; host: string; clientId: string; certificate?: string }
-  /** The pseudonym this request discloses, computed by the wallet as the circuit will. */
-  pseudonym?: { handle: string; config: PseudonymConfig; verifierId: string; value: string; lines: string[] }
-  age?: { handle: string; text: string; range: string; learns: string }
-  /** Other public inputs the verifier sees, from the circuit's registry entry. */
-  alsoVisible: Array<{ label: string; value: string }>
+  /** The request screen's "Requested Information", in product wording. */
+  fields: Array<{ name: string; value: string }>
+  /** The pseudonym this request discloses, computed by the wallet as the circuit will, with the
+   *  rulebook's properties of the requested configuration. */
+  pseudonym?: { handle: string; config: PseudonymConfig; verifierId: string; value: string; properties: string[] }
+  age?: { handle: string; text: string; range: string; ge?: string; le?: string }
+  /** The other values the verifier receives, from the circuit's registry entry. */
+  alsoSent: Array<{ label: string; value: string }>
   notShared: Array<{ label: string; value?: string }>
 }
 
 const ELEMENT_LABELS: Record<string, string> = {
-  birth_date: 'Date of birth',
+  birth_date: 'Birth date',
   ssc: 'Seed commitment (ssc)',
   psc: 'Private seed commitment (psc)',
 }
@@ -153,7 +162,8 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
   const host = view.verifierHost || view.clientId
   const out: ConsentView = {
     verifier: { name: view.verifierName, host, clientId: view.clientId, ...(certificate && { certificate }) },
-    alsoVisible: [],
+    fields: [],
+    alsoSent: [],
     notShared: [],
   }
 
@@ -162,36 +172,29 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
       const verifierId = view.clientId
       const value = await derivePseudonym({ config: item.config, seed: fromHex(holder.secret_seed), verifierId, verifierContext: item.verifierContext })
       const p = CONFIG_PROPERTIES[item.config]
-      const lines = [`The same every time you share it with ${host}.`]
-      if (p.distinctPerVerifier) lines.push(`Other sites get a different one: it is computed for ${verifierId}.`)
-      if (p.sameAcrossVerifiers) lines.push('Every site you give the same value gets the same pseudonym.')
-      if (p.knownOffenderMatching) lines.push(`${host} can recognise you if you sign up again, for example after a ban.`)
-      lines.push(
+      const properties = [`The same at every visit to ${host}.`]
+      if (p.distinctPerVerifier) properties.push(`Different for every site: it is derived from the verifier_id ${verifierId}.`)
+      if (p.sameAcrossVerifiers) properties.push('The same value at every site that receives it.')
+      if (p.knownOffenderMatching) properties.push(`${host} recognises it at a new sign-up, for example after a ban.`)
+      properties.push(
         p.issuerCanLink
-          ? `${cred.issuer.name}, which issued your credential, knows the seed behind it and can link this pseudonym to you.`
-          : `${cred.issuer.name}, which issued your credential, cannot link this pseudonym to you.`,
+          ? `The issuer, ${cred.issuer.name}, knows the seed and can link the pseudonym to the holder.`
+          : `The issuer, ${cred.issuer.name}, cannot link the pseudonym to the holder.`,
       )
-      out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, lines }
+      out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, properties }
+      out.fields.push({ name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site' })
     } else {
-      out.age = {
-        handle: item.handle,
-        text: `You are ${ageText(item)}`,
-        range: birthRangeText(item),
-        learns: `${host} learns only that this is true, not your date of birth.`,
-      }
+      const text = ageText(item)
+      out.age = { handle: item.handle, text, range: birthRangeText(item), ...(item.ge && { ge: item.ge }), ...(item.le && { le: item.le }) }
+      out.fields.push({ name: 'Age', value: capitalize(text) })
     }
   }
 
   for (const input of view.circuit?.public_inputs ?? []) {
-    if (input.name === 'issuer_key_set') out.alsoVisible.push({ label: 'Issuer', value: `${cred.issuer.name}, through its certificate (${cred.issuer.documentSigner})` })
-    if (input.name === 'proof_time') out.alsoVisible.push({ label: 'Time of the proof', value: 'The moment you share, to the second' })
+    if (input.name === 'issuer_key_set') out.alsoSent.push({ label: 'Issuer certificate', value: cred.issuer.documentSigner })
+    if (input.name === 'proof_time') out.alsoSent.push({ label: 'Proof time', value: 'The time of the presentation, to the second' })
   }
-  if (view.circuit) {
-    out.alsoVisible.push({ label: 'Proof method', value: `${view.circuit.label} (${view.circuit.proof_system})` })
-    if (view.circuit.checks_validity) {
-      out.alsoVisible.push({ label: 'Also proven', value: 'Your credential is valid at that time, and this phone’s device key approved this request' })
-    }
-  }
+  if (view.circuit) out.alsoSent.push({ label: 'Circuit', value: `${view.circuit.label} (${view.circuit.proof_system})` })
 
   for (const e of cred.elements) {
     const label = ELEMENT_LABELS[e.id] ?? e.id

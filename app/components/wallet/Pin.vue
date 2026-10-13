@@ -1,26 +1,34 @@
 <script setup lang="ts">
 // Unlocking the device key with the wallet PIN. The SIROS ID wallet unlocks with passkeys; this
 // demo keeps a 6-digit PIN as its second factor, laid out like the wallet's PIN popup
-// (src/components/Popups/PinInput.jsx), with the phone's number pad below.
+// (src/components/Popups/PinInput.jsx: lock icon and title, divider, italic description, error,
+// digit boxes, Cancel and Submit), with the phone's number pad below.
 const props = defineProps<{ verifierName: string; error?: string }>()
-const emit = defineEmits<{ done: [pin: string]; cancel: [] }>()
+const emit = defineEmits<{ done: [pin: string]; cancel: []; input: [] }>()
 const LENGTH = 6
 const pin = ref('')
-let finished = false
+let submitted = false
 
 function press(d: string) {
-  if (finished || pin.value.length >= LENGTH) return
+  if (submitted || pin.value.length >= LENGTH) return
+  if (props.error) emit('input')
   pin.value += d
-  if (pin.value.length === LENGTH) {
-    finished = true
-    setTimeout(() => emit('done', pin.value), 300)
-  }
 }
-const erase = () => !finished && (pin.value = pin.value.slice(0, -1))
+function erase() {
+  if (submitted) return
+  if (props.error) emit('input')
+  pin.value = pin.value.slice(0, -1)
+}
+function submit() {
+  if (submitted || pin.value.length !== LENGTH) return
+  submitted = true
+  emit('done', pin.value)
+}
 
 function onKey(e: KeyboardEvent) {
   if (/^[0-9]$/.test(e.key)) press(e.key)
   else if (e.key === 'Backspace') erase()
+  else if (e.key === 'Enter') submit()
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
@@ -33,21 +41,22 @@ const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
     <WalletAppHeader />
     <div class="flex min-h-0 flex-1 flex-col px-6 pt-6">
       <h2 class="mb-2 flex items-center text-lg font-bold text-sid-gray-900">
-        <WalletSirosIcon name="lock" class="mr-2 size-5" />
-        Enter your PIN
+        <WalletSirosIcon name="lock" class="mr-1 size-5" />
+        Enter the Pin
       </h2>
       <hr class="mb-2 border-t border-sid-gray-400" />
-      <p class="text-sm text-sid-gray-800 italic">Your PIN unlocks the device key to share with {{ props.verifierName }}.</p>
-      <div class="mt-4 flex justify-center" aria-label="PIN">
+      <p class="text-sid-gray-800 italic">Enter your wallet PIN to share with {{ props.verifierName }}.</p>
+      <p v-if="props.error" class="mt-2 text-sm text-sid-red" role="alert">{{ props.error }}</p>
+      <div class="mt-2 flex justify-center" aria-label="PIN">
         <span
           v-for="i in LENGTH"
           :key="i"
-          class="mx-0.5 flex h-11 w-9 items-center justify-center rounded-md border border-sid-gray-400 bg-sid-gray-200 text-lg text-sid-gray-900"
+          class="mx-0.5 my-2 flex h-10 w-9 items-center justify-center rounded-md border border-sid-gray-400 bg-sid-gray-200 text-lg text-sid-gray-900"
         >{{ i <= pin.length ? '•' : '' }}</span>
       </div>
-      <p v-if="props.error" class="mt-3 text-center text-sm text-sid-red">{{ props.error }}</p>
-      <div class="mt-4 flex justify-start">
+      <div class="flex justify-end gap-2 pt-4">
         <WalletButton @click="emit('cancel')">Cancel</WalletButton>
+        <WalletButton variant="primary" :disabled="pin.length !== LENGTH" @click="submit">Submit</WalletButton>
       </div>
     </div>
     <!-- the phone's number pad -->

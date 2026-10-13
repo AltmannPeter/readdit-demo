@@ -11,7 +11,7 @@ defineEmits<{ cancel: [] }>()
     <WalletAppHeader />
     <div class="flex min-h-0 flex-1 flex-col px-6 pt-6 pb-8">
       <div class="flex">
-        <button class="mr-2 mb-2 text-sid-gray-900" aria-label="Cancel scan" @click="$emit('cancel')">
+        <button class="mr-2 mb-2 text-sid-gray-900" aria-label="Go back to the previous page" @click="$emit('cancel')">
           <WalletSirosIcon name="arrow-left" class="size-5" />
         </button>
         <WalletH1 heading="Scan the QR Code" :hr="false" />

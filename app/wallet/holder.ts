@@ -51,7 +51,7 @@ export interface CredentialView {
   attributes: { birth_date: string; ssc: string; psc: string | null }
   elements: Array<{ id: string; digestID: number }>
   mso: { version: string; digestAlgorithm: string; signatureAlgorithm: string }
-  deviceKey: { kty: string; crv: string; jwkThumbprint: string; protection: string }
+  deviceKey: { kty: string; crv: string; jwkThumbprint: string }
   sizes: { issuerSigned: number }
 }
 
@@ -107,7 +107,6 @@ export function loadCredential(): Promise<CredentialView> {
         kty: holder.device_key.kty,
         crv: holder.device_key.crv,
         jwkThumbprint: await thumbprint(holder.device_key),
-        protection: 'Demo only: the private key sits in this page. A real wallet keeps it in the phone’s secure hardware.',
       },
       sizes: { issuerSigned: v.bytes.issuerSigned },
     }

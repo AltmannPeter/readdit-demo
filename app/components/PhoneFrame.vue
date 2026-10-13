@@ -1,5 +1,8 @@
 <script setup lang="ts">
-// Generic smartphone. No brand marks; the SIROS ID wallet runs on it.
+// Generic smartphone. No brand marks; the SIROS ID wallet runs on it. The screen lays the app out
+// at a phone's logical width (about 350 px, as on a real phone) and draws it at SCALE, so the
+// wallet's screens keep their real proportions and the frame still fits the dialog.
+const SCALE = 0.88
 const time = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 const tick = () => {
@@ -14,7 +17,7 @@ onBeforeUnmount(() => clearInterval(timer))
 </script>
 
 <template>
-  <div class="relative h-[620px] w-[300px] shrink-0 select-none">
+  <div class="relative h-[680px] w-[330px] shrink-0 select-none">
     <!-- side buttons -->
     <span class="absolute top-[118px] -left-[3px] h-8 w-[3px] rounded-l bg-neutral-700" />
     <span class="absolute top-[166px] -left-[3px] h-14 w-[3px] rounded-l bg-neutral-700" />
@@ -41,7 +44,9 @@ onBeforeUnmount(() => clearInterval(timer))
         </div>
 
         <div class="relative min-h-0 flex-1">
-          <slot />
+          <div class="absolute top-0 left-0 origin-top-left" :style="{ width: `${100 / SCALE}%`, height: `${100 / SCALE}%`, transform: `scale(${SCALE})` }">
+            <slot />
+          </div>
         </div>
 
         <!-- home indicator -->
