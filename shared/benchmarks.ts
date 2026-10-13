@@ -1,4 +1,4 @@
-// Timing and size model for the technical view and the offline simulation.
+// Timing and size model for the technical view's estimates.
 //
 // Desktop figures are measurements on Apple M5 and AMD Ryzen 9, from:
 //   NYM-AUTH.md               full nym_auth statement (age + pseudonym) on mdoc
@@ -184,24 +184,4 @@ export function presentationRange(sys: SystemModel): Range {
 
 export function systemForCircuit(circuitId?: string | null): SystemModel {
   return SYSTEMS.find((s) => circuitId?.includes(`:${s.key}:`)) ?? SYSTEMS[0]!
-}
-
-/**
- * Point values used by the offline simulation: Vega on the nym_auth mdoc statement, 1 thread,
- * AMD Ryzen 9 5950X, median of 7 (nym-auth-circuits README, "Benchmark"). The Vega backend builds
- * its keys once at start, so a presentation costs the witness and the proof on the phone (scaled by
- * the chosen phone factor) and the verification on the server.
- */
-export function simulatedVega(phoneFactor: number) {
-  const f = phoneFactor
-  return {
-    sign: { sign_ms: +(1 * f).toFixed(1) },
-    prove: {
-      witness_ms: +(11.3 * f).toFixed(1),
-      prove_ms: +(758.1 * f).toFixed(1),
-      total_ms: +((11.3 + 758.1) * f).toFixed(1),
-      proof_bytes: 96_079,
-    },
-    verify: { verify_ms: 62.6, total_ms: 62.6, proof_bytes: 96_079 },
-  }
 }

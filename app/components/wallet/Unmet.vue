@@ -7,8 +7,9 @@ import { ageText } from '~/wallet/engine'
 // Laid out as the SIROS ID error screen (PresentationErrorScreen). "Unsupported Request" is the
 // wallet's own string (openIdCallback.errorCodes.UNSUPPORTED_FLOW_TYPE); the wallet has no string
 // for an unmet age requirement, so that one is written in the same style.
-const props = defineProps<{ view: RequestView }>()
-defineEmits<{ close: [] }>()
+// With other matching credentials, "Switch credential" (presentCredentialsFlow.overview) offers them.
+const props = defineProps<{ view: RequestView; alternatives?: number }>()
+defineEmits<{ close: []; switch: [] }>()
 const age = computed(() => props.view.items.find((i) => i.kind === 'age'))
 </script>
 
@@ -28,7 +29,8 @@ const age = computed(() => props.view.items.find((i) => i.kind === 'age'))
         </template>
       </div>
     </div>
-    <div class="flex shrink-0 flex-col bg-white px-6 pt-4 pb-8">
+    <div class="flex shrink-0 flex-col gap-4 bg-white px-6 pt-4 pb-8">
+      <WalletButton v-if="props.alternatives" variant="outline" size="lg" @click="$emit('switch')">Switch credential</WalletButton>
       <WalletButton variant="primary" size="lg" @click="$emit('close')">Close</WalletButton>
     </div>
   </div>

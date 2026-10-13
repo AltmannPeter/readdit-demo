@@ -12,7 +12,6 @@ interface Service {
   implementation?: string
   version?: string
   stub?: boolean
-  offline?: boolean
   circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null }>
   load_ms?: number
   threads?: number
@@ -28,7 +27,7 @@ interface Trace {
 }
 interface Session {
   id: string
-  purpose: { kind: 'signin' } | { kind: 'age'; community: string }
+  purpose: { kind: 'signin'; intent?: 'signup' | 'login'; community?: string } | { kind: 'age'; community: string }
   status: string
   createdAt: number
   query: { req: Array<{ id: string; return: string; params: Record<string, string> }> }
@@ -43,7 +42,7 @@ interface Session {
   trace: Trace[]
 }
 interface Overview {
-  services: { mode: 'native' | 'offline'; phoneFactor: number; prover: Service; verifier: Service }
+  services: { prover: Service; verifier: Service }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -73,7 +72,10 @@ const step = (name: string) => session.value?.trace.filter((t) => t.step === nam
 const prove = computed(() => step('prove')?.data)
 const verify = computed(() => step('verify')?.data)
 
-const purposeText = (p: Session['purpose']) => (p.kind === 'signin' ? 'Log in' : `Age check, ${COMMUNITY_PREFIX}${p.community}`)
+const purposeText = (p: Session['purpose']) =>
+  p.kind === 'signin'
+    ? `${p.intent === 'login' ? 'Log in' : 'Sign up'}${p.community ? ` and age check, ${COMMUNITY_PREFIX}${p.community}` : ''}`
+    : `Age check, ${COMMUNITY_PREFIX}${p.community}`
 const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(1)} kB` : `${n} B`)
 const mb = (n?: number | null) => (n == null ? '' : `${Math.round(n)} MB`)
 const values = (c?: { shared: number; precommitted: number; rest: number; public: number } | null) =>
@@ -89,7 +91,6 @@ const services = computed((): Record<string, Service> => {
   const s = data.value?.services
   return s ? { prover: s.prover, verifier: s.verifier } : {}
 })
-const offline = computed(() => data.value?.services.mode === 'offline')
 const activeSystem = computed(() => systemForCircuit(session.value?.circuit?.circuit_id ?? prove.value?.circuit_id))
 
 /** "217–588 ms", "0.22–2.9 s" */
@@ -117,9 +118,9 @@ const statusTone = (s: string) =>
         <span
           v-if="data"
           class="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold"
-          :class="offline ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'"
+          :class="data.services.prover.up && data.services.verifier.up ? 'bg-emerald-100 text-emerald-800' : 'bg-adult/10 text-adult'"
         >
-          {{ offline ? `Offline simulation · phone ×${data.services.phoneFactor}` : 'Vega addon, in process' }}
+          {{ data.services.prover.up && data.services.verifier.up ? 'Vega addon, in process' : 'Vega addon not loaded' }}
         </span>
       </div>
     </header>
@@ -131,8 +132,7 @@ const statusTone = (s: string) =>
           <div class="flex items-center gap-2">
             <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
             <h2 class="text-sm font-semibold capitalize">{{ name }}</h2>
-            <span v-if="svc.offline" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">OFFLINE</span>
-            <span v-else-if="svc.stub" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">STUB</span>
+            <span v-if="svc.stub" class="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">STUB</span>
           </div>
           <template v-if="svc.up">
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>
@@ -184,22 +184,18 @@ const statusTone = (s: string) =>
           <div class="card p-4">
             <p class="text-xs text-muted">Prove</p>
             <p class="mt-1 text-2xl font-semibold tabular-nums">{{ ms(prove?.metrics?.total_ms ?? prove?.metrics?.prove_ms) }}</p>
-            <p class="text-xs" :class="prove?.metrics?.simulated ? 'font-semibold text-amber-700' : 'text-muted'">
-              {{ prove?.metrics?.simulated ? 'simulated' : `round trip ${ms(prove?.round_trip_ms)}` }}
-            </p>
+            <p class="text-xs text-muted">round trip {{ ms(prove?.round_trip_ms) }}</p>
           </div>
           <div class="card p-4">
             <p class="text-xs text-muted">Verify</p>
             <p class="mt-1 text-2xl font-semibold tabular-nums">{{ ms(verify?.metrics?.total_ms ?? verify?.metrics?.verify_ms) }}</p>
-            <p class="text-xs" :class="verify?.metrics?.simulated ? 'font-semibold text-amber-700' : 'text-muted'">
-              {{ verify?.metrics?.simulated ? 'simulated' : `round trip ${ms(verify?.round_trip_ms)}` }}
-            </p>
+            <p class="text-xs text-muted">round trip {{ ms(verify?.round_trip_ms) }}</p>
           </div>
           <div class="card p-4">
             <p class="text-xs text-muted">Proof</p>
             <p class="mt-1 text-2xl font-semibold tabular-nums">{{ kb(prove?.metrics?.proof_bytes) }}</p>
             <p class="text-xs text-muted">
-              presentation {{ kb(prove?.metrics?.presentation_bytes) }}<span v-if="prove?.metrics?.simulated" class="font-semibold text-amber-700"> · simulated</span>
+              presentation {{ kb(prove?.metrics?.presentation_bytes) }}
             </p>
           </div>
           <div class="card p-4">
@@ -234,7 +230,7 @@ const statusTone = (s: string) =>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
-                  <p v-else-if="t.step === 'verify' && t.data?.code" class="text-xs text-adult">
+                  <p v-else-if="(t.step === 'verify' || t.step === 'refused') && t.data?.code" class="text-xs text-adult">
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">

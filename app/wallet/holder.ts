@@ -1,8 +1,9 @@
-// The holder's material, which the mocked SIROS ID wallet carries outright: the nym_auth mdoc,
-// the device key pair and the secret_seed, issued by native/vega/issuer (nym-issuer) into
-// demo-wallet.json. The demo has no true holder binding: a real wallet keeps the device key in
-// secure hardware and never shows the seed. The wallet sends each native step only what it needs
-// (app/wallet/prover.ts) and decodes its own credential for the screens below.
+// The holders' material, which the mocked SIROS ID wallet carries outright: for each nym_auth
+// credential, the mdoc, its device key pair and its secret_seed, issued by native/vega/issuer
+// (nym-issuer) into demo-wallet.json under one Document Signer. The demo has no true holder
+// binding: a real wallet keeps the device key in secure hardware and never shows the seed. The
+// wallet sends each native step only what it needs (app/wallet/prover.ts), from the credential
+// the person chose, and decodes its own credentials for the screens below.
 
 import walletFile from './demo-wallet.json'
 import { readIssuerSigned, type IssuerSignedView } from '#shared/utils/mdoc'
@@ -32,14 +33,17 @@ export interface WalletMaterial {
   secret_seed: string
 }
 
-export const holder: WalletMaterial = {
-  credential: walletFile.credential as WalletCredential,
-  device_key: walletFile.device_key as DeviceKeyJwk,
-  secret_seed: walletFile.secret_seed,
-}
+/** Each credential's material, in the wallet's order (the first is the default for a request). */
+export const holders: WalletMaterial[] = walletFile.holders.map((h) => ({
+  credential: h.credential as WalletCredential,
+  device_key: h.device_key as DeviceKeyJwk,
+  secret_seed: h.secret_seed,
+}))
 
 /** The credential as the wallet's screens show it. Everything comes from the mdoc itself. */
 export interface CredentialView {
+  /** Position in the wallet (holders[index]). */
+  index: number
   docType: string
   namespace: string
   title: string
@@ -76,42 +80,51 @@ async function thumbprint(k: DeviceKeyJwk): Promise<string> {
   return toBase64url(await sha256(utf8(JSON.stringify({ crv: k.crv, kty: k.kty, x: k.x, y: k.y }))))
 }
 
-let cached: Promise<CredentialView> | undefined
+let cached: Promise<CredentialView[]> | undefined
 
-/** Decodes the wallet's credential once. */
-export function loadCredential(): Promise<CredentialView> {
-  cached ??= (async () => {
-    const v = readIssuerSigned(holder.credential.issuer_signed)
-    // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
-    await import('reflect-metadata')
-    const x509 = await import('@peculiar/x509')
-    const cert = new x509.X509Certificate(v.documentSigner as BufferSource)
-    const field = (name: string) => cert.subjectName.getField(name)[0]
-    return {
-      docType: v.docType,
-      namespace: v.namespace,
-      title: NYM_TITLE,
-      encoding: 'ISO/IEC 18013-5 mdoc',
-      compactProfile: compact(v),
-      issuer: {
-        name: field('O') ?? field('CN') ?? cert.subject,
-        country: field('C'),
-        documentSigner: cert.subject,
-        certificateValidUntil: cert.notAfter.toISOString().replace(/\.\d{3}Z$/, 'Z'),
-      },
-      validity: v.validity,
-      attributes: { birth_date: v.birthDate, ssc: toHex(v.ssc), psc: v.psc ? toHex(v.psc) : null },
-      elements: v.items.map((i) => ({ id: i.elementIdentifier, digestID: i.digestID })),
-      mso: { version: v.version, digestAlgorithm: v.digestAlgorithm, signatureAlgorithm: v.signatureAlgorithm },
-      deviceKey: {
-        kty: holder.device_key.kty,
-        crv: holder.device_key.crv,
-        jwkThumbprint: await thumbprint(holder.device_key),
-      },
-      sizes: { issuerSigned: v.bytes.issuerSigned },
-    }
-  })()
+/** Decodes the wallet's credentials once. */
+export function loadCredentials(): Promise<CredentialView[]> {
+  cached ??= Promise.all(holders.map((h, index) => decode(h, index)))
   return cached
+}
+
+async function decode(holder: WalletMaterial, index: number): Promise<CredentialView> {
+  const v = readIssuerSigned(holder.credential.issuer_signed)
+  // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
+  await import('reflect-metadata')
+  const x509 = await import('@peculiar/x509')
+  const cert = new x509.X509Certificate(v.documentSigner as BufferSource)
+  const field = (name: string) => cert.subjectName.getField(name)[0]
+  return {
+    index,
+    docType: v.docType,
+    namespace: v.namespace,
+    title: NYM_TITLE,
+    encoding: 'ISO/IEC 18013-5 mdoc',
+    compactProfile: compact(v),
+    issuer: {
+      name: field('O') ?? field('CN') ?? cert.subject,
+      country: field('C'),
+      documentSigner: cert.subject,
+      certificateValidUntil: cert.notAfter.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    },
+    validity: v.validity,
+    attributes: { birth_date: v.birthDate, ssc: toHex(v.ssc), psc: v.psc ? toHex(v.psc) : null },
+    elements: v.items.map((i) => ({ id: i.elementIdentifier, digestID: i.digestID })),
+    mso: { version: v.version, digestAlgorithm: v.digestAlgorithm, signatureAlgorithm: v.signatureAlgorithm },
+    deviceKey: {
+      kty: holder.device_key.kty,
+      crv: holder.device_key.crv,
+      jwkThumbprint: await thumbprint(holder.device_key),
+    },
+    sizes: { issuerSigned: v.bytes.issuerSigned },
+  }
+}
+
+/** A credential in the guide's words: its type, birth date and expiry, which tell the two apart. */
+export function credentialLabel(c: CredentialView): string {
+  const d = (iso: string) => new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  return `${c.title}, born ${d(c.attributes.birth_date)}, expires ${d(c.validity.validUntil)}`
 }
 
 export interface DisplayCredential {

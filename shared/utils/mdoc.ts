@@ -1,6 +1,6 @@
 // Reads an ISO/IEC 18013-5 IssuerSigned (base64url) of the nym_auth attestation: the wallet shows
-// its own credential from it, and the offline simulation reads the birth date. It does not check
-// the issuer's signature; the prover does (native/vega/nym-vega/src/prover.rs).
+// its own credential from it. It does not check the issuer's signature; the prover does
+// (native/vega/nym-vega/src/prover.rs).
 
 import { Decoder, Tag } from 'cbor-x'
 import { NYM_DOCTYPE } from '../types/oid4vp'

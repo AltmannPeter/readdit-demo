@@ -6,26 +6,37 @@ import type { RequestObject } from '#shared/types/oid4vp'
  * of them, and the witness lives only for this call.
  */
 export default defineEventHandler(async (event) => {
-  const { request, circuit_id, credential, secret_seed, device_signature } = await readBody<{
+  const { request, circuit_id, credential, secret_seed, device_signature } = await readObject<{
     request: RequestObject
-    circuit_id: string
+    circuit_id: unknown
     credential: WalletCredential
-    secret_seed: string
-    device_signature: string
+    secret_seed: unknown
+    device_signature: unknown
   }>(event)
-  if (!request?.dcql_query?.credentials?.[0] || !circuit_id || !credential || !secret_seed || !device_signature) {
-    throw createError({ statusCode: 400 })
+  const query = Array.isArray(request?.dcql_query?.credentials) ? request.dcql_query.credentials[0] : undefined
+  if (
+    typeof query?.id !== 'string' ||
+    typeof request?.client_id !== 'string' ||
+    typeof request.nonce !== 'string' ||
+    typeof request.response_uri !== 'string' ||
+    typeof circuit_id !== 'string' ||
+    typeof credential !== 'object' ||
+    !credential ||
+    typeof secret_seed !== 'string' ||
+    typeof device_signature !== 'string'
+  ) {
+    throw refusal(400, 'bad_request', proverMessage('bad_request'))
   }
 
   // Session for the tech trace, if this request came from Readdit.
-  const sid = store().byState.get(request.state)
+  const sid = typeof request.state === 'string' ? store().byState.get(request.state) : undefined
   const s = sid ? store().sessions.get(sid) : undefined
 
   const t0 = Date.now()
   try {
     const result = await prover.prove({
       circuit_id,
-      credential_query_id: request.dcql_query.credentials[0].id,
+      credential_query_id: query.id,
       request,
       handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
       credential,
@@ -46,6 +57,6 @@ export default defineEventHandler(async (event) => {
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : 'error'
     if (s) addTrace(s, 'prove', 'Proof not created', { error: code, ...(e instanceof ServiceError && e.detail && { detail: e.detail }) })
-    throw createError({ statusCode: e instanceof ServiceError ? e.status : 500, statusMessage: proverMessage(code), data: { error: code } })
+    throw refusal(e instanceof ServiceError ? e.status : 500, code, proverMessage(code))
   }
 })

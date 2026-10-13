@@ -1,22 +1,20 @@
 <script setup lang="ts">
-// Unlocking the device key with the wallet PIN. The SIROS ID wallet unlocks with passkeys; this
-// demo keeps a 6-digit PIN as its second factor, laid out like the wallet's PIN popup
-// (src/components/Popups/PinInput.jsx: lock icon and title, divider, italic description, error,
-// digit boxes, Cancel and Submit), with the phone's number pad below.
-const props = defineProps<{ verifierName: string; error?: string }>()
-const emit = defineEmits<{ done: [pin: string]; cancel: []; input: [] }>()
+// Unlocking the wallet before it shares. The SIROS ID wallet unlocks with passkeys; this demo
+// keeps a 6-digit PIN screen for the unlock, and any 6 digits unlock it. Laid out like the
+// wallet's PIN popup (src/components/Popups/PinInput.jsx: lock icon and title, divider, italic
+// description, digit boxes, Cancel and Submit), with the phone's number pad below.
+const props = defineProps<{ verifierName: string }>()
+const emit = defineEmits<{ done: [pin: string]; cancel: [] }>()
 const LENGTH = 6
 const pin = ref('')
 let submitted = false
 
 function press(d: string) {
   if (submitted || pin.value.length >= LENGTH) return
-  if (props.error) emit('input')
   pin.value += d
 }
 function erase() {
   if (submitted) return
-  if (props.error) emit('input')
   pin.value = pin.value.slice(0, -1)
 }
 function submit() {
@@ -46,7 +44,6 @@ const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
       </h2>
       <hr class="mb-2 border-t border-sid-gray-400" />
       <p class="text-sid-gray-800 italic">Enter your wallet PIN to share with {{ props.verifierName }}.</p>
-      <p v-if="props.error" class="mt-2 text-sm text-sid-red" role="alert">{{ props.error }}</p>
       <div class="mt-2 flex justify-center" aria-label="PIN">
         <span
           v-for="i in LENGTH"

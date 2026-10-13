@@ -12,6 +12,27 @@ export interface WalletTransport {
   postResponse(responseUri: string, body: AuthorizationResponse): Promise<void>
 }
 
+/** An HTTP refusal from request_uri or response_uri: its status and the code in its error body. */
+export class TransportError extends Error {
+  constructor(
+    public endpoint: 'request_uri' | 'response_uri',
+    public status: number,
+    public code?: string,
+  ) {
+    super(`${endpoint} ${status}${code ? ` ${code}` : ''}`)
+  }
+}
+
+/** The refusal code in an error body (`data.error`), if the body is the server's JSON error. */
+async function codeOf(res: Response): Promise<string | undefined> {
+  try {
+    const body = (await res.json()) as { data?: { error?: unknown } }
+    return typeof body?.data?.error === 'string' ? body.data.error : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** A Request Object whose signature and certificate SAN checked out, with the signer's subject. */
 export interface VerifiedRequest {
   request: RequestObject
@@ -55,7 +76,7 @@ export const httpTransport: WalletTransport = {
     } else {
       res = await fetch(requestUri)
     }
-    if (!res.ok) throw new Error(`request_uri ${res.status}`)
+    if (!res.ok) throw new TransportError('request_uri', res.status, await codeOf(res))
     const verified = await verifyRequestJws((await res.text()).trim(), clientId)
     if (walletNonce && verified.request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
     return verified
@@ -65,6 +86,6 @@ export const httpTransport: WalletTransport = {
     if ('error' in body) form.set('error', body.error)
     else form.set('vp_token', JSON.stringify(body.vp_token))
     const res = await fetch(responseUri, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })
-    if (!res.ok) throw new Error(`response_uri ${res.status}`)
+    if (!res.ok) throw new TransportError('response_uri', res.status, await codeOf(res))
   },
 }

@@ -9,4 +9,3 @@ services:
     build: .
     ports: ["3000:3000"]
     environment:
-      NUXT_WALLET_PIN: "123456"

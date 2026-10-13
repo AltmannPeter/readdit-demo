@@ -1,11 +1,20 @@
 import type { Account, AgeGate } from '#shared/types'
 import type { CircuitZkCredentialQuery, CircuitZkFormats, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
 
-export type VpPurpose = { kind: 'signin' } | { kind: 'age'; community: string }
+/**
+ * signin: `signup` creates the account or logs in to an existing one; `login` only logs in. With
+ * `community` (a logged-out visitor at an age-restricted community) the same request also proves
+ * the community's age range, and the completion records it.
+ */
+export type VpPurpose = { kind: 'signin'; intent: 'signup' | 'login'; community?: string } | { kind: 'age'; community: string }
 
 export type VpStatus = 'waiting' | 'scanned' | 'responded' | 'verified' | 'failed' | 'completed'
 
-export type FailReason = 'denied' | 'invalid_request' | 'invalid' | 'unavailable' | 'expired'
+/** Why a session ended without a verified presentation. `cancelled`: the site's dialog was closed. */
+export type FailReason = 'denied' | 'invalid_request' | 'invalid' | 'unavailable' | 'expired' | 'cancelled'
+
+/** How a verified session was applied, or why it was not. */
+export type CompletionKind = 'created' | 'logged_in' | 'age' | 'banned' | 'mismatch' | 'no_account' | 'logged_out' | FailReason
 
 export interface TraceEvent {
   at: number
@@ -31,8 +40,12 @@ export interface VpSessionRecord {
   request?: RequestObject
   requestJwsBytes?: number
   status: VpStatus
+  /** The verifier's own timings of this session's presentation, and the time of the call around
+   *  it as the response route measures it (round_trip_ms); accepted or refused. */
+  verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
   outcome?: { ok: true; circuitId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
-  completion?: { ok: boolean; kind: 'created' | 'logged_in' | 'age' | 'banned' | 'mismatch' | FailReason; handle?: string }
+  /** `age`: the session's age proof was recorded for the account. */
+  completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true }
   trace: TraceEvent[]
 }
 
@@ -79,4 +92,8 @@ export function addTrace(s: VpSessionRecord, step: string, label: string, data?:
   s.trace.push({ at: Date.now(), step, label, ...(data && { data }) })
 }
 
-export const SESSION_TTL_MS = 10 * 60_000
+/** How long a wallet request stays valid (runtime config vpSessionTtlS, NUXT_VP_SESSION_TTL_S). */
+export function sessionTtlMs(): number {
+  const s = Number(useRuntimeConfig().vpSessionTtlS)
+  return (Number.isFinite(s) && s > 0 ? s : 600) * 1000
+}

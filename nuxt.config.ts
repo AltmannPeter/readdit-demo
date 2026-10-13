@@ -14,19 +14,14 @@ export default defineNuxtConfig({
     vegaTrustAnchors: 'native/vega/demo/document-signer.pem',
     // How far proof_time may lie from the verifier's clock, in seconds.
     proofTimeToleranceS: 300,
-    // The wallet PIN that unlocks the device key (prover and offline simulation).
-    walletPin: '123456',
     // Comma-separated circuit ids the site accepts, in order of preference.
     acceptedCircuits: 'urn:circuits:vega:nym_auth:v1',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',
     sessionPassword: 'readdit-demo-only-session-password-0123456789abcdef',
-    // 'native' = the Vega addon in this server; 'offline' = built-in simulation, no proofs.
-    // Switchable at runtime in /mod.
-    backendMode: 'native',
-    // Offline simulation: phone slowdown versus desktop (1-5).
-    offlinePhoneFactor: 2,
+    // How long a wallet request (its QR code) stays valid, in seconds.
+    vpSessionTtlS: 600,
     public: {
       siteName: 'Readdit',
       // DNS name in the access certificate. client_id = x509_san_dns:<siteHost>

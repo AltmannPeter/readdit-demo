@@ -1,29 +1,50 @@
-import type { WalletMetadata } from '#shared/types/oid4vp'
+import type { CircuitZkFormats, WalletMetadata } from '#shared/types/oid4vp'
 import { buildRequestObject } from '#shared/utils/dcql'
 import { tailorFormats } from '#shared/utils/negotiation'
 
+const strings = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
+
+/** wallet_metadata as the wallet posted it, or a 400 when it is not JSON or not the expected shape. */
+function parseWalletMetadata(text: unknown): WalletMetadata | undefined {
+  if (text === undefined || text === '') return undefined
+  let m: unknown
+  try {
+    m = JSON.parse(String(text))
+  } catch {
+    throw refusal(400, 'invalid_wallet_metadata', 'wallet_metadata is not valid JSON.')
+  }
+  const formats = (m as { vp_formats_supported?: unknown } | null)?.vp_formats_supported
+  const zk = (formats as { circuit_zk?: unknown } | undefined)?.circuit_zk as CircuitZkFormats | undefined
+  if (
+    !m ||
+    typeof m !== 'object' ||
+    (formats !== undefined && (typeof formats !== 'object' || formats === null)) ||
+    (zk !== undefined && (typeof zk !== 'object' || zk === null || !strings(zk.circuit_id_values) || !strings(zk.circuit_proof_system_values)))
+  ) {
+    throw refusal(400, 'invalid_wallet_metadata', 'wallet_metadata does not have the expected shape.')
+  }
+  return m as WalletMetadata
+}
+
 /**
  * request_uri. GET, or POST with wallet_metadata and wallet_nonce (request_uri_method=post).
- * Returns the signed Request Object (application/oauth-authz-req+jwt). Single use.
+ * Returns the signed Request Object (application/oauth-authz-req+jwt). Single use: 410 with
+ * `already_used`, `expired` or `cancelled` once the session has moved on.
  */
 export default defineEventHandler(async (event) => {
   const method = event.method
-  if (method !== 'GET' && method !== 'POST') throw createError({ statusCode: 405 })
+  if (method !== 'GET' && method !== 'POST') throw refusal(405, 'method_not_allowed', 'Use GET or POST.')
   const s = getVpSession(getRouterParam(event, 'id')!)
-  if (s.status !== 'waiting') throw createError({ statusCode: 410, statusMessage: 'This request has already been used.' })
+  const ended = endedReason(s)
+  if (ended) throw goneRefusal(ended)
+  if (s.status !== 'waiting') throw refusal(410, 'already_used', 'This request has already been used.')
 
   let walletMetadata: WalletMetadata | undefined
   let walletNonce: string | undefined
   if (method === 'POST') {
-    const form = await readBody<Record<string, string>>(event)
-    if (form?.wallet_metadata) {
-      try {
-        walletMetadata = JSON.parse(form.wallet_metadata)
-      } catch {
-        throw createError({ statusCode: 400, statusMessage: 'wallet_metadata is not valid.' })
-      }
-    }
-    walletNonce = form?.wallet_nonce || undefined
+    const form = await readObject<Record<string, unknown>>(event)
+    walletMetadata = parseWalletMetadata(form.wallet_metadata)
+    walletNonce = typeof form.wallet_nonce === 'string' && form.wallet_nonce ? form.wallet_nonce : undefined
   }
 
   const { formats, tailored } = tailorFormats(s.offer, walletMetadata?.vp_formats_supported?.circuit_zk)

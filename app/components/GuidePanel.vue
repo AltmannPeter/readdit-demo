@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { findCommunity } from '#shared/data/communities'
 import type { CredentialView } from '~/wallet/holder'
-import { loadCredential } from '~/wallet/holder'
+import { loadCredentials } from '~/wallet/holder'
 import { STAGES, guideStep } from '~/guide/steps'
 
 // The presenter's guide, docked beside the product. It is not part of Readdit or the wallet: it
@@ -18,12 +18,12 @@ const today = useToday()
 const config = useRuntimeConfig().public
 const community = computed(() => (route.params.slug ? findCommunity(String(route.params.slug)) : undefined))
 const { access } = useCommunityAccess(community)
-const credential = ref<CredentialView | null>(null)
+const credentials = ref<CredentialView[]>([])
 
 onMounted(async () => {
   guide.restore()
   try {
-    credential.value = await loadCredential()
+    credentials.value = await loadCredentials()
   } catch {
     /* the credential's details stay out of the guide */
   }
@@ -46,7 +46,7 @@ const step = computed(() =>
     access: community.value ? access.value : null,
     account: account.value,
     bannedHandle: bannedHandle.value,
-    credential: credential.value,
+    credentials: credentials.value,
   }),
 )
 

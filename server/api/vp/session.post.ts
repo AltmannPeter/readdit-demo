@@ -1,27 +1,46 @@
 import { findCommunity } from '#shared/data/communities'
 import { buildCredentialQuery, authorizationUrl, requestUriFor } from '#shared/utils/dcql'
-import { gateRange, todayISO } from '#shared/utils/age'
+import { decideGate, gateRange, todayISO } from '#shared/utils/age'
 import { randomHex } from '#shared/utils/bytes'
 import type { VpPurpose, VpSessionRecord } from '../../utils/store'
 
-/** Site: start a cross-device OpenID4VP session. Body: { purpose: 'signin' } | { purpose: 'age', community }. */
+/**
+ * Site: start a cross-device OpenID4VP session.
+ * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community }.
+ * signin with `community` (a logged-out visitor at an age-restricted community): one request for
+ * the pseudonym and the community's age range, which logs in (or signs up) and records the age.
+ * An age check alone needs a logged-in account, and only when the site cannot decide from the ages
+ * already proven (shared/utils/age.ts, decideGate): a settled gate gets no wallet request.
+ */
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ purpose?: string; community?: string }>(event)
+  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown }>(event)
   const b = await browserSession(event)
 
   let purpose: VpPurpose
   let gate
-  if (body?.purpose === 'signin') {
-    purpose = { kind: 'signin' }
-  } else if (body?.purpose === 'age' && body.community) {
+  if (body.purpose === 'signin') {
+    const intent = body.intent ?? 'signup'
+    if (intent !== 'signup' && intent !== 'login') throw refusal(400, 'bad_request', 'intent must be signup or login.')
+    if (body.community !== undefined) {
+      const c = typeof body.community === 'string' ? findCommunity(body.community) : undefined
+      if (!c?.gate) throw refusal(400, 'bad_request', 'This community has no age requirement.')
+      purpose = { kind: 'signin', intent, community: c.slug }
+      gate = c.gate
+    } else {
+      purpose = { kind: 'signin', intent }
+    }
+  } else if (body.purpose === 'age' && typeof body.community === 'string') {
     const c = findCommunity(body.community)
-    if (!c?.gate) throw createError({ statusCode: 400, statusMessage: 'This community has no age requirement.' })
+    if (!c?.gate) throw refusal(400, 'bad_request', 'This community has no age requirement.')
     const account = b.data.pseudonym ? store().accounts.get(b.data.pseudonym) : undefined
-    if (!account || account.banned) throw createError({ statusCode: 401, statusMessage: 'Log in to verify your age.' })
+    if (!account || account.banned) throw refusal(401, 'login_required', 'Log in to verify your age.')
+    const decision = decideGate(c.gate, account.birthDateRange, todayISO())
+    if (decision === 'deny') throw refusal(403, 'age_refused', 'The age already verified for this account does not meet this requirement.')
+    if (decision === 'allow') throw refusal(409, 'age_verified', 'The age already verified for this account meets this requirement.')
     purpose = { kind: 'age', community: c.slug }
     gate = c.gate
   } else {
-    throw createError({ statusCode: 400, statusMessage: 'Unknown purpose.' })
+    throw refusal(400, 'bad_request', 'Unknown purpose.')
   }
 
   let offer
@@ -29,12 +48,13 @@ export default defineEventHandler(async (event) => {
     offer = await verifierOffer()
   } catch (e) {
     console.error(`[vp] no offer: ${(e as Error).message}`)
-    throw createError({ statusCode: 503, statusMessage: 'The verifier is not available.' })
+    throw refusal(503, 'unavailable', 'The verifier is not available.')
   }
 
   const cfg = useRuntimeConfig(event)
   const origin = getRequestURL(event).origin
   const id = randomHex(16)
+  const ttl = sessionTtlMs()
   const query = buildCredentialQuery(gate ? gateRange(gate, todayISO()) : undefined)
   const s: VpSessionRecord = {
     id,
@@ -42,7 +62,7 @@ export default defineEventHandler(async (event) => {
     gate,
     ownerSid: b.data.sid!,
     createdAt: Date.now(),
-    expiresAt: Date.now() + SESSION_TTL_MS,
+    expiresAt: Date.now() + ttl,
     origin,
     nonce: randomHex(16),
     state: randomHex(16),
@@ -55,5 +75,5 @@ export default defineEventHandler(async (event) => {
   store().byState.set(s.state, id)
   addTrace(s, 'created', 'Session created', { purpose, req: query.req, offer })
 
-  return { id, authorizationUrl: authorizationUrl(String(cfg.public.siteHost), requestUriFor(origin, id)) }
+  return { id, authorizationUrl: authorizationUrl(String(cfg.public.siteHost), requestUriFor(origin, id)), expiresIn: Math.round(ttl / 1000) }
 })

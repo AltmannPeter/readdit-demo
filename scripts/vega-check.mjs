@@ -1,14 +1,15 @@
-// Checks the Vega addon directly, without the site: real proofs of the demo credential, the
-// pseudonym against an independent computation, and the verifier's refusals, each for its own
-// reason. Run after `npm run build:native`:   node scripts/vega-check.mjs
+// Checks the Vega addon directly, without the site: real proofs of the wallet's two demo
+// credentials, the pseudonym against an independent computation, and the verifier's refusals, each
+// for its own reason. Run after `npm run build:native`:   node scripts/vega-check.mjs
 //
-// Checks (exit 1 on the first failure):
-//   G1  a login presentation proves and verifies;
-//   G2  the verified pseudonym equals SHA-256("nym_auth/v1/known-offender-matching-ssc" ‖ seed ‖ 0x00×32 ‖ SHA-256(client_id)),
-//       computed here with node:crypto, and is the same at two logins;
+// Checks (exit 1 if any fails):
+//   G1  for each credential, a login presentation proves and verifies;
+//   G2  for each credential, the verified pseudonym equals SHA-256("nym_auth/v1/known-offender-matching-ssc" ‖ seed ‖ 0x00×32 ‖ SHA-256(client_id)),
+//       computed here with node:crypto, and is the same at two logins; the two credentials' pseudonyms differ;
 //   G3  the verifier refuses, with the expected code and input: a flipped proof byte, a changed results.nym,
 //       a handover with another nonce, a proof_time outside the tolerance, a changed proof_time, other age bounds;
-//   G4  a wrong PIN gets 401 invalid_pin; an 18+ request for the persona gets 422 unsatisfiable.
+//   G4  the prover takes no PIN: sign inputs with two different PINs both sign, and both proofs
+//       verify; the adult credential proves 18+, and the 18+ request refuses the teen with 422 unsatisfiable.
 import { createRequire } from 'node:module'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -17,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
 const addon = require(`${root}native/vega/readdit-vega.node`)
-const wallet = JSON.parse(readFileSync(`${root}app/wallet/demo-wallet.json`, 'utf8'))
+const [teen, adult] = JSON.parse(readFileSync(`${root}app/wallet/demo-wallet.json`, 'utf8')).holders
 const SHAPES = `${root}native/vega/circuits/mdoc/shapes.zst`
 const ANCHORS = readFileSync(`${root}native/vega/demo/document-signer.pem`, 'utf8')
 const HOST = 'readdit.example'
@@ -63,19 +64,20 @@ function request(age, nonce = randomBytes(16).toString('hex')) {
 const handoverOf = (r) => ({ client_id: r.client_id, nonce: r.nonce, response_uri: r.response_uri, jwk_thumbprint: null })
 
 let t = performance.now()
-const prover = await addon.loadProver(SHAPES, '123456')
+const prover = await addon.loadProver(SHAPES)
 const proverLoad = performance.now() - t
 t = performance.now()
 const verifier = await addon.loadVerifier(SHAPES, ANCHORS, 300)
 const verifierLoad = performance.now() - t
 console.log(`load: prover ${proverLoad.toFixed(0)} ms, verifier ${verifierLoad.toFixed(0)} ms (wall, includes the addon's own load_ms ${JSON.parse(prover.info).load_ms} / ${JSON.parse(verifier.info).load_ms})`)
 
-async function sign(r, pin = '123456') {
-  return JSON.parse(await prover.sign(JSON.stringify({ pin, device_key: wallet.device_key, doc_type: DOCTYPE, handover: handoverOf(r) })))
+/** Step 1 with `wallet`'s device key; `extra` adds fields to the input (a PIN, which the prover does not read). */
+async function sign(r, wallet, extra = {}) {
+  return JSON.parse(await prover.sign(JSON.stringify({ ...extra, device_key: wallet.device_key, doc_type: DOCTYPE, handover: handoverOf(r) })))
 }
 
-async function present(r) {
-  const s = await sign(r)
+async function present(r, wallet = teen, extra = {}) {
+  const s = await sign(r, wallet, extra)
   if (!s.ok) return s
   const w = await prover.witness(JSON.stringify({
     circuit_id: CIRCUIT, credential_query_id: 'nym_attestation', request: r, handover: handoverOf(r),
@@ -90,27 +92,29 @@ async function verify(r, presentation, { handover = handoverOf(r), now = new Dat
 }
 
 const sha256 = (...parts) => createHash('sha256').update(Buffer.concat(parts)).digest()
-const expectedNym = sha256(
-  Buffer.from('nym_auth/v1/known-offender-matching-ssc'),
-  Buffer.from(wallet.secret_seed, 'hex'),
-  Buffer.alloc(32),
-  sha256(Buffer.from(CLIENT_ID)),
-).toString('hex')
+const nymOf = (wallet) =>
+  sha256(Buffer.from('nym_auth/v1/known-offender-matching-ssc'), Buffer.from(wallet.secret_seed, 'hex'), Buffer.alloc(32), sha256(Buffer.from(CLIENT_ID))).toString('hex')
+const expectedNym = nymOf(teen)
 
-// G1 + G2: two logins.
-const nyms = []
-for (const i of [1, 2]) {
-  const r = request(undefined)
-  const p = await present(r)
-  check(`G1 login ${i}: proof created`, p.ok === true, p.ok ? `witness ${p.metrics.witness_ms} ms, prove ${p.metrics.prove_ms} ms, proof ${p.metrics.proof_bytes} B, presentation ${p.metrics.presentation_bytes} B, peak ${p.metrics.peak_memory_mb} MB` : JSON.stringify(p))
-  if (!p.ok) continue
-  const v = await verify(r, p.presentation)
-  check(`G1 login ${i}: verified`, v.ok === true, v.ok ? `verify ${v.metrics.verify_ms} ms` : `${v.code} ${v.input ?? ''} ${v.reason}`)
-  check(`G1 login ${i}: no age key in results`, v.ok && Object.keys(v.results).join() === 'nym', JSON.stringify(v.results))
-  nyms.push(v.results?.nym)
+// G1 + G2: two logins with each credential.
+const verified = {}
+for (const [name, wallet] of [['teen', teen], ['adult', adult]]) {
+  const nyms = []
+  for (const i of [1, 2]) {
+    const r = request(undefined)
+    const p = await present(r, wallet)
+    check(`G1 ${name} login ${i}: proof created`, p.ok === true, p.ok ? `witness ${p.metrics.witness_ms} ms, prove ${p.metrics.prove_ms} ms, proof ${p.metrics.proof_bytes} B, presentation ${p.metrics.presentation_bytes} B, peak ${p.metrics.peak_memory_mb} MB` : JSON.stringify(p))
+    if (!p.ok) continue
+    const v = await verify(r, p.presentation)
+    check(`G1 ${name} login ${i}: verified`, v.ok === true, v.ok ? `verify ${v.metrics.verify_ms} ms` : `${v.code} ${v.input ?? ''} ${v.reason}`)
+    check(`G1 ${name} login ${i}: no age key in results`, v.ok && Object.keys(v.results).join() === 'nym', JSON.stringify(v.results))
+    nyms.push(v.results?.nym)
+  }
+  check(`G2 ${name} pseudonym = independent SHA-256 derivation`, nyms[0] === nymOf(wallet), `${nyms[0]} vs ${nymOf(wallet)}`)
+  check(`G2 ${name} same pseudonym at two logins`, nyms.length === 2 && nyms[0] === nyms[1])
+  verified[name] = nyms[0]
 }
-check('G2 pseudonym = independent SHA-256 derivation', nyms[0] === expectedNym, `${nyms[0]} vs ${expectedNym}`)
-check('G2 same pseudonym at two logins', nyms.length === 2 && nyms[0] === nyms[1])
+check('G2 the two credentials give different pseudonyms', verified.teen && verified.adult && verified.teen !== verified.adult, `${verified.teen?.slice(0, 16)}… vs ${verified.adult?.slice(0, 16)}…`)
 
 // G3: tamper with a teenspace presentation.
 const r = request(TEEN)
@@ -166,11 +170,19 @@ const withAge = (req, age) => {
 expectRefusal('G3e other age bound ge (one day later)', await verify(withAge(r, { ge: plusDays(TEEN.ge, 1), le: TEEN.le }), p.presentation), 'public_input', 'age_check.ge')
 expectRefusal('G3e other age bound le (one day earlier)', await verify(withAge(r, { ge: TEEN.ge, le: plusDays(TEEN.le, -1) }), p.presentation), 'public_input', 'age_check.le')
 
-// G4 at the addon: a wrong PIN, and the 18+ community.
-const wrong = await sign(request(undefined), '000000')
-check('G4 wrong PIN refused 401 invalid_pin', wrong.ok === false && wrong.status === 401 && wrong.error === 'invalid_pin', JSON.stringify(wrong))
-const adult = await present(request(ADULT))
-check('G4 18+ request: 422 unsatisfiable', adult.ok === false && adult.status === 422 && adult.error === 'unsatisfiable', JSON.stringify(adult))
+// G4 at the addon: any PIN signs (the prover takes none), and the 18+ community.
+for (const pin of ['000000', '987654']) {
+  const r4 = request(undefined)
+  const p4 = await present(r4, teen, { pin })
+  const v4 = p4.ok ? await verify(r4, p4.presentation) : p4
+  check(`G4 PIN ${pin}: signs, and the proof verifies`, v4.ok === true && v4.results?.nym === expectedNym, v4.ok ? `nym ${v4.results.nym.slice(0, 16)}…` : JSON.stringify(v4))
+}
+const rAdult = request(ADULT)
+const pAdult = await present(rAdult, adult)
+const vAdult = pAdult.ok ? await verify(rAdult, pAdult.presentation) : pAdult
+check('G4 18+ request, adult credential: proves, verifies, age true', vAdult.ok === true && vAdult.results.age === true && vAdult.results.nym === nymOf(adult), JSON.stringify(vAdult.results ?? vAdult))
+const teen18 = await present(request(ADULT), teen)
+check('G4 18+ request, teen credential: 422 unsatisfiable', teen18.ok === false && teen18.status === 422 && teen18.error === 'unsatisfiable', JSON.stringify(teen18))
 
 console.log(failures ? `${failures} check(s) failed` : 'all checks passed')
 process.exit(failures ? 1 : 0)

@@ -8,10 +8,12 @@ import type { Account, AgeGate, BirthDateRange, Community } from '#shared/types'
 import type { CircuitEntry } from '#shared/registry/circuits'
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { gateRange } from '#shared/utils/age'
-import type { DialogFlow, LastOutcome, WalletFlow } from '~/composables/useFlow'
+import type { DialogFlow, LastOutcome, VerificationMetrics, WalletFlow } from '~/composables/useFlow'
 import type { WalletPurpose } from '~/composables/useWallet'
+import type { CommunityAccess } from '~/composables/useCommunityAccess'
 import type { ConsentView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
+import { credentialLabel } from '~/wallet/holder'
 import { ageText, birthRangeText, fmtDate, parseAuthorizationUrl } from '~/wallet/engine'
 
 export interface GuideRow {
@@ -55,10 +57,34 @@ export interface GuideInput {
   last: LastOutcome | null
   page: { kind: 'home' } | { kind: 'community'; community: Community } | { kind: 'other' }
   /** Access to the community on screen (useCommunityAccess). */
-  access: 'login' | 'allow' | 'ask' | 'deny' | null
+  access: CommunityAccess | null
   account: Account | null
   bannedHandle: string | null
-  credential: CredentialView | null
+  /** The wallet's credentials (the one in focus is wallet.credential). */
+  credentials: CredentialView[]
+}
+
+/** The credential in focus: open on the phone, or used by the request; else the wallet's first. */
+const focusOf = (i: GuideInput): CredentialView | null => i.wallet.credential ?? i.credentials[0] ?? null
+
+/** Which credential the request uses, and what choosing another one changes. */
+function usedCredentialSection(i: GuideInput, site: string): GuideSection | null {
+  const c = i.wallet.credential
+  if (!c) return null
+  return {
+    heading: 'Credential',
+    rows: [
+      { label: 'Used', value: credentialLabel(c) },
+      { label: 'Other matching credentials', value: String(Math.max(0, i.wallet.matching - 1)) },
+    ],
+    items:
+      i.wallet.matching > 1
+        ? [
+            `Each credential has its own secret seed. Under known-offender-matching-ssc the pseudonym is derived from the seed, so another credential gives another pseudonym for ${i.siteHost}, and so another ${site} account.`,
+          ]
+        : undefined,
+    stacked: true,
+  }
 }
 
 const ms = (n: number) => `${n < 10 ? n.toFixed(1) : Math.round(n).toLocaleString('en-GB')} ms`
@@ -102,8 +128,9 @@ function ageSection(c: ConsentView, site: string): GuideSection | null {
   }
 }
 
-function consentSections(c: ConsentView, site: string): GuideSection[] {
+function consentSections(c: ConsentView, site: string, i: GuideInput): GuideSection[] {
   return [
+    usedCredentialSection(i, site),
     pseudonymSection(c),
     ageSection(c, site),
     { heading: 'Not shared', items: c.notShared.map((n) => (n.value ? `${n.label} (${n.value})` : n.label)) },
@@ -123,32 +150,32 @@ function proofSection(w: WalletFlow, site: string): GuideSection | null {
   const m = w.metrics
   const circuit = w.view?.circuit
   if (!m && !circuit) return null
-  const sim = m?.simulated ? ' (simulated)' : ''
   const rows: GuideRow[] = []
+  if (w.credential) rows.push({ label: 'Credential', value: credentialLabel(w.credential) })
   if (circuit) rows.push({ label: 'Circuit', value: `${circuit.label} (${circuit.proof_system})` })
-  if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) + sim })
-  if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) + sim })
-  if (m?.prove_ms != null) rows.push({ label: 'Proving', value: ms(m.prove_ms) + sim })
-  if (m?.proof_bytes != null) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) + sim })
-  if (m?.presentation_bytes != null) rows.push({ label: 'Presentation size', value: kB(m.presentation_bytes) + sim })
-  rows.push({
-    label: 'Runs on',
-    value: m?.simulated
-      ? 'The offline simulation: no proof is created, and the times follow the benchmark model'
-      : `${site}'s server (the Vega addon), in place of the phone`,
-  })
+  if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) })
+  if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
+  if (m?.prove_ms != null) rows.push({ label: 'Proving', value: ms(m.prove_ms) })
+  if (m?.proof_bytes != null) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) })
+  if (m?.presentation_bytes != null) rows.push({ label: 'Presentation size', value: kB(m.presentation_bytes) })
+  rows.push({ label: 'Runs on', value: `${site}'s server (the Vega addon), in place of the phone` })
   return { heading: 'Proof', rows }
 }
 
-function checksSection(circuit: CircuitEntry | undefined, site: string, simulated = false): GuideSection | null {
+/** The verifier's timings, apart from the prover's: as measured on this machine, in the server. */
+function verificationSection(v: VerificationMetrics | null | undefined, site: string): GuideSection | null {
+  if (!v) return null
+  const rows: GuideRow[] = []
+  if (v.decode_ms != null) rows.push({ label: 'Decoding', value: ms(v.decode_ms) })
+  if (v.verify_ms != null) rows.push({ label: 'Verification', value: ms(v.verify_ms) })
+  if (v.total_ms != null) rows.push({ label: 'Verifier total', value: ms(v.total_ms) })
+  rows.push({ label: 'Verifier call', value: `${ms(v.round_trip_ms)}, timed by ${site}'s response route around the call` })
+  rows.push({ label: 'Runs on', value: `${site}'s server (the Vega addon); measured on this machine` })
+  return { heading: 'Verification', rows }
+}
+
+function checksSection(circuit: CircuitEntry | undefined, site: string): GuideSection | null {
   if (!circuit) return null
-  // server/utils/offline-backend.ts: no proof, so none of the circuit's public inputs is checked.
-  if (simulated) {
-    return {
-      heading: `What ${site} checks`,
-      items: ['Offline simulation: the circuit id, that the request offered it, and the results against the request. There is no proof to verify.'],
-    }
-  }
   const rows: GuideRow[] = circuit.public_inputs.map((p) => ({
     label: p.name,
     code: true,
@@ -196,13 +223,59 @@ function credentialSection(c: CredentialView | null): GuideSection | null {
 function requestContext(i: GuideInput): string {
   const p = i.dialog.purpose
   if (p?.kind === 'age') return `Age check · ${communityName(p.community)}`
-  if (i.bannedHandle || (i.last && !i.last.ok && i.last.kind === 'banned')) return 'Sign-up after the ban'
-  return p?.intent === 'login' ? 'Log-in' : 'Sign-up'
+  if (p?.community) return `Log-in and age check · ${communityName(p.community)}`
+  const name = p?.intent === 'login' ? 'Log-in' : 'Sign-up'
+  if (i.bannedHandle || (i.last && !i.last.ok && i.last.kind === 'banned')) return `${name} after the ban`
+  return name
+}
+
+/** What a refusal code from request_uri or response_uri means (server/api/vp/*). */
+const REFUSALS: Record<string, string> = {
+  already_used: 'the QR code was already used, and each request_uri answers once',
+  expired: 'the request expired',
+  cancelled: 'the request was cancelled when the dialog was closed',
+  unknown_session: 'it does not know the request',
+  state_mismatch: 'the state does not match the request',
+  already_answered: 'the request already has an answer',
+  unavailable: 'its verifier failed',
+}
+
+/** The wallet stopped on its own error: what happened and what the site sees, from the error's cause. */
+function walletErrorStep(i: GuideInput, context: string): GuideStep {
+  const e = i.wallet.error
+  const cause = e?.cause ?? ''
+  const [endpoint, status, code] = cause.split(' ')
+  const ended = i.dialog.phase === 'failed'
+  const waits = ended
+    ? `${i.siteName}'s request has already ended.`
+    : `The wallet sends no response, so ${i.siteName} waits until the request expires or the dialog is closed.`
+  let summary: string
+  if (endpoint === 'request_uri' && status) {
+    summary = `${i.siteName} refused to hand out the request (${status}): ${REFUSALS[code ?? ''] ?? 'see the technical view'}. ${waits}`
+  } else if (endpoint === 'response_uri' && status) {
+    summary = `${i.siteName} refused the wallet's response (${status}): ${REFUSALS[code ?? ''] ?? 'see the technical view'}. Nothing was applied.`
+  } else if (endpoint === '/api/wallet/capabilities') {
+    summary = `The wallet could not reach the prover in ${i.siteName}'s server (the Vega addon), so it cannot answer requests. ${waits}`
+  } else if (endpoint?.startsWith('/api/wallet/')) {
+    summary = `The prover in ${i.siteName}'s server (the Vega addon) did not ${endpoint.endsWith('sign') ? 'sign' : 'create the proof'}. ${waits}`
+  } else if (e?.title === 'Verifier is not Trusted') {
+    summary = `The signed request did not check out, so the wallet stops and sends nothing to a verifier it cannot trust. ${waits}`
+  } else {
+    summary = `The wallet stopped with an error: ${e?.description ?? ''} ${waits}`
+  }
+  return {
+    id: 'wallet-error',
+    context,
+    title: e?.title ?? 'Error',
+    summary,
+    details: cause ? [{ heading: 'Error', rows: [{ label: 'Cause', value: cause, mono: true }, { label: 'Response sent', value: 'None' }], stacked: true }] : [],
+  }
 }
 
 function dialogStep(i: GuideInput): GuideStep {
   const w = i.wallet
   const context = requestContext(i)
+  if (w.switching) return switchStep(i, context)
   switch (w.screen) {
     case 'detail':
     case 'presentations':
@@ -212,28 +285,31 @@ function dialogStep(i: GuideInput): GuideStep {
     case 'request':
       return consentStep(i, context)
     case 'pin':
-      return w.pinRejected ? wrongPinStep(i, context) : pinStep(i, context)
+      return pinStep(i, context)
     case 'working':
       return provingStep(i, context)
     case 'unmet':
       return unmetStep(i, context)
     case 'declined':
-      return {
-        id: 'declined',
-        context,
-        stage: 2,
-        title: 'Declined',
-        summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
-        details: [],
-      }
+      return w.declinedAt === 'pin'
+        ? {
+            id: 'pin-cancelled',
+            context,
+            stage: 3,
+            title: 'Cancelled at the PIN',
+            summary: 'The person cancelled at the PIN screen. The device key did not sign, no proof was made, and the wallet answers access_denied, as for a declined request.',
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+          }
+        : {
+            id: 'declined',
+            context,
+            stage: 2,
+            title: 'Declined',
+            summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+          }
     case 'error':
-      return {
-        id: 'wallet-error',
-        context,
-        title: w.error?.title ?? 'Error',
-        summary: `The wallet stopped with an error: ${w.error?.description ?? ''}`,
-        details: [],
-      }
+      return walletErrorStep(i, context)
   }
   // The wallet is on its home screen or shows "Success!": the dialog's state decides.
   const failure = i.dialog.phase === 'failed' ? i.dialog.failure : w.sentError === 'access_denied' ? 'denied' : w.sentError
@@ -245,10 +321,8 @@ function dialogStep(i: GuideInput): GuideStep {
       context,
       stage: 5,
       title: 'Verifying',
-      summary: w.metrics?.simulated
-        ? `${i.siteName} received the presentation and checks it against the request it signed. The offline simulation sends no proof.`
-        : `${i.siteName} received the presentation and verifies the proof against the request it signed.`,
-      details: [checksSection(w.view?.circuit, i.siteName, !!w.metrics?.simulated)].filter((s): s is GuideSection => !!s),
+      summary: `${i.siteName} received the presentation and verifies the proof against the request it signed.`,
+      details: [checksSection(w.view?.circuit, i.siteName)].filter((s): s is GuideSection => !!s),
     }
   }
   return qrStep(i, context)
@@ -271,7 +345,10 @@ function qrStep(i: GuideInput, context: string): GuideStep {
       ]
     : []
   let summary: string
-  if (p?.kind === 'age') {
+  if (p?.kind === 'signin' && p.community) {
+    const c = i.page.kind === 'community' ? i.page.community : null
+    summary = `${communityName(p.community)}${c?.gate ? ` is for ${gateText(c.gate)}` : ' has an age requirement'}. The visitor is not logged in, so ${i.siteName} shows one QR code that asks for the pseudonym and the age range together.`
+  } else if (p?.kind === 'age') {
     const c = i.page.kind === 'community' ? i.page.community : null
     const gate = c?.gate ? ` is for ${gateText(c.gate)}` : ''
     summary = `${communityName(p.community)}${gate}. ${
@@ -282,17 +359,39 @@ function qrStep(i: GuideInput, context: string): GuideStep {
   } else {
     summary = `${i.siteName} shows a QR code that points to a signed OpenID4VP request. The person scans it with the SIROS ID wallet on their phone.`
   }
-  return { id: p?.kind === 'age' ? 'age-qr' : 'signin-qr', context, stage: 0, title: 'QR code', summary, details }
+  const id = p?.kind === 'age' ? 'age-qr' : p?.community ? 'signin-age-qr' : 'signin-qr'
+  return { id, context, stage: 0, title: 'QR code', summary, details }
 }
 
 function credentialStep(i: GuideInput, context: string): GuideStep {
-  const c = i.credential
+  const c = focusOf(i)
+  const n = i.credentials.length
   return {
     id: 'credential',
     context,
     title: 'The credential',
-    summary: `The wallet holds one Age and pseudonym credential${c ? ` from ${c.issuer.name}` : ''}. It contains a birth date and a commitment to a secret seed. Neither value is sent to sites.`,
+    summary: `The wallet holds ${n === 1 ? 'one Age and pseudonym credential' : `${n} Age and pseudonym credentials`}${c ? ` from ${c.issuer.name}` : ''}${
+      n > 1 && c ? `; this one was issued for a birth date of ${fmtDate(c.attributes.birth_date)}` : ''
+    }. Each contains a birth date and a commitment to its own secret seed. Neither value is sent to sites.`,
     details: [credentialSection(c)].filter((s): s is GuideSection => !!s),
+  }
+}
+
+function switchStep(i: GuideInput, context: string): GuideStep {
+  const c = i.wallet.credential
+  return {
+    id: 'switch-credential',
+    context,
+    stage: 2,
+    title: 'Switch credential',
+    summary: `${i.wallet.matching} credentials in the wallet match the request. Each has its own secret seed, so each gives a different pseudonym for ${i.siteHost}, and so a different ${i.siteName} account.`,
+    details: [
+      {
+        heading: 'Credentials',
+        rows: i.credentials.map((k) => ({ label: k.index === c?.index ? 'Current' : 'Other', value: credentialLabel(k) })),
+        stacked: true,
+      },
+    ],
   }
 }
 
@@ -320,47 +419,40 @@ function scanStep(i: GuideInput, context: string): GuideStep {
 function consentStep(i: GuideInput, context: string): GuideStep {
   const c = i.wallet.consent
   const host = c?.verifier.host ?? i.siteHost
+  const signinAge = !!c?.age && i.dialog.purpose?.kind === 'signin'
   let summary: string
-  if (c?.age) {
+  if (signinAge) {
+    summary = `${i.siteName} asks for a pseudonym and proof that the holder is ${c!.age!.text}, in one presentation. The pseudonym logs in to the account, or creates it; the birth date stays on the phone.`
+  } else if (c?.age) {
     summary = `${i.siteName} asks for the account's pseudonym and proof that the holder is ${c.age.text}. The wallet proves both from the credential; the birth date stays on the phone.`
   } else if (i.bannedHandle) {
     summary = `${i.siteName} asks for a pseudonym. The wallet derives the same one as at the first sign-up, because it depends only on the wallet's secret seed and ${i.siteName}'s verifier_id.`
   } else {
     summary = `${i.siteName} asks for a pseudonym. The wallet derives one that is specific to ${host} and proves that it comes from a valid credential, without revealing the credential.`
   }
-  return { id: c?.age ? 'age-consent' : 'consent', context, stage: 2, title: 'Consent', summary, details: c ? consentSections(c, i.siteName) : [] }
+  return { id: signinAge ? 'signin-age-consent' : c?.age ? 'age-consent' : 'consent', context, stage: 2, title: 'Consent', summary, details: c ? consentSections(c, i.siteName, i) : [] }
 }
 
 function pinStep(i: GuideInput, context: string): GuideStep {
-  const key = i.credential ? `${i.credential.deviceKey.kty} ${i.credential.deviceKey.crv}, bound to the credential` : 'Bound to the credential'
+  const f = focusOf(i)
+  const key = f ? `${f.deviceKey.kty} ${f.deviceKey.crv}, bound to the credential` : 'Bound to the credential'
   return {
     id: 'pin',
     context,
     stage: 3,
     title: 'PIN',
-    summary: "The PIN unlocks the wallet's device key, which signs this request. The circuit verifies that signature, so the proof is valid only for this request.",
+    summary: "The PIN unlocks the wallet's device key, which signs this request. Any PIN unlocks it in this demo. The circuit verifies the signature, so the proof is valid only for this request.",
     details: [
       {
         heading: 'Device key',
         rows: [
           { label: 'Key', value: key },
           { label: 'Signs', value: 'DeviceAuthentication over the OpenID4VP session transcript: client_id, nonce and response_uri' },
-          { label: 'Wrong PIN', value: 'Refused before the device key signs' },
+          { label: 'PIN', value: 'Any 6 digits unlock the key in this demo; the PIN never leaves the phone. The SIROS ID app unlocks with a passkey.' },
         ],
         stacked: true,
       },
     ],
-  }
-}
-
-function wrongPinStep(i: GuideInput, context: string): GuideStep {
-  return {
-    id: 'wrong-pin',
-    context,
-    stage: 3,
-    title: 'Wrong PIN',
-    summary: `The PIN was wrong, so the device key did not sign and nothing was sent to ${i.siteName}. The wallet asks again.`,
-    details: [{ heading: 'Prover response', rows: [{ label: 'Status', value: '401 invalid_pin', mono: true }] }],
   }
 }
 
@@ -371,9 +463,7 @@ function provingStep(i: GuideInput, context: string): GuideStep {
     context,
     stage: 4,
     title: 'Proof',
-    summary: i.wallet.metrics?.simulated
-      ? `The offline simulation stands in for the prover: it checks the request against the credential and sends a presentation with a random proof of Vega's size. ${i.siteName} checks the presentation, not a proof.`
-      : `The wallet proves the request's statement over its credential${circuit ? ` with ${circuit.label}` : ''} and sends the presentation to ${i.siteName}. ${i.siteName} verifies it against the request it signed.`,
+    summary: `The wallet proves the request's statement over its credential${circuit ? ` with ${circuit.label}` : ''} and sends the presentation to ${i.siteName}. ${i.siteName} verifies it against the request it signed.`,
     details: [proofSection(i.wallet, i.siteName)].filter((s): s is GuideSection => !!s),
   }
 }
@@ -387,7 +477,9 @@ function unmetStep(i: GuideInput, context: string): GuideStep {
       context,
       stage: 2,
       title: 'Requirement not met',
-      summary: `The request asks for proof of age ${ageText(age)}. The credential's birth date is outside that range, so the wallet cannot make the proof. It answers access_denied, as it does for a declined request.`,
+      summary: `The request asks for proof of age ${ageText(age)}. The credential's birth date is outside that range, so the wallet cannot make the proof with it. ${
+        i.wallet.matching > 1 ? 'Another matching credential can be chosen; closing answers' : 'It answers'
+      } access_denied, as it does for a declined request.`,
       details: [
         {
           heading: 'Age check',
@@ -398,7 +490,8 @@ function unmetStep(i: GuideInput, context: string): GuideStep {
             { label: 'Proof created', value: 'No' },
           ],
         },
-      ],
+        usedCredentialSection(i, i.siteName),
+      ].filter((s): s is GuideSection => !!s),
     }
   }
   return {
@@ -409,16 +502,37 @@ function unmetStep(i: GuideInput, context: string): GuideStep {
     summary: `The wallet cannot answer this request: ${
       v?.problem === 'no_circuit' ? 'it has no circuit in common with the request' : 'the request is outside what the wallet supports'
     }. It answers invalid_request, which does not depend on the holder's data.`,
-    details: [],
+    details: [
+      {
+        heading: 'Request',
+        rows: [
+          ...(v?.reason ? [{ label: 'Reason', value: v.reason }] : []),
+          { label: 'Response', value: 'invalid_request' },
+          { label: 'Proof created', value: 'No' },
+        ],
+        stacked: true,
+      },
+    ],
   }
 }
 
 function successStep(i: GuideInput, context: string): GuideStep {
   const kind = i.dialog.completion?.kind
   const handle = i.dialog.completion?.handle ?? i.account?.handle
-  const checks = checksSection(i.wallet.view?.circuit, i.siteName, !!i.wallet.metrics?.simulated)
-  const verified = i.wallet.metrics?.simulated ? 'checked the presentation (offline simulation)' : 'verified the proof'
+  const checks = checksSection(i.wallet.view?.circuit, i.siteName)
   const proof = proofSection(i.wallet, i.siteName)
+  const verification = verificationSection(i.dialog.verification, i.siteName)
+  if (i.dialog.completion?.age && (kind === 'created' || kind === 'logged_in')) {
+    const age = i.wallet.consent?.age
+    return {
+      id: 'signin-age-verified',
+      context,
+      stage: 5,
+      title: kind === 'created' ? 'Account created, age verified' : 'Logged in, age verified',
+      summary: `${i.siteName} verified one proof for both: the pseudonym, which ${kind === 'created' ? `created u/${handle}` : `belongs to u/${handle}, so the person is logged in`}, and that the holder is ${age?.text ?? 'in the requested range'}. It stores the proven birth-date range, not a birth date.`,
+      details: [storedSection(i.account, i.siteName), proof, verification, checks].filter((s): s is GuideSection => !!s),
+    }
+  }
   if (kind === 'age') {
     const age = i.wallet.consent?.age
     return {
@@ -426,8 +540,8 @@ function successStep(i: GuideInput, context: string): GuideStep {
       context,
       stage: 5,
       title: 'Age verified',
-      summary: `${i.siteName} ${i.wallet.metrics?.simulated ? 'accepted, from the offline simulation without a proof,' : 'verified'} that the holder is ${age?.text ?? 'in the requested range'} and that the pseudonym is the logged-in account's. It stores the proven birth-date range, not a birth date.`,
-      details: [storedSection(i.account, i.siteName), proof, checks].filter((s): s is GuideSection => !!s),
+      summary: `${i.siteName} verified that the holder is ${age?.text ?? 'in the requested range'} and that the pseudonym is the logged-in account's. It stores the proven birth-date range, not a birth date.`,
+      details: [storedSection(i.account, i.siteName), proof, verification, checks].filter((s): s is GuideSection => !!s),
     }
   }
   return {
@@ -437,13 +551,23 @@ function successStep(i: GuideInput, context: string): GuideStep {
     title: kind === 'created' ? 'Account created' : 'Logged in',
     summary:
       kind === 'created'
-        ? `${i.siteName} ${verified} and created u/${handle}. The pseudonym is the account identifier; ${i.siteName} has no name, email address or birth date for it.`
-        : `${i.siteName} ${verified}. The pseudonym belongs to an existing account, so the person is logged in as u/${handle}.`,
-    details: [storedSection(i.account, i.siteName), proof, checks].filter((s): s is GuideSection => !!s),
+        ? `${i.siteName} verified the proof and created u/${handle}. The pseudonym is the account identifier; ${i.siteName} has no name, email address or birth date for it.`
+        : i.dialog.purpose?.kind === 'signin' && i.dialog.purpose.intent === 'signup'
+          ? `${i.siteName} verified the proof. The pseudonym already has an account, so the sign-up logs in to u/${handle} and creates no second account.`
+          : `${i.siteName} verified the proof. The pseudonym belongs to an existing account, so the person is logged in as u/${handle}.`,
+    details: [storedSection(i.account, i.siteName), proof, verification, checks].filter((s): s is GuideSection => !!s),
   }
 }
 
+/** A request that ended without being applied; when a presentation was verified or refused, its
+ *  verifier timings join the details. */
 function failedStep(i: GuideInput, context: string, failure: string): GuideStep {
+  const step = failedStepFor(i, context, failure)
+  const v = verificationSection(i.dialog.verification, i.siteName)
+  return v ? { ...step, details: [...step.details, v] } : step
+}
+
+function failedStepFor(i: GuideInput, context: string, failure: string): GuideStep {
   const p = i.dialog.purpose
   const base = { context, stage: 5 }
   switch (failure) {
@@ -458,15 +582,54 @@ function failedStep(i: GuideInput, context: string, failure: string): GuideStep 
         summary:
           p?.kind === 'age'
             ? `${i.siteName} received ${failure === 'denied' ? 'access_denied' : 'invalid_request'} and no data. ${communityName(p.community)} stays closed and the account is unchanged.`
-            : `${i.siteName} received ${failure === 'denied' ? 'access_denied' : 'invalid_request'} and no data. No account was created or logged in.`,
+            : p?.community
+              ? `${i.siteName} received ${failure === 'denied' ? 'access_denied' : 'invalid_request'} and no data. No account was created or logged in, and ${communityName(p.community)} stays closed.`
+              : `${i.siteName} received ${failure === 'denied' ? 'access_denied' : 'invalid_request'} and no data. No account was created or logged in.`,
         details: [],
       }
     case 'invalid':
       return { ...base, id: 'invalid', title: 'Not verified', summary: `${i.siteName} could not verify the presentation and discarded it. The technical view shows the rule that failed.`, details: [] }
     case 'unavailable':
-      return { ...base, id: 'unavailable', title: 'Verifier not available', summary: 'The verifier is not available. The moderation view can switch the proof backend to the offline simulation.', details: [] }
+      return {
+        ...base,
+        id: 'unavailable',
+        title: 'Verifier not available',
+        summary: `${i.siteName}'s proof backend, the Vega addon in its server, failed, so ${i.siteName} could not ${i.dialog.authUrl ? 'verify the response' : 'start the request'}. Nothing was applied. The technical view and the server log show the error.`,
+        details: [],
+      }
     case 'expired':
-      return { ...base, id: 'expired', title: 'Request expired', summary: 'The request expired before the wallet answered. Try again shows a new QR code.', details: [] }
+      return { ...base, id: 'expired', title: 'Request expired', summary: 'The request expired before the wallet answered. Its request_uri and response_uri now refuse with 410. Try again shows a new QR code.', details: [] }
+    case 'gone':
+      return { ...base, id: 'gone', title: 'Request no longer known', summary: `${i.siteName} no longer has this request, for example after a demo reset. Try again shows a new QR code.`, details: [] }
+    case 'no_account':
+      return {
+        ...base,
+        id: 'no-account',
+        title: 'No account',
+        summary: `The wallet proved its pseudonym for ${i.siteHost}, and ${i.siteName} has no account for it. A log-in only finds an existing account; it creates none. Sign up sends the same wallet request and creates the account.`,
+        details: [i.wallet.consent ? pseudonymSection(i.wallet.consent) : null].filter((s): s is GuideSection => !!s),
+      }
+    case 'logged_out':
+      return {
+        ...base,
+        id: 'logged-out',
+        title: 'Logged out',
+        summary: `The browser was logged out while the wallet answered, so ${i.siteName} has no account to apply the age proof to. Nothing was stored.`,
+        details: [],
+      }
+    case 'login_required':
+    case 'age_refused':
+    case 'age_verified':
+      return {
+        ...base,
+        id: 'not-started',
+        title: 'No request',
+        summary:
+          failure === 'login_required'
+            ? `${i.siteName} asks for an age check only for a logged-in account, so it created no request.`
+            : `The age already proven for this account settles this community's requirement, so ${i.siteName} created no request.`,
+        details: [],
+      }
     case 'mismatch':
       return {
         ...base,
@@ -480,6 +643,18 @@ function failedStep(i: GuideInput, context: string, failure: string): GuideStep 
   }
 }
 
+/** The intent of the sign-in request on screen, or of the one that just ended. */
+function signinIntent(i: GuideInput): 'signup' | 'login' | null {
+  const p = i.dialog.open ? i.dialog.purpose : i.last?.purpose
+  return p?.kind === 'signin' ? p.intent : null
+}
+
+/** The community of a sign-in that also checks the age, on screen or just ended. */
+function signinCommunity(i: GuideInput): string | undefined {
+  const p = i.dialog.open ? i.dialog.purpose : i.last?.purpose
+  return p?.kind === 'signin' ? p.community : undefined
+}
+
 function bannedSignupStep(i: GuideInput, context: string, ageCheck = false): GuideStep {
   const handle = i.last?.handle ?? i.bannedHandle
   const pseudonym = i.wallet.consent ? pseudonymSection(i.wallet.consent) : null
@@ -490,7 +665,7 @@ function bannedSignupStep(i: GuideInput, context: string, ageCheck = false): Gui
     title: 'Account banned',
     summary: ageCheck
       ? `The account${handle ? ` u/${handle}` : ''} is banned, so ${i.siteName} does not apply the age proof.`
-      : `The wallet derived the same pseudonym for ${i.siteHost} as at the first sign-up. ${i.siteName} matched it to the banned account${handle ? ` u/${handle}` : ''} and refused the sign-up.`,
+      : `The wallet derived the same pseudonym for ${i.siteHost} as at the first sign-up. ${i.siteName} matched it to the banned account${handle ? ` u/${handle}` : ''} and refused the ${signinCommunity(i) ? 'log-in and the age check' : signinIntent(i) === 'login' ? 'log-in' : 'sign-up'}.`,
     details: pseudonym ? [pseudonym] : [],
   }
 }
@@ -501,7 +676,26 @@ function bannedSignupStep(i: GuideInput, context: string, ageCheck = false): Gui
 function siteStep(i: GuideInput): GuideStep {
   const last = i.last
   if (last && !last.ok && last.kind === 'banned' && last.purpose.kind === 'signin') {
-    return { ...bannedSignupStep(i, 'Sign-up after the ban'), stage: undefined }
+    return {
+      ...bannedSignupStep(i, last.purpose.community ? `Log-in and age check · ${communityName(last.purpose.community)}` : last.purpose.intent === 'login' ? 'Log-in after the ban' : 'Sign-up after the ban'),
+      stage: undefined,
+    }
+  }
+  if (last && !last.ok && last.kind === 'closed') {
+    return {
+      id: 'request-closed',
+      context:
+        last.purpose.kind === 'age'
+          ? `Age check · ${communityName(last.purpose.community)}`
+          : last.purpose.community
+            ? `Log-in and age check · ${communityName(last.purpose.community)}`
+            : last.purpose.intent === 'login'
+              ? 'Log-in'
+              : 'Sign-up',
+      title: 'Request closed',
+      summary: `The dialog was closed before the request ended. ${i.siteName} cancelled the request on its server, so an answer the wallet sends later is refused and nothing is applied.`,
+      details: [{ heading: 'Request', rows: [{ label: 'Status', value: 'failed, cancelled', mono: true }, { label: 'Later answers', value: '410 cancelled', mono: true }] }],
+    }
   }
   if (i.bannedHandle) {
     return {
@@ -524,7 +718,6 @@ function siteStep(i: GuideInput): GuideStep {
   }
   if (i.page.kind === 'community') return communityStep(i, i.page.community)
   if (!i.account) {
-    const c = i.credential
     return {
       id: 'start',
       context: i.siteName,
@@ -534,8 +727,7 @@ function siteStep(i: GuideInput): GuideStep {
         {
           heading: 'Demo setup',
           rows: [
-            ...(c ? [{ label: 'Wallet credential', value: `${c.title} (${c.docType}), issued by ${c.issuer.name}` }] : []),
-            ...(c ? [{ label: 'Birth date in the credential', value: fmtDate(c.attributes.birth_date) }] : []),
+            ...i.credentials.map((c, k) => ({ label: `Wallet credential ${k + 1}`, value: `${c.title} (${c.docType}), issued by ${c.issuer.name}, birth date ${fmtDate(c.attributes.birth_date)}` })),
             { label: 'Mocked', value: 'The site and the phone screens' },
             { label: 'Real', value: 'The OpenID4VP requests and responses, the proofs and their verification' },
             { label: 'Posts and other accounts', value: 'Sample data' },
@@ -555,7 +747,8 @@ function siteStep(i: GuideInput): GuideStep {
       details: [
         storedSection(i.account, i.siteName),
         proofSection(i.wallet, i.siteName),
-        checksSection(i.wallet.view?.circuit, i.siteName, !!i.wallet.metrics?.simulated),
+        verificationSection(i.dialog.verification, i.siteName),
+        checksSection(i.wallet.view?.circuit, i.siteName),
       ].filter((s): s is GuideSection => !!s),
     }
   }
@@ -571,12 +764,38 @@ function siteStep(i: GuideInput): GuideStep {
 function communityStep(i: GuideInput, c: Community): GuideStep {
   const name = communityName(c)
   const context = name
+  if (i.access === 'ask-signin' && c.gate) {
+    const lastHere = i.last?.purpose.community === c.slug ? i.last : null
+    return {
+      id: 'age-signin',
+      context,
+      title: 'Age-restricted community',
+      summary: `${name} is for ${gateText(c.gate)}. The visitor is not logged in, so ${i.siteName} asks the wallet once for both: the pseudonym, which logs in to the account or creates it, and proof of the age range.${
+        lastHere && !lastHere.ok ? ` The last request ended with ${lastHere.kind === 'denied' ? 'access_denied' : lastHere.kind}.` : ''
+      }`,
+      details: [
+        {
+          heading: 'One request',
+          rows: [
+            { label: 'Requirement', value: gateText(c.gate) },
+            { label: 'Birth dates that qualify today', value: birthRangeText(gateRange(c.gate, i.today)) },
+            { label: 'req', value: 'pseudonym-v1-sha256 and age_check, in one credential query', mono: true },
+          ],
+          items: [
+            'One presentation carries the pseudonym and the age result: both are outputs of the same proof over the same credential, so the age is bound to the pseudonym.',
+            `A new pseudonym creates the account; an existing one logs in. ${i.siteName} records the proven age range either way.`,
+          ],
+          stacked: true,
+        },
+      ],
+    }
+  }
   if (i.access === 'login' || !i.account) {
     return {
       id: 'login-required',
       context,
       title: 'Log-in required',
-      summary: `${i.siteName} shows communities only to logged-in accounts. Logging in uses the same wallet request as signing up.`,
+      summary: `${i.siteName} shows communities only to logged-in accounts. Logging in uses the same wallet request as signing up: a log-in finds the existing account, a sign-up creates it.`,
       details: [],
     }
   }
@@ -595,7 +814,8 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
     { label: 'Birth dates that qualify today', value: birthRangeText(required) },
     { label: 'Proven for this account', value: rangeText(i.account.birthDateRange) },
   ]
-  const lastHere = i.last?.purpose.kind === 'age' && i.last.purpose.community === c.slug ? i.last : null
+  // The last request for this community: an age check, or a sign-in that checked the age.
+  const lastHere = i.last?.purpose.community === c.slug ? i.last : null
   if (i.access === 'ask') {
     return {
       id: 'age-ask',
@@ -627,7 +847,9 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
         rows: [...gateRows, { label: 'Age checks passed', value: i.account.ageProofs.map((p) => p.label).join(', ') || 'None' }],
         stacked: true,
       },
-      ...(lastHere?.ok ? [proofSection(i.wallet, i.siteName), checksSection(i.wallet.view?.circuit, i.siteName, !!i.wallet.metrics?.simulated)] : []),
+      ...(lastHere?.ok
+        ? [proofSection(i.wallet, i.siteName), verificationSection(i.dialog.verification, i.siteName), checksSection(i.wallet.view?.circuit, i.siteName)]
+        : []),
     ].filter((s): s is GuideSection => !!s),
   }
 }
