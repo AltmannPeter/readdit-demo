@@ -1,0 +1,19 @@
+{
+  "caseName": "changed ph",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "PresentationContext",
+  "input": {
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941500",
+    "commitments": [
+      "a8f49e1493c03dc64b960f5cdd8fd21d08b4960ee3e0799806157c0ba9d7e8559ffe3abc9f163c7a047c4b1d5dcf720f",
+      "908951975f2ef3dd46ed0bf239de08d173b9f3f0c01b2830abbf0cc1df83bd98258e935f114bd97d99ee18f8dd33b86c",
+      "a8f49e1493c03dc64b960f5cdd8fd21d08b4960ee3e0799806157c0ba9d7e8559ffe3abc9f163c7a047c4b1d5dcf720f"
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "output": "0000000000000020bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba9415000000000000000003a8f49e1493c03dc64b960f5cdd8fd21d08b4960ee3e0799806157c0ba9d7e8559ffe3abc9f163c7a047c4b1d5dcf720f908951975f2ef3dd46ed0bf239de08d173b9f3f0c01b2830abbf0cc1df83bd98258e935f114bd97d99ee18f8dd33b86ca8f49e1493c03dc64b960f5cdd8fd21d08b4960ee3e0799806157c0ba9d7e8559ffe3abc9f163c7a047c4b1d5dcf720f"
+  }
+}

@@ -3,6 +3,9 @@
 // Desktop figures are measurements on Apple M5 and AMD Ryzen 9, from:
 //   NYM-AUTH.md               full nym_auth statement (age + pseudonym) on mdoc
 //   vega-caching-analysis.md  per-phase figures for a 1920-byte MSO
+// BBS (mms_zk): bbs-cd-plugins' full-flow-bench (n = 20, 1 thread) on the 2-core Intel Xeon
+// 2.8 GHz cloud VM the BBS backend was built on, 2026-10-19: ETSI BBS proof, ecdsa-pop (hashed,
+// 96-bit limbs), date-range and pseudonym in one presentation.
 // Phone figures are NOT measured: desktop x PHONE_FACTOR (1-5x), applied only to
 // phases that run on the phone.
 
@@ -26,7 +29,7 @@ export interface Phase {
 }
 
 export interface SystemModel {
-  key: 'longfellow' | 'vega'
+  key: 'longfellow' | 'vega' | 'bbs'
   label: string
   proofSystem: string
   proofBytes: number
@@ -36,6 +39,7 @@ export interface SystemModel {
 
 const NYM = 'NYM-AUTH.md'
 const CACHE = 'vega-caching-analysis.md'
+const BBS_BENCH = 'bbs-cd-plugins full-flow-bench'
 
 export const SYSTEMS: SystemModel[] = [
   {
@@ -150,6 +154,64 @@ export const SYSTEMS: SystemModel[] = [
     notes: [
       'Prove assumes setup and precompute are cached. The demo implementation measured 340–948 ms per presentation (NYM-AUTH.md), which may include them every time.',
       'Peak memory of ~550 MB matters on phones.',
+    ],
+  },
+  {
+    key: 'bbs',
+    label: 'BBS',
+    proofSystem: 'bbs-cd-plugins-v0.1',
+    proofBytes: 126_710,
+    phases: [
+      {
+        id: 'setup',
+        label: 'Setup',
+        where: 'circuit provider',
+        frequency: 'Once per circuit version',
+        desktopMs: null,
+        detail: 'No circuit: the issuer key and the schema are all a verifier needs',
+        source: BBS_BENCH,
+      },
+      {
+        id: 'precompute',
+        label: 'Precompute',
+        where: 'phone',
+        frequency: 'Before each presentation',
+        desktopMs: [8, 9],
+        detail: 'BBS commitments and ecdsa-pop preparation, before the request arrives',
+        source: BBS_BENCH,
+      },
+      {
+        id: 'prove',
+        label: 'Prove',
+        where: 'phone',
+        frequency: 'Every presentation',
+        // Holder online: ProofGen 14.5, ecdsa-pop 135.8 (device signature 0.2), date-range 5.3, pseudonym 1.5.
+        desktopMs: [152, 158],
+        detail: 'ecdsa-pop 136 ms, BBS proof 14 ms, date-range 5 ms, pseudonym 1.5 ms',
+        source: BBS_BENCH,
+      },
+      {
+        id: 'transfer',
+        label: 'Send proof',
+        where: 'network',
+        frequency: 'Every presentation',
+        desktopMs: null,
+        detail: '126.7 kB, of which ecdsa-pop 123.2 kB',
+        source: BBS_BENCH,
+      },
+      {
+        id: 'verify',
+        label: 'Verify',
+        where: 'Readdit server',
+        frequency: 'Every presentation',
+        // ProofVerify 10.4, ecdsa-pop 58.0, date-range 9.8, pseudonym 1.3, parse 1.6.
+        desktopMs: [80, 82],
+        detail: 'ecdsa-pop 58 ms, BBS proof 10 ms, date-range 10 ms',
+        source: BBS_BENCH,
+      },
+    ],
+    notes: [
+      'Measured on a 2-core Intel Xeon cloud VM, not on the desktop machines above. Device binding (ecdsa-pop) takes most of the time and 97% of the size; without it a presentation is about 3.5 kB.',
     ],
   },
 ]

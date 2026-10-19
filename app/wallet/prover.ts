@@ -1,8 +1,8 @@
 import type { RequestObject } from '#shared/types/oid4vp'
-import { holders } from './holder'
+import { holders, mdocMaterial } from './holder'
 
-// The phone's native steps, through the site's /api/wallet/* routes to the prover (the Vega
-// addon). Each call carries the holder material that step needs; the prover keeps none of it.
+// The phone's native steps, through the site's /api/wallet/* routes to the provers (the Vega and
+// BBS addons). Each call carries the holder material that step needs; the prover keeps none of it.
 
 export interface SignOutput {
   /** r ‖ s, hex */
@@ -47,7 +47,7 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
   try {
     return await $fetch<SignOutput>('/api/wallet/sign', {
       method: 'POST',
-      body: { request: o.request, device_key: holders[o.credential]!.device_key },
+      body: { request: o.request, device_key: mdocMaterial(o.credential).device_key },
     })
   } catch (e) {
     throw failure('/api/wallet/sign', e)
@@ -55,17 +55,53 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
 }
 
 /** Steps 2 and 3: the witness from the credential, then the proof. */
-export async function prove(o: { request: RequestObject; circuitId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
+export async function prove(o: { request: RequestObject; queryId: string; circuitId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
+  const m = mdocMaterial(o.credential)
   try {
     return await $fetch<ProveOutput>('/api/wallet/prove', {
       method: 'POST',
       body: {
         request: o.request,
+        credential_query_id: o.queryId,
         circuit_id: o.circuitId,
-        credential: holders[o.credential]!.credential,
-        secret_seed: holders[o.credential]!.secret_seed,
+        credential: m.credential,
+        secret_seed: m.secret_seed,
         device_signature: o.deviceSignature,
       },
+    })
+  } catch (e) {
+    throw failure('/api/wallet/prove', e)
+  }
+}
+
+export interface BbsProveOutput {
+  scheme_id: string
+  /** base64url of the BBS-CD envelope */
+  presentation: string
+  results: Record<string, string | true>
+  metrics: {
+    offline_ms?: number
+    bbs_ms?: number
+    ecdsa_pop_ms?: number
+    device_sign_ms?: number
+    pseudonym_ms?: number
+    date_range_ms?: number | null
+    online_ms?: number
+    prove_ms?: number
+    total_ms?: number
+    presentation_bytes?: number
+    parts?: { bbs_proof: number; ecdsa_pop: number; pseudonym: number; date_range: number | null }
+  }
+}
+
+/** mms_zk, once the PIN screen has unlocked the wallet: one step. The device key signs inside the
+ *  ecdsa-pop plugin; the phone sends the BBS credential and the device key, as for the mdoc. */
+export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number }): Promise<BbsProveOutput> {
+  const m = holders[o.credential]!
+  try {
+    return await $fetch<BbsProveOutput>('/api/wallet/prove', {
+      method: 'POST',
+      body: { request: o.request, credential_query_id: o.queryId, credential: m.credential, device_key: m.device_key },
     })
   } catch (e) {
     throw failure('/api/wallet/prove', e)

@@ -1,5 +1,5 @@
 import { findCommunity } from '#shared/data/communities'
-import { buildCredentialQuery, authorizationUrl, clientIdFor, requestUriFor } from '#shared/utils/dcql'
+import { buildDcqlQuery, authorizationUrl, clientIdFor, requestUriFor } from '#shared/utils/dcql'
 import { decideGate, gateRange, todayISO } from '#shared/utils/age'
 import { randomHex } from '#shared/utils/bytes'
 import type { VpPurpose, VpSessionRecord } from '../../utils/store'
@@ -69,7 +69,8 @@ export default defineEventHandler(async (event) => {
   const origin = publicOrigin(event, body.origin)
   const id = randomHex(16)
   const ttl = sessionTtlMs()
-  const query = buildCredentialQuery(gate ? gateRange(gate, todayISO()) : undefined)
+  const age = gate ? gateRange(gate, todayISO()) : undefined
+  const dcql = buildDcqlQuery(offer, age)
   const s: VpSessionRecord = {
     id,
     purpose,
@@ -82,14 +83,21 @@ export default defineEventHandler(async (event) => {
     origin,
     nonce: randomHex(16),
     state: randomHex(16),
-    query,
+    ...(age && { age }),
+    dcql,
     offer,
     status: 'waiting',
     trace: [],
   }
   store().sessions.set(id, s)
   store().byState.set(s.state, id)
-  addTrace(s, 'created', 'Session created', { purpose, client_id: clientIdFor(host), req: query.req, offer, ...(s.phone && { phone: s.phone }) })
+  addTrace(s, 'created', 'Session created', {
+    purpose,
+    client_id: clientIdFor(host),
+    queries: dcql.credentials.map((q) => ({ id: q.id, format: q.format, req: q.req })),
+    offer,
+    ...(s.phone && { phone: s.phone }),
+  })
 
   return { id, authorizationUrl: authorizationUrl(host, requestUriFor(origin, id)), expiresIn: Math.round(ttl / 1000) }
 })

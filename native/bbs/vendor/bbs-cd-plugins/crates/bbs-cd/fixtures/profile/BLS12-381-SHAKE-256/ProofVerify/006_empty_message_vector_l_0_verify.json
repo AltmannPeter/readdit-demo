@@ -1,0 +1,28 @@
+{
+  "caseName": "empty message vector (L = 0) (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "proof": "0000000000000000ac17f1e4e1e3473529ce3cc71fb2603b075a3191f0c048e212f85be44af189fbaa83bd696b70f0a643f8650516557d9396e1066ddc081133ebb1c2e2b2d32bc51712e2402cabde01a867f1a980acc0bcd564c2f1e377db16d11ae32db21682e8b2a6c1687ac798cf46242184579dc69dd39a59abdfcf0334f8a42e57d5c45e9a2929369fae6a8e636ea29b884ee777203ae249d517c1adc0a085e574078921d58f550a3ea1cab29e23d65ee234bc32815e6496086eb370cbb173eab9162d2fcba36355e5f27b5ebda25609fa3e130b055f59eb19e111f07e266555798d075bb1505185bcd3bdcbd453b7675f6a7b4a3867ec988bcf74e7d29f92d8787cc1d3f855d7282d38ccdb554e9dfa468a5d03f3",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [],
+    "commitments": [],
+    "messageTypes": [],
+    "messageDisclosures": []
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "5b76a0711d40b8a2b679fd99e55e911b8663c1ded15cab3a2bba5eed8556c443",
+    "challenge": "67ec988bcf74e7d29f92d8787cc1d3f855d7282d38ccdb554e9dfa468a5d03f3"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

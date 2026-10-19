@@ -1,0 +1,68 @@
+[package]
+name = "cd-ecdsa-pop"
+description = "ECDSA (P-256) proof-of-possession plugin for BBS committed disclosures: hashed mode (default) and raw-signing mode."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Raw-signing mode (randomized device key, precomputable proof; needs raw
+# digest signing from the secure element and rests on KR-ECDSA).
+raw-mode = []
+# Compile in rayon for the `Parallelism` settings.
+parallel = ["cd-tom256/parallel", "bbs-cd-plugin/parallel"]
+# DELIBERATELY BROKEN raw-mode variant (Q' omitted from the signed hash) and
+# a malicious-holder presentation path, for attack-reproduction tests only.
+# MUST NOT be enabled in any build that verifies or produces real
+# presentations.  Only the attack-test targets below require it (run them
+# with `--all-features`); it never turns on `raw-mode` by itself.
+insecure-test-controls = ["cd-tom256/insecure-test-controls"]
+
+[dependencies]
+bbs-cd.workspace = true
+bbs-cd-plugin.workspace = true
+cd-tom256.workspace = true
+bls12_381.workspace = true
+p256.workspace = true
+ark-ff.workspace = true
+num-bigint.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+rand_core.workspace = true
+rand_chacha.workspace = true
+serde_json.workspace = true
+
+# Integration tests.  The shared test helpers cover both modes, so every
+# target needs `raw-mode`; the attack tests also need the test controls.
+# Without the features cargo skips these targets: run the whole suite with
+# `cargo test --workspace --all-features` (CI does).
+[[test]]
+name = "presentation"
+required-features = ["raw-mode"]
+
+[[test]]
+name = "key_usage"
+required-features = ["raw-mode"]
+
+[[test]]
+name = "batch_config_parallel"
+required-features = ["raw-mode"]
+
+[[test]]
+name = "review_issuer_tag"
+required-features = ["raw-mode"]
+
+[[test]]
+name = "freshness"
+required-features = ["raw-mode", "insecure-test-controls"]
+
+[[test]]
+name = "hashed_malicious"
+required-features = ["raw-mode", "insecure-test-controls"]
+
+[[bin]]
+name = "ecdsa-pop-bench"
+path = "src/bin/ecdsa-pop-bench.rs"

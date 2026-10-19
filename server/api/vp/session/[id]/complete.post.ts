@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
     } else if (main && existing?.linkedTo && existing.linkedTo !== main.pseudonym) {
       s.completion = { ok: false, kind: 'linked_elsewhere', handle: existing.handle, community: slug }
     } else {
-      const { account, created } = getOrCreateAccount(pseudonym, slug)
+      const { account, created } = getOrCreateAccount(pseudonym, slug, s.outcome.format)
       const link = !!main && !account.linkedTo
       if (link) account.linkedTo = main!.pseudonym
       await b.update({ communities: { ...b.data.communities, [slug]: pseudonym } })
@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
     } else if (existing && s.purpose.intent === 'signup' && !s.purpose.community) {
       s.completion = { ok: false, kind: 'account_exists' }
     } else {
-      const { account, created } = getOrCreateAccount(pseudonym)
+      const { account, created } = getOrCreateAccount(pseudonym, undefined, s.outcome.format)
       const gate = s.purpose.community ? findCommunity(s.purpose.community)?.gate : undefined
       if (gate && s.outcome.age) recordAgeProof(account, gate)
       await b.update({ pseudonym })

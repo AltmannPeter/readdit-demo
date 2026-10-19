@@ -1,0 +1,7 @@
+/target/
+# Local copy of the ETSI draft text: not redistributed.
+/spec/
+/dist/
+.DS_Store
+__pycache__/
+*.pyc

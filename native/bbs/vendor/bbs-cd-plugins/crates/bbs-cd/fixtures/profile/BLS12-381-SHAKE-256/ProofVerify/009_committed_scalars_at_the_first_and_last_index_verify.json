@@ -1,0 +1,46 @@
+{
+  "caseName": "committed scalars at the first and last index (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "proof": "000000000000000284091e884f5c9df44239f10059c6287b3d6988acecc945f3ebd99bc0fb133a3970b8a2689077417bcb9e017a9ae7d36c8deaa6d3540803dc693710f3219c08ae8a99f6178359bdd8529a183f2c3061803d611e96325198b2bfa24131c7f15fb483d93295d90957c2b2fd8c5cbc754fbfc69bc30b3598cb49bd073a0380618084bc57c3fc70c93ce7dead61e629f0716f236bf90e0c8f30d302f62da4b776f3432bb30c31cec243ef53a0534e1065d9e65e2873a84101e286c65cada96dd2f83d052e2b3caf8a355b696f554f8c60ddef72bec54bd8fff261e5b9dc079dd19acc00b4187ed82ceb84307bfe40e529fe1907b7ae771e15d68f5b88cbef9150aec981048eb7d48a55c44bf52d272d836fdb32f7c494683f48702aeaa2d4c866abf6ed1d7b1fcce3a4bfcb9dc16fdb760a3b5fde0ce11ba5209cb36d6d51c2ae162ace38529d7044328250bec76786bb0d9a93fe15111ed8b49f2b7ad4c94914159fd490a578fa157be8ebb711493bbb9dfad415a6b693c83eac635976b487ae97b0947ff7ca1b39883580ee4448c3f0ad90b74032eacd3697fc68645f4cf98e6fa19a14660446f9005c2db3c164ecc22360634d751919b1ae9917e4c53bce273c76517486e4967d466847bcd9094f99f9ef16d616883aa8ee192a0850a0d140807b782a7ae2245739b7ad4b0d5e3df6c7b612f4174216194c0185ec3406d7d2f4037d0aabdfb80cce6c398a62678ff0e105",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      "6e616d65",
+      ""
+    ],
+    "commitments": [
+      "93fe15111ed8b49f2b7ad4c94914159fd490a578fa157be8ebb711493bbb9dfad415a6b693c83eac635976b487ae97b0",
+      "947ff7ca1b39883580ee4448c3f0ad90b74032eacd3697fc68645f4cf98e6fa19a14660446f9005c2db3c164ecc22360"
+    ],
+    "messageTypes": [
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR"
+    ],
+    "messageDisclosures": [
+      "COMMIT",
+      "DISCLOSE",
+      "HIDE",
+      "DISCLOSE",
+      "COMMIT"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "2b9b5184c39c18c9f38055c280a3d16f5ab42389164a2e2e5f4a5414ed566061",
+    "challenge": "12f4174216194c0185ec3406d7d2f4037d0aabdfb80cce6c398a62678ff0e105"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

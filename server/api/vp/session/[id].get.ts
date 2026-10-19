@@ -6,5 +6,6 @@ export default defineEventHandler(async (event) => {
     failure: s.outcome && !s.outcome.ok ? s.outcome.reason : undefined,
     completion: s.completion,
     verification: s.verification,
+    proof: s.outcome?.ok ? { format: s.outcome.format, id: s.outcome.proofId } : undefined,
   }
 })

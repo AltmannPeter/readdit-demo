@@ -1,0 +1,22 @@
+[package]
+name = "bbs-cd-plugin"
+description = "Plugin framework on ETSI BBS committed disclosures: credential schema, issuer, request, presentation envelope and plugin traits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Compile in rayon so that `Parallelism::Max` / `Threads(n)` take effect.
+parallel = ["dep:rayon"]
+
+[dependencies]
+bbs-cd.workspace = true
+bls12_381.workspace = true
+num-bigint.workspace = true
+sha2.workspace = true
+rand_core.workspace = true
+rand_chacha.workspace = true
+rayon = { workspace = true, optional = true }

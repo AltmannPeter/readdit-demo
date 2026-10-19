@@ -8,7 +8,7 @@
 // of the circuits as data (server/utils/vp.ts). The Longfellow entry is the demo's working value;
 // nothing in this package runs it.
 
-import { NYM_DOCTYPE, type PseudonymConfig } from '../types/oid4vp'
+import { NYM_BBS_SCHEMA, NYM_DOCTYPE, type PseudonymConfig } from '../types/oid4vp'
 
 export interface PublicInput {
   name: string
@@ -104,3 +104,66 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
 export function findCircuit(id: string): CircuitEntry | undefined {
   return CIRCUIT_REGISTRY.find((c) => c.circuit_id === id)
 }
+
+// ---- mms_zk: multi-message-signature schemes (docs/mms_zk.md) ----
+//
+// A scheme is a BBS credential schema with the plugins that prove the request's functions. The
+// site offers a scheme only when the BBS verifier reports the same id, proof system and schema
+// digest (server/utils/vp.ts), as for circuits.
+
+export interface SchemeEntry {
+  scheme_id: string
+  proof_system: string
+  label: string
+  credential_format: 'mms_zk'
+  /** The credential schema: its id and digest (the framework's H(Tr(schema))). */
+  schema: { id: string; digest: string }
+  /** The catalogue's name for the issuer (the BBS issuer parameters carry no name). */
+  issuer: { name: string; country?: string }
+  /** The plugins, in the order of the BBS request. */
+  plugins: Array<{ id: string; attribute: string; proves: string }>
+  functions: {
+    'pseudonym-bbs-v1': { configs: Array<'known-offender-matching-ssc'>; verifier_id_types: Array<'x509_san_dns'>; required: true }
+    age_check: { params: Array<'ge' | 'le'> }
+  }
+  /** What both sides derive from the request (the BBS request's binding values). */
+  statement: Array<{ name: string; derivation: string }>
+}
+
+export const SCHEME_REGISTRY: SchemeEntry[] = [
+  {
+    scheme_id: 'urn:mms:bbs-cd:nym_auth:v1',
+    proof_system: 'bbs-cd-plugins-v0.1',
+    label: 'BBS nym_auth v1',
+    credential_format: 'mms_zk',
+    schema: { id: NYM_BBS_SCHEMA, digest: '2b39f8559b7bf2888502ccac0a681538f218bbf792d826cbad482ee487fb6793' },
+    issuer: { name: 'Demo Issuer', country: 'SE' },
+    plugins: [
+      { id: 'ecdsa-pop/0.1', attribute: 'device_key', proves: 'the committed P-256 device key signed this request (hashed ECDSA)' },
+      { id: 'pseudonym/0.1', attribute: 'nym_seed', proves: 'nym = seed·OP, OP = hash_to_curve(config ‖ client_id), from the committed seed' },
+      { id: 'date-range/0.1', attribute: 'birth_date', proves: 'the committed birth date lies in [ge, le]' },
+    ],
+    functions: {
+      'pseudonym-bbs-v1': { configs: ['known-offender-matching-ssc'], verifier_id_types: ['x509_san_dns'], required: true },
+      age_check: { params: ['ge', 'le'] },
+    },
+    statement: [
+      { name: 'audience', derivation: 'SHA-256(OpenID4VPHandoverInfo): client_id, nonce, jwk_thumbprint (null), response_uri' },
+      { name: 'nonce', derivation: 'the request nonce' },
+      { name: 'credential', derivation: "the issuer's BBS public key and the schema digest, nothing disclosed" },
+      { name: 'pseudonym.verifier_input', derivation: 'client_id (x509_san_dns)' },
+      { name: 'age_check', derivation: 'ge and le as sent, as YYYYMMDD' },
+    ],
+  },
+]
+
+export function findScheme(id: string): SchemeEntry | undefined {
+  return SCHEME_REGISTRY.find((s) => s.scheme_id === id)
+}
+
+/** The proof systems the site can accept, by backend: a label for /tech and the guide. */
+export const PROOF_SYSTEMS = [
+  { id: 'vega-v1', format: 'circuit_zk', label: 'Vega (mdoc circuit)' },
+  { id: 'bbs-cd-plugins-v0.1', format: 'mms_zk', label: 'BBS (committed disclosures)' },
+] as const
+export type ProofSystemId = (typeof PROOF_SYSTEMS)[number]['id']

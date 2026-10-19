@@ -1,0 +1,31 @@
+{
+  "comment": "Demo holder material for the mocked SIROS ID wallet: the BBS nym_auth credential (mms_zk profile, docs/mms_zk.md), issued by native/bbs/issuer (bbs-issuer). The device key is the one of the mdoc holder it was issued for. Not secret: demo only.",
+  "holders": [
+    {
+      "credential": {
+        "format": "mms_zk",
+        "issuer_params": "YJARav7_0GHgMe5Z5onqd7PmUvdmMv6vhU7WYCDfFwX_DmxyR4ovOoTPYeXqJoHSjAURrYL79Sspx4gbDkDIf48QxQ89cxDwfMe3eDzhqIf-ZfavDVsjIQqZsIhHDyOKkACQIGV1LmV1cm9wYS5lYy5ldWRpLm55bV9hdXRoLmJicy4xAwpkZXZpY2Vfa2V5ARpwMjU2LXBvaW50LXh5LmVjZHNhLXNoYTI1NgAGAGAACmJpcnRoX2RhdGUBC2RhdGUtcGFja2VkAAEAEQAIbnltX3NlZWQBFW55bS1zZWVkLmlzc3Vlci1rbm93bgABAP8A",
+        "messages": [
+          "00000000000000000000000000000000000000004144ac49731cfa3991c2b4ec",
+          "00000000000000000000000000000000000000007e68c51cf76843436540ce16",
+          "0000000000000000000000000000000000000000000000007e6f8bd7edebf045",
+          "000000000000000000000000000000000000000019d154c25260eac9e32c11c9",
+          "0000000000000000000000000000000000000000ae102c8902ad1ca04b378843",
+          "00000000000000000000000000000000000000000000000024e13ba96758ae34",
+          "000000000000000000000000000000000000000000000000000000000000a197",
+          "502e55e45953b96c355b0be797635a994f0e19c627ca7aa491154efa62f56832"
+        ],
+        "schema_id": "eu.europa.ec.eudi.nym_auth.bbs.1",
+        "signature": "oWo3F5nmeZNdMRcI5UNhOLqdAa9O-6ZF_PxH7OuZR9Lnb9h5_u_7Lk-xSlkd5WwqTuz2xhzmxbhxt4aApUsdGC3UCynHa6iqptHvmRCrrbo"
+      },
+      "device_key": {
+        "crv": "P-256",
+        "d": "-kIPShCJOixF-0VqWGTR-1WAcB_OQZQ401JiJyODC_c",
+        "kty": "EC",
+        "x": "fm-L1-3r8EV-aMUc92hDQ2VAzhZBRKxJcxz6OZHCtOw",
+        "y": "JOE7qWdYrjSuECyJAq0coEs3iEMZ0VTCUmDqyeMsEck"
+      },
+      "device_of": 0
+    }
+  ]
+}

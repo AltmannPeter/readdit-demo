@@ -1,0 +1,52 @@
+{
+  "caseName": "unknown type at a hidden position",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "proof": "000000000000000399a6184d0053dd8c6a28fa5944ebfeba5ea183ca5b50b5f1508287498520abfdfab0ce693607f010fadde79bae09d6a1a68af02ab17e439124d999e1360f0b9f7bcd5f16d20da5b20029350583554686b7d92c0289b1447f67a6d9aa572e35e1a5a4dd3b5f965cc9eb76066b4cc1180a77d9cde994f6b98eca06733d801fe167cb837e93aedba565a231f5b3de4cb52135ec18c71679c4a1d7db835bfacbe6232f4a6166593a4f15d8b6e69820affd67466e5a5ff82346db10bf5fb33fcd0f4846698c9448689d75820e23920e44b4ee23259e5918c6ca7e0bf6d400bb4cae7443639c678143e2e3558e289a277b775615b96017b1d80af70775c9f86f857065ba533bcf75e65577691717b1ec04c0e745f5b8d42dcf2b986208b7501ec88ac1942b503ddb60175cd99c78e50daf37b601eb3047609ef2f17f724309c9cfdcca3072d7fd98bcad088a8fe3d4d8543a501fbf3f8d6c36c106a7188562a9fcf4e62ee2233a5b7b280e603e3a2e73f7a65862d453a71abfc7f624e052ce714e3f0ba3b29420352144548de6fda7d8b8126a9624f53a8dd61e5fa40f0d97a1af297f76d614d191732d2330a26d0f5ca4d2c0ef87615957dedb3fd92a4cf04d01f7619480d9fcadeab9cc2f527339de12cd5efe964c7c54a102a3773c2a8c36715ae00722a1bd5fd0964adaad63bf682f6e33a29bc1fa40ad1405a3ad2e37e5eb9cf98637b6f285df1bbbf99aa0a7285006cbeff761b92b642ba05285ac5d0813ea6a104e520a5dbd5e0ba6e7dbab2c540418086e1c881bce11ebbfaecab36a1e3cd9322ad89428f850af137bfcbb18e00d80f1d84d190627d3aff4f922e5de72d9af139390cec712ac06f1473b155bec87cdeb6fff43e0c79ab98879af8dcba6d545605933c137e2840d815228777475937dacb904a8574de1fed24878d0577136b2",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      "676976656e206e616d65",
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "6c617374"
+    ],
+    "commitments": [
+      "9624f53a8dd61e5fa40f0d97a1af297f76d614d191732d2330a26d0f5ca4d2c0ef87615957dedb3fd92a4cf04d01f761",
+      "9480d9fcadeab9cc2f527339de12cd5efe964c7c54a102a3773c2a8c36715ae00722a1bd5fd0964adaad63bf682f6e33",
+      "a29bc1fa40ad1405a3ad2e37e5eb9cf98637b6f285df1bbbf99aa0a7285006cbeff761b92b642ba05285ac5d0813ea6a"
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "UNKNOWN",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "COMMIT",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE"
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "unknown type"
+    }
+  }
+}

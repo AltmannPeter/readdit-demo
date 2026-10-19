@@ -17,7 +17,8 @@ const rows = computed(() => {
   const c = props.credential
   return [
     { label: 'Birth Date', value: date(c.attributes.birth_date) },
-    { label: 'Issuance Date', value: date(c.validity.signed) },
+    // The BBS credential carries no issuance date.
+    ...(c.validity.signed ? [{ label: 'Issuance Date', value: date(c.validity.signed) }] : []),
     ...(neverExpires(c.validity.validUntil) ? [] : [{ label: 'Expiry Date', value: date(c.validity.validUntil) }]),
   ]
 })

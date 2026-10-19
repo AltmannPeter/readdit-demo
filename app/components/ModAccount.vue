@@ -9,6 +9,8 @@ export interface ModAccountRow {
   /** A community account (a community with its own pseudonym), and the Readdit account it is linked to. */
   community: string | null
   linkedTo: string | null
+  /** The format of the presentation that created the account. */
+  format: 'circuit_zk' | 'mms_zk' | null
   banned: { at: string; reason: string } | null
   comments: number
 }
@@ -38,6 +40,10 @@ const a = computed(() => props.account)
       <div class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Joined</dt>
         <dd>{{ a.joinedAt }}</dd>
+      </div>
+      <div v-if="a.format" class="flex gap-2">
+        <dt class="w-20 shrink-0 text-muted">Credential</dt>
+        <dd>{{ a.format === 'mms_zk' ? 'BBS (mms_zk)' : 'mdoc (circuit_zk)' }}</dd>
       </div>
       <div v-if="a.community && !props.nested" class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Linked to</dt>

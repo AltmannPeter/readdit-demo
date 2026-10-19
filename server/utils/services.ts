@@ -1,13 +1,17 @@
-// The ONLY place that calls the proof backend: the Vega Node addon (native/vega, Rust, built with
-// `npm run build:native`). There is no other backend. When the addon cannot load, the server
-// refuses to start (server/plugins/vega.ts).
+// The ONLY place that calls the proof backends, two Node addons (Rust, built with
+// `npm run build:native`):
+//   Vega (native/vega): circuit_zk over the nym_auth mdoc;
+//   BBS (native/bbs): mms_zk over the nym_auth BBS credential (docs/mms_zk.md).
+// Each loads on its own. The site starts when at least one loads (server/plugins/backends.ts) and
+// offers only the formats of the backends that loaded (server/utils/vp.ts).
 //
+// Vega:
 // Prover: the phone's native steps. The mocked wallet sends the credential material each step
 // needs (credential, device key, secret_seed); the prover keeps none of it. The device key signs
 // DeviceAuthentication (the wallet's PIN screen unlocks it on the phone, with any PIN; the prover
 // takes none), then the prover builds the witness and proves.
 // Verifier: verifies a presentation against the site's own request, handover and clock.
-// Both sides build their keys from the circuits once, when the server starts (server/plugins/vega.ts).
+// Both sides build their keys from the circuits once, when the server starts (server/plugins/backends.ts).
 // Contract: docs/backend-api.md
 
 import { createRequire } from 'node:module'
@@ -151,7 +155,7 @@ export class ServiceError extends Error {
   }
 }
 
-// ---- the addon ----
+// ---- the Vega addon ----
 
 interface NativeWitness {
   readonly summary: string
@@ -179,7 +183,7 @@ const g = globalThis as unknown as { __readditVega?: Promise<Native> }
 
 /**
  * Loads the addon and builds both sides' keys, once. A failure is not kept: the next call tries
- * again. The caller reports it (server/plugins/vega.ts at start, `native` below on a request).
+ * again. The caller reports it (server/plugins/backends.ts at start, `native` below on a request).
  */
 export function loadNative(): Promise<Native> {
   if (g.__readditVega) return g.__readditVega
@@ -276,22 +280,190 @@ export const verifier = {
   },
 }
 
+// ---- the BBS addon (mms_zk) ----
+//
+// Prover: one call per presentation. The mocked wallet sends the BBS credential and its device
+// key; the device key signs inside the ecdsa-pop plugin (hashed ECDSA over the plugin's device
+// message), so there is no separate signing step. Verifier: derives the BBS request from the site's
+// own request and handover, against the issuer parameters it trusts (bbsIssuerParams).
+
+export interface BbsScheme {
+  scheme_id: string
+  proof_system: string
+  schema_id: string
+  schema_digest: string
+  plugins: string[]
+}
+
+export interface BbsInfo {
+  service: string
+  implementation: string
+  version: string
+  schemes: BbsScheme[]
+  issuers?: Array<{ issuer_pk: string; schema_id: string; schema_digest: string }>
+  load_ms?: number
+  threads?: number
+}
+
+export interface BbsCredential {
+  format: 'mms_zk'
+  schema_id: string
+  issuer_params: string
+  signature: string
+  messages: string[]
+}
+
+export interface BbsProveBody {
+  request: RequestObject
+  credential_query_id: string
+  handover: Handover
+  credential: BbsCredential
+  device_key: DeviceKeyJwk
+}
+
+export interface BbsProveMetrics {
+  load_ms?: number
+  /** BBS commitments and the ecdsa-pop preparation (request-independent). */
+  offline_ms?: number
+  bbs_ms?: number
+  ecdsa_pop_ms?: number
+  device_sign_ms?: number
+  pseudonym_ms?: number
+  date_range_ms?: number | null
+  online_ms?: number
+  /** offline + online */
+  prove_ms?: number
+  total_ms?: number
+  peak_memory_mb?: number | null
+  proof_bytes?: number
+  presentation_bytes?: number
+  parts?: { bbs_proof: number; ecdsa_pop: number; pseudonym: number; date_range: number | null }
+}
+
+export interface BbsProveResult {
+  scheme_id: string
+  presentation: string
+  results: Record<string, string | true>
+  metrics: BbsProveMetrics
+  statement: { audience: string; nonce: string; verifier_input: string; committed: string[]; plugins: string[] }
+}
+
+export type BbsVerifyResult =
+  | { ok: true; scheme_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
+  | { ok: false; reason: string; code?: string; metrics?: VerifyMetrics }
+
+interface NativeBbsProver {
+  readonly info: string
+  prove(input: string): Promise<string>
+}
+interface NativeBbsVerifier {
+  readonly info: string
+  verify(input: string): Promise<string>
+}
+interface NativeBbsAddon {
+  loadProver(): Promise<NativeBbsProver>
+  loadVerifier(issuerParamsPath: string): Promise<NativeBbsVerifier>
+}
+interface NativeBbs {
+  prover: NativeBbsProver
+  verifier: NativeBbsVerifier
+}
+
+const gb = globalThis as unknown as { __readditBbs?: Promise<NativeBbs> }
+
+/** Loads the BBS addon and the trusted issuer parameters, once; a failure is retried at the next call. */
+export function loadBbs(): Promise<NativeBbs> {
+  if (gb.__readditBbs) return gb.__readditBbs
+  const loading = (async () => {
+    const cfg = useRuntimeConfig()
+    const path = (p: unknown) => resolve(process.cwd(), String(p))
+    let addon: NativeBbsAddon
+    try {
+      addon = createRequire(import.meta.url)(path(cfg.bbsAddon)) as NativeBbsAddon
+    } catch (e) {
+      throw new Error(`The BBS addon ${path(cfg.bbsAddon)} could not be loaded. (${(e as Error).message})`)
+    }
+    const [prover, verifier] = await Promise.all([addon.loadProver(), addon.loadVerifier(path(cfg.bbsIssuerParams))])
+    return { prover, verifier }
+  })()
+  gb.__readditBbs = loading
+  loading.catch(() => {
+    if (gb.__readditBbs === loading) gb.__readditBbs = undefined
+  })
+  return loading
+}
+
+async function bbsNative(service: 'prover' | 'verifier'): Promise<NativeBbs> {
+  try {
+    return await loadBbs()
+  } catch (e) {
+    console.error(`[bbs] ${service}: the addon is not loaded: ${(e as Error).message} Run npm run build:native.`)
+    throw new ServiceError(service, 503, 'unavailable', (e as Error).message)
+  }
+}
+
+export const bbsProver = {
+  async info(): Promise<BbsInfo> {
+    const n = await bbsNative('prover')
+    return call('prover', 'prover.info', async () => JSON.parse(n.prover.info) as BbsInfo)
+  },
+
+  /** One presentation: commitments, the device signature inside ecdsa-pop, the plugin proofs. */
+  async prove(body: BbsProveBody): Promise<BbsProveResult> {
+    const n = await bbsNative('prover')
+    return outcome<BbsProveResult>(await call('prover', 'prover.prove', async () => JSON.parse(await n.prover.prove(JSON.stringify(body)))))
+  },
+}
+
+export const bbsVerifier = {
+  async info(): Promise<BbsInfo> {
+    const n = await bbsNative('verifier')
+    return call('verifier', 'verifier.info', async () => JSON.parse(n.verifier.info) as BbsInfo)
+  },
+
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover }): Promise<BbsVerifyResult> {
+    const n = await bbsNative('verifier')
+    return call('verifier', 'verifier.verify', async () => JSON.parse(await n.verifier.verify(JSON.stringify(body))) as BbsVerifyResult)
+  },
+}
+
+// ---- both ----
+
+/** Each backend that loads: the site starts with at least one (server/plugins/backends.ts). */
+export async function loadBackends(): Promise<{ vega: string | null; bbs: string | null }> {
+  const err = (p: Promise<unknown>) => p.then(() => null, (e: Error) => e.message)
+  const [vega, bbs] = await Promise.all([err(loadNative()), err(loadBbs())])
+  return { vega, bbs }
+}
+
 /** Backend info for the tech view; never throws, and never takes a test fault. */
 export async function servicesStatus() {
-  let n: Native | undefined
-  let error = ''
-  try {
-    n = await loadNative()
-  } catch (e) {
-    error = (e as Error).message
-  }
-  const read = (side: NativeProver | NativeVerifier | undefined) => {
+  const read = <T>(side: { info: string } | undefined, error: string) => {
     if (!side) return { up: false as const, error }
     try {
-      return { up: true as const, ...(JSON.parse(side.info) as ServiceInfo) }
+      return { up: true as const, ...(JSON.parse(side.info) as T) }
     } catch (e) {
       return { up: false as const, error: (e as Error).message }
     }
   }
-  return { prover: read(n?.prover), verifier: read(n?.verifier) }
+  let n: Native | undefined
+  let vegaError = ''
+  try {
+    n = await loadNative()
+  } catch (e) {
+    vegaError = (e as Error).message
+  }
+  let b: NativeBbs | undefined
+  let bbsError = ''
+  try {
+    b = await loadBbs()
+  } catch (e) {
+    bbsError = (e as Error).message
+  }
+  return {
+    prover: read<ServiceInfo>(n?.prover, vegaError),
+    verifier: read<ServiceInfo>(n?.verifier, vegaError),
+    bbsProver: read<BbsInfo>(b?.prover, bbsError),
+    bbsVerifier: read<BbsInfo>(b?.verifier, bbsError),
+  }
 }

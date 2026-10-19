@@ -12,10 +12,18 @@ export default defineNuxtConfig({
     vegaAddon: 'native/vega/readdit-vega.node',
     vegaShapes: 'native/vega/circuits/mdoc/shapes.zst',
     vegaTrustAnchors: 'native/vega/demo/document-signer.pem',
+    // BBS backend (mms_zk): the Rust Node addon and the issuer parameters the verifier trusts.
+    bbsAddon: 'native/bbs/readdit-bbs.node',
+    bbsIssuerParams: 'native/bbs/demo/issuer-params.bin',
     // How far proof_time may lie from the verifier's clock, in seconds.
     proofTimeToleranceS: 300,
-    // Comma-separated circuit ids the site accepts, in order of preference.
+    // Comma-separated circuit ids (circuit_zk) and scheme ids (mms_zk) the site can accept, in
+    // order of preference.
     acceptedCircuits: 'urn:circuits:vega:nym_auth:v1',
+    acceptedSchemes: 'urn:mms:bbs-cd:nym_auth:v1',
+    // The proof systems accepted when the site starts (and after a demo reset); /tech switches
+    // them. Comma-separated: vega-v1, bbs-cd-plugins-v0.1.
+    acceptedProofSystems: 'vega-v1',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',

@@ -1,7 +1,11 @@
 # Proof backend contract
 
-The prover and the verifier are the Vega Node addon (`native/vega`, Rust, napi-rs), loaded in the
-site's server process. Only `server/utils/services.ts` calls them. They replaced the earlier HTTP
+There are two backends, each a Node addon (Rust, napi-rs) loaded in the site's server process:
+the Vega addon (`native/vega`, `circuit_zk` over the nym_auth mdoc), described first, and the BBS
+addon (`native/bbs`, `mms_zk` over the nym_auth BBS credential, `docs/mms_zk.md`), in its own
+section below. Only `server/utils/services.ts` calls them. Each loads on its own; the site starts
+when at least one loads and offers only the formats of those that did. The Vega prover and
+verifier They replaced the earlier HTTP
 services (and their stubs) at Frédéric's request (2026-10-13), so a presentation costs no network
 hop on the server side.
 
@@ -10,16 +14,17 @@ hop on the server side.
   what it needs. The prover keeps none of it between calls.
 - **Verifier:** verifies a presentation against the site's own request, handover and clock.
 - Both build their keys from the circuits (`native/vega/circuits/mdoc/shapes.zst`) once, when the
-  server starts (`server/plugins/vega.ts`), and keep them. Setup is deterministic. Nothing
+  server starts (`server/plugins/backends.ts`), and keep them. Setup is deterministic. Nothing
   randomized and no witness is kept between requests.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and peak memory are its own.
 
-There is no other backend. When the addon cannot load, the built server stops at start with the
-reason and `Build the Vega addon with npm run build:native, then start the site again.` (exit code
-1, `server/plugins/vega.ts`); the development server keeps running and answers 503 `unavailable`.
-An addon call that fails at runtime (it throws, or its result is not JSON) is `500 backend_error`
-(`services.ts`), logged as `[vega] <step> failed: <reason>`.
+When neither addon loads, the built server stops at start with the reasons (exit code 1,
+`server/plugins/backends.ts`); the development server keeps running and answers 503
+`unavailable`. When one does not load, the site starts with the other and logs `[vega] not
+loaded: …` or `[bbs] not loaded: …`; `/tech` shows which. An addon call that fails at runtime (it
+throws, or its result is not JSON) is `500 backend_error` (`services.ts`), logged as
+`[vega] <step> failed: <reason>`.
 
 Configuration (Nuxt runtime config, environment variables):
 
@@ -30,6 +35,10 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The verifier's trust anchors (PEM) |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far `proof_time` may lie from the verifier's clock |
 | `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1` | Circuits Readdit accepts, comma-separated, in preference order |
+| `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon (`npm run build:native`) |
+| `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
+| `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `mms_zk` schemes Readdit can accept |
+| `NUXT_ACCEPTED_PROOF_SYSTEMS` | `vega-v1` | Proof systems accepted at start and after a demo reset; `/tech` switches them (`vega-v1`, `bbs-cd-plugins-v0.1`) |
 
 ## The circuit
 
@@ -245,6 +254,45 @@ The verifier takes only `issuer_key_set`, `proof_time` and `results` from the pr
 
 Readdit repeats the circuit and results-key checks after the call, as a second line of defence.
 
+## The BBS addon (`mms_zk`)
+
+`native/bbs/node` (crate `readdit-bbs-node`) around `native/bbs/nym-bbs`, which implements the
+profile of `docs/mms_zk.md` on the vendored bbs-cd-plugins crates. `loadProver()` builds the
+date-range tables; `loadVerifier(issuerParamsPath)` reads the trusted issuer parameters and
+checks that their schema is the profile's. Calls take and return JSON text; one heavy step runs at
+a time.
+
+**`info`** (both): `implementation`, `version`, `schemes` (`scheme_id`, `proof_system`,
+`schema_id`, `schema_digest`, `plugins` in request order), `load_ms`, `threads`; the verifier also
+`issuers` (`issuer_pk`, `schema_id`, `schema_digest`). The site offers a scheme only when the
+verifier reports the registry's proof system, schema and plugins (`server/utils/vp.ts`).
+
+**Prover: `prove`.** One call per presentation; there is no separate sign step, because the device
+key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
+
+```json
+{ "request": { …Request Object… }, "credential_query_id": "nym_attestation_bbs",
+  "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null },
+  "credential": { "format": "mms_zk", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
+  "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" } }
+```
+
+It answers `{ ok: true, scheme_id, presentation, results, metrics, statement }`: `presentation` is
+base64url of the envelope; `results` as the verifier's; `metrics` `offline_ms` (commitments and
+the ecdsa-pop preparation), `bbs_ms`, `ecdsa_pop_ms`, `device_sign_ms`, `pseudonym_ms`,
+`date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `presentation_bytes`, `parts` (bytes per
+part), `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
+committed attributes, plugins). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
+is outside the range), `400 unsupported_request`, `unsupported_config`, `unsupported_function`,
+`unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
+does not decode or verify, or the device key is not the credential's), `bad_request`.
+
+**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover }`, all but the
+presentation from the site's session store. It answers `{ ok: true, scheme_id, results, metrics }`
+or `{ ok: false, code, reason, metrics }` with `code` `presentation`, `request`, `scheme` or
+`proof_invalid` (`docs/mms_zk.md` §6). `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
+`ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
+
 ## Readdit's routes and their refusals
 
 Every refusal carries a plain status text and a code in the error body's `data.error`.
@@ -258,20 +306,22 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 503 `unavailable` | The verifier could not make an offer |
 | request_uri | 404 `unknown_session` | |
 | | 405 `method_not_allowed` | Not GET or POST |
-| | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `circuit_zk` values are not lists of strings |
+| | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `circuit_zk` or `mms_zk` values are not lists of strings |
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
+| | 503 `unavailable` | The site has no format to offer now (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
 | | 400 `state_mismatch` | `state` is not the session's; checked first |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
 | | 400 `already_answered` | A second response, for example a replay; logged as `[vp] <id>: refused a second response` |
-| | 200 | The response was processed. A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
+| | 200 | The response was processed. The vp_token must answer exactly one of the request's credential queries, in a format the site still accepts (else refused with code `format`). A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
 | | 503 `unavailable` | The verifier failed; the session ends as `unavailable` |
 | `GET /api/vp/session/:id`, `…/complete`, `…/cancel` | 404 `unknown_session`, 403 `other_browser` | Only the browser that started the session |
 | `POST …/complete` | 409 `not_verified` | Before a verified presentation |
 | `POST /api/wallet/sign`, `/prove` | 400 `bad_request` | Missing or mistyped fields; the prover's refusals above otherwise |
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
+| `POST /api/tech/accept` | 400 `bad_request`, 409 `last_proof_system` | An unknown proof system; switching off the last accepted one |
 
 `{ purpose: 'signin', intent, community }` is the request of a logged-out visitor at an
 age-restricted community: one presentation of the pseudonym and the community's age range, which
@@ -288,6 +338,7 @@ failed: `denied`, `invalid_request`, `invalid`, `unavailable`, `expired`, `cance
 
 **Test only.** With `READDIT_TEST_FAULTS=1` in the server's environment, `POST /api/test/fault
 { "step": "prover.info" | "prover.sign" | "prover.prove" | "verifier.info" | "verifier.verify" }`
-makes the next addon call of that step fail as a failing addon would (`server/utils/test-faults.ts`).
+makes the next addon call of that step fail as a failing addon would (`server/utils/test-faults.ts`),
+in either addon: `prover.info` and the others name the step, not the backend.
 Without the variable the route answers 404 and no call is failed. `scripts/flows-check.mjs` uses it
 for the "backend failing" paths.

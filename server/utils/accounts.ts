@@ -47,7 +47,7 @@ export function memberAccount(community: string, data: { pseudonym?: string; com
  * The account of a pseudonym, created when new. Pseudonyms of different verifier identities never
  * coincide, so Readdit and community accounts share one map; `community` marks the latter.
  */
-export function getOrCreateAccount(pseudonym: string, community?: string): { account: AccountRecord; created: boolean } {
+export function getOrCreateAccount(pseudonym: string, community?: string, format?: AccountRecord['format']): { account: AccountRecord; created: boolean } {
   const accounts = store().accounts
   const existing = accounts.get(pseudonym)
   if (existing) return { account: existing, created: false }
@@ -58,6 +58,7 @@ export function getOrCreateAccount(pseudonym: string, community?: string): { acc
     birthDateRange: null,
     ageProofs: [],
     ...(community && { community }),
+    ...(format && { format }),
   }
   accounts.set(pseudonym, account)
   return { account, created: true }

@@ -1,0 +1,31 @@
+# Readdit's BBS backend: ETSI BBS committed disclosures (draft v0.7) with the ecdsa-pop,
+# date-range and pseudonym plugins of sirosfoundation/bbs-cd-plugins, compiled into a Node addon
+# that the site's server calls in process.
+#
+#   vendor/bbs-cd-plugins/  the bbs-cd-plugins repository, vendored unchanged (its own workspace;
+#                           VENDOR-SHA256SUMS lists the files' hashes; `sha256sum -c` checks them)
+#   nym-bbs/                the mms_zk profile: OpenID4VP request → BBS request, prover, verifier
+#   node/                   the napi-rs addon: BbsProver and BbsVerifier objects for Node (napi glue only)
+#   issuer/                 bbs-issuer: issues the demo BBS credential and the issuer parameters
+[workspace]
+resolver = "2"
+members = ["nym-bbs", "node", "issuer"]
+exclude = ["vendor"]
+
+[workspace.dependencies]
+bbs-cd = { path = "vendor/bbs-cd-plugins/crates/bbs-cd" }
+bbs-cd-plugin = { path = "vendor/bbs-cd-plugins/crates/bbs-cd-plugin" }
+cd-tom256 = { path = "vendor/bbs-cd-plugins/crates/cd-tom256" }
+cd-ecdsa-pop = { path = "vendor/bbs-cd-plugins/crates/cd-ecdsa-pop" }
+cd-date-range = { path = "vendor/bbs-cd-plugins/crates/cd-date-range" }
+cd-pseudonym = { path = "vendor/bbs-cd-plugins/crates/cd-pseudonym" }
+
+[profile.release]
+codegen-units = 16
+
+# The proofs are compute-heavy: optimize dependencies even in test builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

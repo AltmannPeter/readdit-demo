@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
-import type { CircuitEntry } from '#shared/registry/circuits'
+import { PROOF_SYSTEMS, type CircuitEntry, type SchemeEntry } from '#shared/registry/circuits'
 import { DESKTOP_MACHINES, PHONE_FACTOR, SYSTEMS, UPLINK_MBPS, phaseRange, presentationRange } from '#shared/benchmarks'
 
 definePageMeta({ layout: false })
@@ -12,6 +12,8 @@ interface Service {
   implementation?: string
   version?: string
   circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null }>
+  schemes?: Array<{ scheme_id: string; proof_system: string; schema_id: string; plugins: string[] }>
+  issuers?: Array<{ issuer_pk: string; schema_id: string }>
   load_ms?: number
   threads?: number
   trust_anchors?: Array<{ subject: string }>
@@ -30,19 +32,26 @@ interface Session {
   phone?: string
   status: string
   createdAt: number
-  query: { req: Array<{ id: string; return: string; params: Record<string, string> }> }
-  offer: { circuit_id_values?: string[]; circuit_proof_system_values?: string[] }
-  walletMetadata: { vp_formats_supported: { circuit_zk?: { circuit_id_values?: string[]; circuit_proof_system_values?: string[] } } } | null
+  dcql: { credentials: Array<{ id: string; format: 'circuit_zk' | 'mms_zk'; meta: Record<string, string>; req: Array<{ id: string; return: string; params: Record<string, string> }> }>; credential_sets?: Array<{ options: string[][] }> }
+  answered: string | null
+  offer: Formats
+  walletMetadata: { vp_formats_supported: Formats } | null
   tailored: boolean
   request: Record<string, any> | null
   requestJwsBytes: number | null
   circuit: Partial<CircuitEntry> | null
+  scheme: Partial<SchemeEntry> | null
   outcome: Record<string, any> | null
   completion: { ok: boolean; kind: string } | null
   trace: Trace[]
 }
+interface Formats {
+  circuit_zk?: { circuit_id_values?: string[]; circuit_proof_system_values?: string[] }
+  mms_zk?: { scheme_id_values?: string[]; proof_system_values?: string[] }
+}
 interface Overview {
-  services: { prover: Service; verifier: Service }
+  services: { prover: Service; verifier: Service; bbsProver: Service; bbsVerifier: Service }
+  acceptedProofSystems: string[]
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -85,14 +94,37 @@ const values = (c?: { shared: number; precommitted: number; rest: number; public
 const ms = (n?: number | null) => (n == null ? '–' : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`)
 const time = (t: number) => new Date(t).toLocaleTimeString('en-GB')
 const since = (t: number) => (session.value ? `+${t - session.value.createdAt} ms` : '')
-const reqText = (r: Session['query']['req'][number]) =>
+const reqText = (r: Session['dcql']['credentials'][number]['req'][number]) =>
   r.id === 'age_check'
     ? `age_check  ${Object.entries(r.params).map(([k, v]) => `${k} ${v}`).join(', ')}`
     : `${r.id}  ${r.params.config}${r.params.verifier_id_type ? `, ${r.params.verifier_id_type}` : ''}`
 const services = computed((): Record<string, Service> => {
   const s = data.value?.services
-  return s ? { prover: s.prover, verifier: s.verifier } : {}
+  return s ? { 'Vega prover': s.prover, 'Vega verifier': s.verifier, 'BBS prover': s.bbsProver, 'BBS verifier': s.bbsVerifier } : {}
 })
+/** Whether the backend of a proof system is loaded (both its sides). */
+const loaded = (id: string) => {
+  const s = data.value?.services
+  if (!s) return false
+  return id === 'vega-v1' ? s.prover.up && s.verifier.up : s.bbsProver.up && s.bbsVerifier.up
+}
+const backendsText = computed(() => {
+  const up = PROOF_SYSTEMS.filter((p) => loaded(p.id)).map((p) => p.label.split(' ')[0])
+  return up.length ? `${up.join(' and ')} addon${up.length > 1 ? 's' : ''}, in process` : 'No backend loaded'
+})
+const acceptError = ref('')
+async function setAccepted(id: string, accept: boolean) {
+  acceptError.value = ''
+  try {
+    await $fetch('/api/tech/accept', { method: 'POST', body: { proof_system: id, accept } })
+  } catch (e) {
+    acceptError.value = (e as { data?: { statusMessage?: string } }).data?.statusMessage ?? 'Not changed.'
+  }
+  await load()
+}
+/** Ids each side lists for a format: circuits (circuit_zk) or schemes (mms_zk). */
+const ids = (f: Formats | undefined, format: 'circuit_zk' | 'mms_zk') => (format === 'circuit_zk' ? f?.circuit_zk?.circuit_id_values : f?.mms_zk?.scheme_id_values)?.join(', ') || '–'
+const formats = computed(() => (session.value ? (['circuit_zk', 'mms_zk'] as const).filter((f) => session.value!.offer[f]) : []))
 
 /** "217–588 ms", "0.22–2.9 s" */
 function span(r: readonly [number, number] | null): string {
@@ -119,30 +151,55 @@ const statusTone = (s: string) =>
         <span
           v-if="data"
           class="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold"
-          :class="data.services.prover.up && data.services.verifier.up ? 'bg-emerald-100 text-emerald-800' : 'bg-adult/10 text-adult'"
+          :class="PROOF_SYSTEMS.some((p) => loaded(p.id)) ? 'bg-emerald-100 text-emerald-800' : 'bg-adult/10 text-adult'"
         >
-          {{ data.services.prover.up && data.services.verifier.up ? 'Vega addon, in process' : 'Vega addon not loaded' }}
+          {{ backendsText }}
         </span>
       </div>
     </header>
 
     <main v-if="data" class="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <!-- accepted proof systems -->
+      <section class="card p-4">
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <h2 class="text-sm font-semibold">Readdit accepts</h2>
+          <label v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
+            <input
+              type="checkbox"
+              :data-accept="p.id"
+              :checked="data.acceptedProofSystems.includes(p.id)"
+              :disabled="!loaded(p.id)"
+              @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
+            />
+            {{ p.label }} <span class="font-mono text-[11px] text-muted">{{ p.format }} · {{ p.id }}</span>
+          </label>
+        </div>
+        <p class="mt-1 text-xs text-muted">
+          Only the ticked ones: a wallet request offers their formats when the phone fetches it, so a QR code already on screen follows too, and a presentation in a format unticked meanwhile is refused. With both, the DCQL query carries one credential query per format as alternatives (credential_sets). A demo reset restores Vega only.
+        </p>
+        <p v-if="acceptError" class="mt-1 text-xs text-adult">{{ acceptError }}</p>
+      </section>
+
       <!-- services -->
       <section class="grid gap-4 md:grid-cols-3">
         <div v-for="(svc, name) in services" :key="name" class="card p-4">
           <div class="flex items-center gap-2">
             <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
-            <h2 class="text-sm font-semibold capitalize">{{ name }}</h2>
+            <h2 class="text-sm font-semibold">{{ name }}</h2>
           </div>
           <template v-if="svc.up">
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>
             <p class="text-xs text-muted">Version {{ svc.version }}</p>
-            <p v-if="svc.load_ms != null" class="text-xs text-muted">Keys built once at start: {{ ms(svc.load_ms) }} · {{ svc.threads }} threads</p>
+            <p v-if="svc.load_ms != null" class="text-xs text-muted">
+              {{ svc.schemes ? 'Tables built once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ svc.threads }} thread{{ svc.threads === 1 ? '' : 's' }}
+            </p>
             <p v-if="svc.trust_anchors?.length" class="text-xs text-muted">
               Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
             </p>
             <ul class="mt-2 space-y-0.5 font-mono text-[11px] text-muted">
               <li v-for="c in svc.circuits" :key="c.circuit_id">{{ c.circuit_id }} · {{ c.proof_system }}</li>
+              <li v-for="c in svc.schemes" :key="c.scheme_id">{{ c.scheme_id }} · {{ c.proof_system }} · {{ c.plugins.join(', ') }}</li>
+              <li v-for="c in svc.issuers" :key="c.issuer_pk">trusted issuer {{ c.issuer_pk.slice(0, 16) }}… · {{ c.schema_id }}</li>
             </ul>
           </template>
           <template v-else>
@@ -224,17 +281,20 @@ const statusTone = (s: string) =>
                   <p v-else-if="t.step === 'witness' && t.data?.metrics" class="text-xs text-muted">
                     {{ ms(t.data.metrics.witness_ms) }}<template v-if="t.data.counts"> · {{ values(t.data.counts) }}</template> · proof_time {{ t.data.proof_time }}
                   </p>
+                  <p v-else-if="t.step === 'prove' && t.data?.format === 'mms_zk' && t.data?.metrics" class="text-xs text-muted">
+                    commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
+                  </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
                     witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} threads</template>
                   </p>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
-                    {{ kb(t.data?.bytes) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
+                    {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
                   <p v-else-if="(t.step === 'verify' || t.step === 'refused') && t.data?.code" class="text-xs text-adult">
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template>
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>
@@ -249,41 +309,46 @@ const statusTone = (s: string) =>
             <!-- request -->
             <section class="card">
               <div class="flex items-center border-b border-line px-5 py-3">
-                <h2 class="text-sm font-semibold">Request (DCQL, circuit_zk)</h2>
+                <h2 class="text-sm font-semibold">Request (DCQL, {{ session.dcql.credentials.map((q) => q.format).join(' or ') }})</h2>
                 <button class="ml-auto text-xs font-semibold text-brand" @click="showRaw = !showRaw">{{ showRaw ? 'Summary' : 'Raw JSON' }}</button>
               </div>
-              <pre v-if="showRaw" class="max-h-96 overflow-auto px-5 py-3 text-[11px] leading-relaxed">{{ JSON.stringify(session.request ?? session.query, null, 2) }}</pre>
-              <ul v-else class="space-y-1 px-5 py-3 font-mono text-xs">
-                <li class="text-muted">doctype eu.europa.ec.eudi.nym_auth.1</li>
-                <li v-for="r in session.query.req" :key="r.return">
-                  <span class="text-muted">{{ r.return }} ←</span> {{ reqText(r) }}
-                </li>
-              </ul>
+              <pre v-if="showRaw" class="max-h-96 overflow-auto px-5 py-3 text-[11px] leading-relaxed">{{ JSON.stringify(session.request ?? session.dcql, null, 2) }}</pre>
+              <div v-else class="divide-y divide-line">
+                <ul v-for="q in session.dcql.credentials" :key="q.id" class="space-y-1 px-5 py-3 font-mono text-xs">
+                  <li class="text-muted">
+                    {{ q.id }} · {{ q.format }} · {{ q.format === 'circuit_zk' ? `doctype ${q.meta.doctype_value}` : `schema ${q.meta.schema_id_value}` }}<template v-if="session.answered === q.id"> · answered</template>
+                  </li>
+                  <li v-for="r in q.req" :key="r.return">
+                    <span class="text-muted">{{ r.return }} ←</span> {{ reqText(r) }}
+                  </li>
+                </ul>
+                <p v-if="session.dcql.credential_sets" class="px-5 py-2 font-mono text-[11px] text-muted">
+                  credential_sets: one of {{ session.dcql.credential_sets[0]!.options.map((o) => o.join('+')).join(' | ') }}
+                </p>
+              </div>
             </section>
 
             <!-- negotiation -->
             <section class="card">
               <h2 class="border-b border-line px-5 py-3 text-sm font-semibold">Capability negotiation</h2>
-              <dl class="divide-y divide-line text-xs">
+              <dl v-for="f in formats" :key="f" class="divide-y divide-line border-b border-line text-xs last:border-b-0">
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Readdit accepts</dt>
-                  <dd class="font-mono">{{ session.offer.circuit_id_values?.join(', ') || '–' }}</dd>
+                  <dd class="font-mono">{{ f }}: {{ ids(session.offer, f) }}</dd>
                 </div>
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Wallet supports</dt>
-                  <dd class="font-mono">{{ session.walletMetadata?.vp_formats_supported.circuit_zk?.circuit_id_values?.join(', ') || '–' }}</dd>
+                  <dd class="font-mono">{{ ids(session.walletMetadata?.vp_formats_supported, f) }}</dd>
                 </div>
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Sent in request</dt>
-                  <dd class="font-mono">
-                    {{ session.request?.client_metadata?.vp_formats_supported?.circuit_zk?.circuit_id_values?.join(', ') || '–' }}
-                  </dd>
-                </div>
-                <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
-                  <dt class="text-muted">Circuit used</dt>
-                  <dd class="font-mono">{{ session.circuit?.circuit_id ?? prove?.circuit_id ?? '–' }}</dd>
+                  <dd class="font-mono">{{ ids(session.request?.client_metadata?.vp_formats_supported, f) }}</dd>
                 </div>
               </dl>
+              <div class="grid grid-cols-[9rem_1fr] gap-2 border-t border-line px-5 py-2.5 text-xs">
+                <dt class="text-muted">Used</dt>
+                <dd class="font-mono">{{ session.circuit?.circuit_id ?? session.scheme?.scheme_id ?? prove?.circuit_id ?? prove?.scheme_id ?? '–' }}</dd>
+              </div>
             </section>
 
             <!-- circuit -->
@@ -296,6 +361,21 @@ const statusTone = (s: string) =>
                   <span class="text-muted tabular-nums">{{ i + 1 }}</span>
                   <span class="font-mono">{{ p.name }}</span>
                   <span class="text-muted">{{ p.source === 'presentation' ? 'from presentation' : 'recomputed by Readdit' }}: {{ p.derivation }}</span>
+                </li>
+              </ol>
+            </section>
+
+            <!-- scheme -->
+            <section v-if="session.scheme?.plugins" class="card">
+              <h2 class="border-b border-line px-5 py-3 text-sm font-semibold">{{ session.scheme.label }} · {{ session.scheme.proof_system }}</h2>
+              <ol class="divide-y divide-line text-xs">
+                <li v-for="x in session.scheme.statement" :key="x.name" class="grid grid-cols-[12.5rem_1fr] gap-2 px-5 py-2">
+                  <span class="font-mono">{{ x.name }}</span>
+                  <span class="text-muted">recomputed by Readdit: {{ x.derivation }}</span>
+                </li>
+                <li v-for="p in session.scheme.plugins" :key="p.id" class="grid grid-cols-[12.5rem_1fr] gap-2 px-5 py-2">
+                  <span class="font-mono">{{ p.id }} on {{ p.attribute }}</span>
+                  <span class="text-muted">{{ p.proves }}</span>
                 </li>
               </ol>
             </section>
@@ -380,8 +460,8 @@ const statusTone = (s: string) =>
             <span class="font-semibold text-ink">{{ sys.label }}:</span> {{ sys.notes.join(' ') }}
           </li>
           <li>
-            Sources: NYM-AUTH.md (full nym_auth statement on mdoc, Google Rust and Vega provers) and vega-caching-analysis.md
-            (per-phase figures, 1920-byte MSO). Setup keys are published, so a phone only downloads them.
+            Sources: NYM-AUTH.md (full nym_auth statement on mdoc, Google Rust and Vega provers), vega-caching-analysis.md
+            (per-phase figures, 1920-byte MSO) and bbs-cd-plugins' full-flow-bench (BBS). Setup keys are published, so a phone only downloads them.
           </li>
         </ul>
       </section>

@@ -5,3 +5,5 @@ demo-shots
 .DS_Store
 native/vega/target
 native/vega/readdit-vega.node
+native/bbs/target
+native/bbs/readdit-bbs.node

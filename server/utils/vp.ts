@@ -1,21 +1,22 @@
 import type { H3Event } from 'h3'
-import type { CircuitZkFormats } from '#shared/types/oid4vp'
-import { findCircuit } from '#shared/registry/circuits'
+import type { CircuitZkFormats, MmsZkFormats, VpFormats } from '#shared/types/oid4vp'
+import { findCircuit, findScheme } from '#shared/registry/circuits'
 import type { VpSessionRecord } from './store'
 
-/**
- * The site's circuit_zk offer: accepted circuits (config order) that are in the approved registry
- * and that the verifier can verify. A circuit the verifier lists must be the registry's: the same
- * proof system, the same public inputs in the same order and, where the registry pins one, the same
- * hash of the circuits as data. A mismatch is a configuration error and fails the offer, and so
- * does an offer without any circuit.
- */
-export async function verifierOffer(): Promise<CircuitZkFormats> {
-  const cfg = useRuntimeConfig()
-  const accepted = String(cfg.acceptedCircuits)
+const list = (v: unknown) =>
+  String(v)
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+
+/**
+ * circuit_zk: the accepted circuits (config order) that are in the approved registry and that the
+ * Vega verifier can verify. A circuit the verifier lists must be the registry's: the same proof
+ * system, the same public inputs in the same order and, where the registry pins one, the same hash
+ * of the circuits as data. A mismatch is a configuration error and fails the offer.
+ */
+async function circuitZkOffer(): Promise<CircuitZkFormats | undefined> {
+  const accepted = list(useRuntimeConfig().acceptedCircuits)
   const info = await verifier.info()
   const ids = accepted.filter((id) => {
     const entry = findCircuit(id)
@@ -31,9 +32,60 @@ export async function verifierOffer(): Promise<CircuitZkFormats> {
     }
     return true
   })
-  if (!ids.length) throw new Error(`none of the accepted circuits (${accepted.join(', ')}) is in the registry and the verifier`)
-  const systems = [...new Set(ids.map((id) => findCircuit(id)!.proof_system))]
-  return { circuit_proof_system_values: systems, circuit_id_values: ids }
+  if (!ids.length) return undefined
+  return { circuit_proof_system_values: [...new Set(ids.map((id) => findCircuit(id)!.proof_system))], circuit_id_values: ids }
+}
+
+/** mms_zk, likewise: the accepted schemes that are in the registry and that the BBS verifier
+ *  reports with the same proof system, schema and plugins. */
+async function mmsZkOffer(): Promise<MmsZkFormats | undefined> {
+  const accepted = list(useRuntimeConfig().acceptedSchemes)
+  const info = await bbsVerifier.info()
+  const ids = accepted.filter((id) => {
+    const entry = findScheme(id)
+    const listed = info.schemes.find((s) => s.scheme_id === id)
+    if (!entry || !listed) return false
+    if (listed.proof_system !== entry.proof_system) throw new Error(`verifier scheme ${id}: proof system ${listed.proof_system}, registry ${entry.proof_system}`)
+    if (listed.schema_id !== entry.schema.id || listed.schema_digest !== entry.schema.digest) {
+      throw new Error(`verifier scheme ${id}: schema ${listed.schema_id} ${listed.schema_digest} is not the registry's ${entry.schema.id} ${entry.schema.digest}`)
+    }
+    if (listed.plugins.join() !== entry.plugins.map((p) => p.id).join()) throw new Error(`verifier scheme ${id}: plugins ${listed.plugins.join()} are not the registry's`)
+    return true
+  })
+  if (!ids.length) return undefined
+  return { proof_system_values: [...new Set(ids.map((id) => findScheme(id)!.proof_system))], scheme_id_values: ids }
+}
+
+/**
+ * The site's offer: for each proof system the site accepts now (store().acceptedProofSystems,
+ * switched in /tech), its format, when its backend is loaded. circuit_zk first, then mms_zk: the
+ * order of preference. A backend that is not loaded leaves its format out; an offer with no format
+ * fails, and so does a configuration mismatch.
+ */
+export async function verifierOffer(): Promise<VpFormats> {
+  const accepted = store().acceptedProofSystems
+  const offer: VpFormats = {}
+  const missing: string[] = []
+  const take = async <T>(system: string, make: () => Promise<T | undefined>): Promise<T | undefined> => {
+    if (!accepted.includes(system)) return undefined
+    try {
+      return await make()
+    } catch (e) {
+      if (e instanceof ServiceError) {
+        missing.push(`${system}: ${e.code}`)
+        return undefined
+      }
+      throw e
+    }
+  }
+  const zk = await take('vega-v1', circuitZkOffer)
+  if (zk) offer.circuit_zk = zk
+  const mms = await take('bbs-cd-plugins-v0.1', mmsZkOffer)
+  if (mms) offer.mms_zk = mms
+  if (!offer.circuit_zk && !offer.mms_zk) {
+    throw new Error(`no format to offer: the site accepts ${accepted.join(', ') || 'no proof system'}${missing.length ? `; ${missing.join('; ')}` : ''}`)
+  }
+  return offer
 }
 
 /** A session by id; one past its time ends as failed with reason `expired`. 404 unknown_session. */

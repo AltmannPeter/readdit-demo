@@ -1,4 +1,5 @@
 import { RETURN_AGE, RETURN_PSEUDONYM } from '#shared/utils/dcql'
+import { PROOF_SYSTEMS } from '#shared/registry/circuits'
 import type { FailReason } from '../../../utils/store'
 
 /**
@@ -53,23 +54,34 @@ export default defineEventHandler(async (event) => {
     addTrace(s, 'response', 'Presentation received', { bytes: raw.length, presentations: 0 })
     return reject('vp_token', 'vp_token is not JSON')
   }
-  const list = vpToken && typeof vpToken === 'object' && !Array.isArray(vpToken) ? (vpToken as Record<string, unknown>)[s.query.id] : undefined
+  // Exactly one of the request's credential queries is answered (credential_sets: one option).
+  const token = vpToken && typeof vpToken === 'object' && !Array.isArray(vpToken) ? (vpToken as Record<string, unknown>) : {}
+  const answeredIds = Object.keys(token)
+  const query = answeredIds.length === 1 ? s.dcql.credentials.find((q) => q.id === answeredIds[0]) : undefined
+  const list = query ? token[query.id] : undefined
   addTrace(s, 'response', 'Presentation received', {
     bytes: raw.length,
+    ...(query && { query: query.id, format: query.format }),
     presentations: Array.isArray(list) ? list.map((p) => (typeof p === 'string' ? p.length : 0)) : 0,
   })
-  if (!Array.isArray(list) || list.length !== 1 || typeof list[0] !== 'string') return reject('vp_token', `expected one presentation for ${s.query.id}`)
+  if (!query) return reject('vp_token', `expected a presentation for exactly one of ${s.dcql.credentials.map((q) => q.id).join(', ')}`)
+  if (!Array.isArray(list) || list.length !== 1 || typeof list[0] !== 'string') return reject('vp_token', `expected one presentation for ${query.id}`)
+  s.answered = query.id
+  // The site accepts the format at the moment of the response too (/tech's switches).
+  const system = PROOF_SYSTEMS.find((p) => p.format === query.format)
+  if (!system || !store().acceptedProofSystems.includes(system.id)) return reject('format', `${query.format} (${system?.id ?? 'unknown'}) is no longer accepted`)
 
   const t0 = Date.now()
-  let result
+  let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; metrics?: VerifyMetrics }
   try {
-    result = await verifier.verify({
-      request: s.request,
-      credential_query_id: s.query.id,
-      presentation: list[0],
-      handover: handoverFor(s),
-      now: new Date().toISOString(),
-    })
+    const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
+    if (query.format === 'circuit_zk') {
+      const r = await verifier.verify({ ...call, now: new Date().toISOString() })
+      result = r.ok ? { ok: true, proofId: r.circuit_id, results: r.results, metrics: r.metrics } : r
+    } else {
+      const r = await bbsVerifier.verify(call)
+      result = r.ok ? { ok: true, proofId: r.scheme_id, results: r.results, metrics: r.metrics } : r
+    }
   } catch (e) {
     const detail = e instanceof ServiceError ? `${e.code}: ${e.detail ?? ''}` : String(e)
     console.error(`[vp] ${s.id}: the verifier failed: ${detail}`)
@@ -84,20 +96,22 @@ export default defineEventHandler(async (event) => {
 
   if (!result.ok) return reject(result.code ?? 'refused', result.reason, { input: result.input, metrics: result.metrics, round_trip_ms: roundTripMs })
 
-  // Defence in depth on top of the verifier service.
-  const offered = s.request.client_metadata.vp_formats_supported.circuit_zk.circuit_id_values
-  if (offered && !offered.includes(result.circuit_id)) return reject('circuit', 'circuit not offered')
-  const expected = s.query.req.map((r) => r.return).sort().join()
+  // Defence in depth on top of the verifier services.
+  const formats = s.request.client_metadata.vp_formats_supported
+  const offered = query.format === 'circuit_zk' ? formats.circuit_zk?.circuit_id_values : formats.mms_zk?.scheme_id_values
+  if (offered && !offered.includes(result.proofId)) return reject('circuit', `${query.format === 'circuit_zk' ? 'circuit' : 'scheme'} not offered`)
+  const expected = query.req.map((r) => r.return).sort().join()
   if (Object.keys(result.results).sort().join() !== expected) return reject('results', 'results keys do not match req')
   const pseudonym = result.results[RETURN_PSEUDONYM]
   if (typeof pseudonym !== 'string' || !/^[0-9a-f]{64}$/.test(pseudonym)) return reject('results', 'bad pseudonym')
-  const hasAge = s.query.req.some((r) => r.id === 'age_check')
+  const hasAge = query.req.some((r) => r.id === 'age_check')
   if (hasAge && result.results[RETURN_AGE] !== true) return reject('results', 'bad predicate')
 
   s.status = 'verified'
-  s.outcome = { ok: true, circuitId: result.circuit_id, pseudonym, ...(hasAge && { age: true as const }) }
+  s.outcome = { ok: true, format: query.format, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const }) }
   addTrace(s, 'verify', 'Proof verified', {
-    circuit_id: result.circuit_id,
+    format: query.format,
+    [query.format === 'circuit_zk' ? 'circuit_id' : 'scheme_id']: result.proofId,
     results: result.results,
     metrics: result.metrics,
     round_trip_ms: roundTripMs,

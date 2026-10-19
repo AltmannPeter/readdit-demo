@@ -13,6 +13,17 @@ export interface ProofMetrics {
   prove_ms?: number
   proof_bytes?: number
   presentation_bytes?: number
+  /** mms_zk: the BBS prover's parts (commitments, BBS proof, each plugin) and sizes. */
+  bbs?: {
+    offline_ms?: number
+    bbs_ms?: number
+    ecdsa_pop_ms?: number
+    device_sign_ms?: number
+    pseudonym_ms?: number
+    date_range_ms?: number | null
+    online_ms?: number
+    parts?: { bbs_proof: number; ecdsa_pop: number; pseudonym: number; date_range: number | null }
+  }
 }
 
 /** What the wallet on the phone shows and knows about the current request. */
@@ -26,8 +37,9 @@ export interface WalletFlow {
   matching: number
   /** The "Switch credential" popup is open. */
   switching: boolean
-  /** Circuits the wallet can run (its wallet_metadata). */
+  /** Circuits (circuit_zk) and schemes (mms_zk) the wallet can run (its wallet_metadata). */
   walletCircuits: string[]
+  walletSchemes: string[]
   view: RequestView | null
   consent: ConsentView | null
   metrics: ProofMetrics | null
@@ -77,6 +89,7 @@ export const initialWalletFlow = (): WalletFlow => ({
   matching: 0,
   switching: false,
   walletCircuits: [],
+  walletSchemes: [],
   view: null,
   consent: null,
   metrics: null,

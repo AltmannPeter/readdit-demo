@@ -10,7 +10,8 @@
 // open community, c/afterdark (requirement not met; then the adult's phone swapped in at the QR
 // code, refused with "Pseudonym does not match"), c/teenspace (age range granted), c/afterdark
 // refused by the site, c/france joined with its own pseudonym (linked), a comment, the ban from
-// /mod, the second sign-up ending in "Account banned", and /tech.
+// /mod, the second sign-up ending in "Account banned", /tech, and then BBS only (switched in /tech
+// after a reset): sign-up with the teen's BBS card and c/teenspace with the date-range plugin.
 // At each step it checks that the guide panel shows the matching step.
 // Exits 1 on a console error or when a step does not reach its expected state.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
@@ -175,7 +176,7 @@ try {
   await guide('unmet')
   await shot('afterdark-requirement-not-met')
   await phone.getByRole('button', { name: 'Close' }).click()
-  await page.getByText('Not completed').waitFor()
+  await page.getByText('Not completed').first().waitFor()
   await guide('not-completed')
   await shot('afterdark-not-completed')
 
@@ -194,7 +195,7 @@ try {
   await guide('age-consent')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await page.getByText('Pseudonym does not match').waitFor({ timeout: 30_000 })
+  await page.getByText('Pseudonym does not match').first().waitFor({ timeout: 30_000 })
   await guide('mismatch')
   await shot('afterdark-pseudonym-does-not-match')
   await page.keyboard.press('Escape')
@@ -298,7 +299,7 @@ try {
   await guide('consent')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await page.getByText('Account banned').waitFor({ timeout: 30_000 })
+  await page.getByText('Account banned').first().waitFor({ timeout: 30_000 })
   await guide('signup-refused')
   await openDetails()
   await shot('signup-again-account-banned')
@@ -308,6 +309,49 @@ try {
   await tech.bringToFront()
   await tech.getByRole('button', { name: /Age check, c\/teenspace/ }).click()
   await tech.getByText('Proof verified').first().waitFor()
+
+  // 9. BBS: the operator resets the demo and has Readdit accept only BBS (mms_zk) in /tech. The
+  // teen's phone answers with its BBS card: a new pseudonym and account, an age range with the
+  // date-range plugin, and c/afterdark refused by the site.
+  step('9. BBS only')
+  await tech.request.post(`${BASE}/api/demo/reset`)
+  await tech.reload()
+  await ready(tech)
+  await tech.locator('[data-accept="bbs-cd-plugins-v0.1"]').check()
+  await tech.locator('[data-accept="vega-v1"]').uncheck()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'bbs-cd-plugins-v0.1')
+  await page.bringToFront()
+  await page.goto(BASE)
+  await ready(page)
+  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
+  await scan()
+  await readRequest()
+  await guide('consent')
+  await openDetails()
+  await guidePanel.getByText('pseudonym-bbs-v1').first().waitFor()
+  await shot('bbs-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText(/^Account created: u\//).waitFor({ timeout: 30_000 })
+  await guide('account-created')
+  await openDetails()
+  await shot('bbs-account-created')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.click('a[href="/c/teenspace"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Age proof: 13–17').waitFor()
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText('Age verified').first().waitFor({ timeout: 30_000 })
+  await openDetails()
+  await shot('bbs-age-granted')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await tech.request.post(`${BASE}/api/demo/reset`)
 } catch (e) {
   // Leave the state the run stopped in.
   await page.screenshot({ path: join(OUT, 'failure.png') })
@@ -322,8 +366,8 @@ const count = (line) => net.filter((l) => l === line).length
 const expect = [
   ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 5],
   ["c/afterdark on the teen's phone: the wallet answers access_denied, once", count('response_uri error=access_denied 200') === 1],
-  ["five presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up", count('/api/wallet/prove 200') === 5],
-  ['five vp_token responses', count('response_uri vp_token 200') === 5],
+  ["seven presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, and with BBS sign-up and c/teenspace", count('/api/wallet/prove 200') === 7],
+  ['seven vp_token responses', count('response_uri vp_token 200') === 7],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)

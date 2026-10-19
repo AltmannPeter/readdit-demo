@@ -1,0 +1,20 @@
+{
+  "caseName": "identity commitment",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "PresentationContext",
+  "input": {
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "commitments": [
+      "c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "identity commitment"
+    }
+  }
+}

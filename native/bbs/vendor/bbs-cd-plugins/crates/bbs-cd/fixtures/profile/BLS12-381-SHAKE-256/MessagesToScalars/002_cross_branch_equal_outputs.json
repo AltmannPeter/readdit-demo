@@ -1,0 +1,32 @@
+{
+  "caseName": "cross-branch equal outputs",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "MessagesToScalars",
+  "input": {
+    "messages": [
+      "616263",
+      {
+        "scalar": "45655df00a4e978b5aeba46e0f5fe30d9c8b7b07012545cf421796b9a38a3171"
+      },
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000005"
+      }
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "SCALAR"
+    ],
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f"
+  },
+  "trace": {},
+  "expected": {
+    "output": [
+      "45655df00a4e978b5aeba46e0f5fe30d9c8b7b07012545cf421796b9a38a3171",
+      "45655df00a4e978b5aeba46e0f5fe30d9c8b7b07012545cf421796b9a38a3171",
+      "0000000000000000000000000000000000000000000000000000000000000005"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "readdit-bbs-node"
+version = "0.1.0"
+edition = "2021"
+description = "Node addon: the mms_zk (BBS committed disclosures) prover and verifier for Readdit's server"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nym-bbs = { path = "../nym-bbs" }
+napi = { version = "3", features = ["napi8"] }
+napi-derive = "3"
+serde = "1"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+
+# napi-derive's #[napi] expansion emits the unsafe FFI glue, so this crate cannot forbid unsafe
+# code. Its own source has none; every computation lives in nym-bbs, which forbids it.
+[lints.rust]
+unsafe_code = "allow"
+unused_must_use = "deny"

@@ -1,5 +1,5 @@
-import type { CircuitZkFormats, WalletMetadata } from '#shared/types/oid4vp'
-import { buildRequestObject } from '#shared/utils/dcql'
+import type { CircuitZkFormats, MmsZkFormats, WalletMetadata } from '#shared/types/oid4vp'
+import { buildDcqlQuery, buildRequestObject } from '#shared/utils/dcql'
 import { tailorFormats } from '#shared/utils/negotiation'
 
 const strings = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
@@ -15,11 +15,13 @@ function parseWalletMetadata(text: unknown): WalletMetadata | undefined {
   }
   const formats = (m as { vp_formats_supported?: unknown } | null)?.vp_formats_supported
   const zk = (formats as { circuit_zk?: unknown } | undefined)?.circuit_zk as CircuitZkFormats | undefined
+  const mms = (formats as { mms_zk?: unknown } | undefined)?.mms_zk as MmsZkFormats | undefined
   if (
     !m ||
     typeof m !== 'object' ||
     (formats !== undefined && (typeof formats !== 'object' || formats === null)) ||
-    (zk !== undefined && (typeof zk !== 'object' || zk === null || !strings(zk.circuit_id_values) || !strings(zk.circuit_proof_system_values)))
+    (zk !== undefined && (typeof zk !== 'object' || zk === null || !strings(zk.circuit_id_values) || !strings(zk.circuit_proof_system_values))) ||
+    (mms !== undefined && (typeof mms !== 'object' || mms === null || !strings(mms.scheme_id_values) || !strings(mms.proof_system_values)))
   ) {
     throw refusal(400, 'invalid_wallet_metadata', 'wallet_metadata does not have the expected shape.')
   }
@@ -28,6 +30,7 @@ function parseWalletMetadata(text: unknown): WalletMetadata | undefined {
 
 /**
  * request_uri. GET, or POST with wallet_metadata and wallet_nonce (request_uri_method=post).
+ * The offer and the DCQL query follow the proof systems the site accepts at this moment.
  * Returns the signed Request Object (application/oauth-authz-req+jwt). Single use: 410 with
  * `already_used`, `expired` or `cancelled` once the session has moved on.
  */
@@ -47,7 +50,20 @@ export default defineEventHandler(async (event) => {
     walletNonce = typeof form.wallet_nonce === 'string' && form.wallet_nonce ? form.wallet_nonce : undefined
   }
 
-  const { formats, tailored } = tailorFormats(s.offer, walletMetadata?.vp_formats_supported?.circuit_zk)
+  // The offer as the site accepts now (/tech's switches may have changed since the QR code was shown).
+  let offer
+  try {
+    offer = await verifierOffer()
+  } catch (e) {
+    console.error(`[vp] ${s.id}: no offer: ${(e as Error).message}`)
+    throw refusal(503, 'unavailable', 'The verifier is not available.')
+  }
+  if (JSON.stringify(offer) !== JSON.stringify(s.offer)) {
+    addTrace(s, 'offer', 'Offer updated: the accepted proof systems changed', { was: s.offer, now: offer })
+    s.offer = offer
+    s.dcql = buildDcqlQuery(offer, s.age)
+  }
+  const { formats, tailored } = tailorFormats(s.offer, walletMetadata?.vp_formats_supported)
   const cfg = useRuntimeConfig(event)
   const request = buildRequestObject({
     host: s.host,
@@ -56,7 +72,7 @@ export default defineEventHandler(async (event) => {
     sessionId: s.id,
     nonce: s.nonce,
     state: s.state,
-    query: s.query,
+    dcql: s.dcql,
     formats,
     walletNonce,
   })

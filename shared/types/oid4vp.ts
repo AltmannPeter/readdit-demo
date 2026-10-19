@@ -1,6 +1,9 @@
-// OpenID4VP 1.0 + `circuit_zk` shapes from the Nym-authentication rulebook (v0.2).
+// OpenID4VP 1.0 + `circuit_zk` shapes from the Nym-authentication rulebook (v0.2), and the
+// demo's `mms_zk` profile for BBS credentials with committed disclosures (docs/mms_zk.md).
 
 export const NYM_DOCTYPE = 'eu.europa.ec.eudi.nym_auth.1'
+/** The nym_auth attestation as a BBS credential (mms_zk). */
+export const NYM_BBS_SCHEMA = 'eu.europa.ec.eudi.nym_auth.bbs.1'
 
 export type PseudonymConfig =
   | 'known-offender-matching-ssc'
@@ -34,8 +37,35 @@ export interface CircuitZkCredentialQuery {
   require_cryptographic_holder_binding?: true
 }
 
+/** mms_zk: a pseudonym from the BBS credential's committed seed, nym = seed·OP, returned as
+ *  SHA-256(nym). The configuration names its properties, as in pseudonym-v1-sha256. */
+export interface PseudonymBbsReq {
+  id: 'pseudonym-bbs-v1'
+  return: string
+  params: { config: 'known-offender-matching-ssc'; verifier_id_type: 'x509_san_dns' }
+}
+
+export type MmsReqItem = PseudonymBbsReq | AgeCheckReq
+
+export interface MmsZkCredentialQuery {
+  id: string
+  format: 'mms_zk'
+  meta: { schema_id_value: string }
+  req: MmsReqItem[]
+  require_cryptographic_holder_binding?: true
+}
+
+export type CredentialQuery = CircuitZkCredentialQuery | MmsZkCredentialQuery
+
+/** DCQL credential set: the wallet answers with one of the options (each a list of query ids). */
+export interface CredentialSet {
+  options: string[][]
+  required?: boolean
+}
+
 export interface DcqlQuery {
-  credentials: CircuitZkCredentialQuery[]
+  credentials: CredentialQuery[]
+  credential_sets?: CredentialSet[]
 }
 
 export interface CircuitZkFormats {
@@ -43,9 +73,21 @@ export interface CircuitZkFormats {
   circuit_id_values?: string[]
 }
 
+/** mms_zk metadata: the multi-message-signature schemes (schema + plugins) and proof systems. */
+export interface MmsZkFormats {
+  proof_system_values?: string[]
+  scheme_id_values?: string[]
+}
+
+/** vp_formats_supported: the formats a verifier accepts, or a wallet supports. */
+export interface VpFormats {
+  circuit_zk?: CircuitZkFormats
+  mms_zk?: MmsZkFormats
+}
+
 /** `wallet_metadata` posted to request_uri when request_uri_method=post. */
 export interface WalletMetadata {
-  vp_formats_supported: { circuit_zk?: CircuitZkFormats }
+  vp_formats_supported: VpFormats
 }
 
 /** Decoded payload of the Request Object fetched from `request_uri`. */
@@ -63,7 +105,7 @@ export interface RequestObject {
   dcql_query: DcqlQuery
   client_metadata: {
     client_name?: string
-    vp_formats_supported: { circuit_zk: CircuitZkFormats }
+    vp_formats_supported: VpFormats
   }
 }
 
@@ -71,8 +113,9 @@ export interface RequestObject {
 export type Results = Record<string, string | true>
 
 /**
- * vp_token: Credential Query id -> array of presentations, each
- * base64url(CBOR(CircuitZkPresentation)) without padding. Opaque to the site.
+ * vp_token: Credential Query id -> array of presentations: for circuit_zk
+ * base64url(CBOR(CircuitZkPresentation)), for mms_zk base64url of the BBS-CD envelope, without
+ * padding. Opaque to the site.
  */
 export type VpToken = Record<string, string[]>
 

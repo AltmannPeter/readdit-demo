@@ -1,0 +1,67 @@
+# SOURCES.lock — pinned sources for the DEVBIND-BBS-TOM-ECDSA/0.1 research prototype
+# Each entry: what was used, exact revision, files/sections, selected variant,
+# parameters, licence and how it is reused.  "Inspected" never means audited.
+
+[hpi-ecdsa-pops]
+repository   = "https://github.com/hpicrypto/ecdsa_pops"
+revision     = "e05148765142b237f369a4336a0898c7f29b78b2"
+licence      = "MIT (Copyright (c) Alexandros Zacharakis) — copied to docs/LICENSE.hpi-ecdsa_pops"
+files = [
+  "CDLS/t256/src/curves/mod.rs            -> devbind/params.py (Tom-256 a, b, GT=(3,..), HT=(5,..))",
+  "CDLS/pedersen/src/ec_point_add_protocol_opt.rs -> devbind/pa.py (PA equations, Opt 1/2/3)",
+  "CDLS/pedersen/src/scalar_mul_wc_protocol.rs    -> devbind/sm.py (public-base SM round)",
+  "CDLS/pedersen/src/fs_scalar_mul_wc_protocol.rs -> devbind/presentation.py sm_bits (batched bits)",
+  "ecdsa_pops/src/roks/dleq_rok.rs        -> devbind/transfer.py (mask range, abort interval)",
+  "ecdsa_pops/src/roks/bls_to_tom.rs      -> devbind/presentation.py (2x128-bit limbs, fold 1, 2^128)",
+]
+variant      = "algebra ported; transcripts are NOT the merlin transcripts (no byte compatibility)"
+parameters   = "SM 128 rounds; DLEQ b_x=128, b_c=112, b_f=8"
+
+[draft-cllz-cfrg-ecdsa-pop-00]
+reference    = "https://www.ietf.org/archive/id/draft-cllz-cfrg-ecdsa-pop-00.html §§4-10"
+status       = "NOT retrievable from this environment (ietf.org blocked by egress policy)"
+used_via     = "check_relation.py (the report's transcription of the draft-00 shared-bit SM)"
+
+[check-relation-oracle]
+file         = "oracle/check_relation.py (unmodified copy supplied by Peter)"
+sha256       = "8b6fe4a4a3cb80f4581270470870d018595be8446dad64f605ba589f5d72b43d"
+reuse        = "algebra oracle only; cross-verified in tests/test_oracle.py"
+
+[bbs-core]
+reference    = "draft-irtf-cfrg-bbs-signatures, editor's copy"
+repository   = "https://github.com/decentralized-identity/bbs-signature"
+revision     = "1329e8587e08fac3d970ab8fe504f7eb882f058d (2026-10-14)"
+files        = ["draft-irtf-cfrg-bbs-signatures.md", "tooling/fixtures/fixture_data/bls12-381-sha-256/*"]
+ciphersuite  = "BLS12-381-SHA-256 (BBS_BLS12381G1_XMD:SHA-256_SSWU_RO_)"
+note         = "Report pins draft-10 on ietf.org, which is unreachable here; the editor's copy at the pinned fixture revision was used. Differences from draft-10 text are not known in detail (recorded as open item S-1)."
+licence      = "repository LICENSE / LICENSE.md copied with the fixtures (vectors/bbs-core-fixtures)"
+reuse        = "algorithms re-implemented; fixtures used as conformance gate (30/30 pass)"
+
+[blind-bbs]
+reference    = "draft-irtf-cfrg-bbs-blind-signatures, editor's copy"
+repository   = "https://github.com/cfrg/draft-irtf-cfrg-bbs-blind-signatures"
+revision     = "56b032e (2026-07-13), post -03; its history lists '-04' fixes (generator counts, scalar ordering, disclosure indexing, proof serialization)"
+sections     = ["Core Proof Generation", "Core Proof Verification", "Proof Challenge Calculation", "Proof to Octets / Octets to Proof"]
+variant      = "CoreProofGen/CoreProofVerify with commitment_indexes; Y0,Y1 = create_generators(2, 'COM_DIS_' || api_id)"
+note         = "Report pins -03 on datatracker (unreachable). Committed-disclosure test vectors are 'being revised' per the draft; none used."
+
+[modular-bbs]
+reference    = "draft-bormann-jwp-modular-bbs-03 §§2.5-2.6, 3.2, 4.3, 5"
+status       = "NOT retrievable (datatracker blocked; WebFetch permission not granted in time)"
+consequence  = "numeric-limb scalar profile defined locally as an experimental interface (IMPLEMENTATION_DECISIONS D-4); not claimed compatible with Modular BBS"
+
+[dock-crypto]
+repository   = "https://github.com/docknetwork/crypto"
+revision     = "224f195bb8babc2d0de5256135120e0aca9fbd19"
+files        = ["equality_across_groups/src/eq_across_groups.rs"]
+reuse        = "second reference for the transfer statement and bounds only (no code reused)"
+
+[cross-group-paper]
+reference    = "Chase, Orrù, Perrin, Zaverucha, ePrint 2022/1593 (Fig. 1, §5) — cited via Dock; not re-read here"
+
+[python-deps]
+python       = "3.13.16"
+py_ecc       = "8.0.0  (BLS12-381 arithmetic, pairing, hash_to_G1, point compression)"
+cryptography = "50.0.1 (OpenSSL P-256 ECDSA prehashed sign/verify, Ed25519 for simulated attestation)"
+gmpy2        = "2.3.2 (installed, not required)"
+pytest       = "9.1.1"

@@ -8,3 +8,6 @@ demo-shots
 native/vega/target
 native/vega/readdit-vega.node
 native/vega/readdit-vega.node.tmp
+native/bbs/target
+native/bbs/readdit-bbs.node
+native/bbs/readdit-bbs.node.tmp

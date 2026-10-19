@@ -1,0 +1,66 @@
+{
+  "caseName": "wrong number of precomputed openings",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "ProofGen",
+  "input": {
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "signature": "89dc8cbc73a21865afce17359fee2ead4bbad55eb99869ec8e4aca3b014db0021d7bd842d8c04f4fa680fcae871b2e67325559cd684d06bfcf4d53c1620b762467899a107d0e0ad5a304e17a802174aa",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "messages": [
+      "676976656e206e616d65",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "",
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"
+      },
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "00",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "6c617374"
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "COMMIT",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE"
+    ],
+    "precomputedRands": [
+      "2dda9226594998d314a63edce1c7f8bfa78b18346b01b341af7be2c2264f1118",
+      "4a198f2feb5c76a13784e131081a3f9ceb951d6570ab3734eb9e3086f29e73ec"
+    ]
+  },
+  "mockedRng": {
+    "seed": "332e313431353932363533353839373933323338343632363433333833323739",
+    "dst": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f434f4d5f4449535f4d4f434b5f52414e444f4d5f5343414c4152535f4453545f"
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "wrong opening count"
+    }
+  }
+}

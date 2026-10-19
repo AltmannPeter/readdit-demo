@@ -1,5 +1,5 @@
-import type { Account, AgeGate } from '#shared/types'
-import type { CircuitZkCredentialQuery, CircuitZkFormats, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
+import type { Account, AgeGate, BirthDateRange } from '#shared/types'
+import type { CredentialQuery, DcqlQuery, RequestObject, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
 
 /**
  * signin: `signup` creates the account; `login` only logs in. With `community` (a logged-out
@@ -57,8 +57,12 @@ export interface VpSessionRecord {
   origin: string
   nonce: string
   state: string
-  query: CircuitZkCredentialQuery
-  offer: CircuitZkFormats
+  /** The age range the request asks for, if any (from the community's gate, when the session starts). */
+  age?: BirthDateRange
+  /** The DCQL query: one credential query per accepted format, alternatives in credential_sets.
+   *  Made again, with the offer, when the wallet fetches the request, so it follows /tech's switches. */
+  dcql: DcqlQuery
+  offer: VpFormats
   walletMetadata?: WalletMetadata
   tailored?: boolean
   request?: RequestObject
@@ -67,7 +71,10 @@ export interface VpSessionRecord {
   /** The verifier's own timings of this session's presentation, and the time of the call around
    *  it as the response route measures it (round_trip_ms); accepted or refused. */
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
-  outcome?: { ok: true; circuitId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
+  /** The query the wallet answered, once a response arrived. */
+  answered?: string
+  /** `proofId`: the circuit (circuit_zk) or scheme (mms_zk) of the verified presentation. */
+  outcome?: { ok: true; format: CredentialQuery['format']; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
   /** `age`: the session's age proof was recorded for the account. */
   completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
@@ -80,6 +87,8 @@ export interface AccountRecord extends Account {
   community?: string
   /** A community account linked to this Readdit account's pseudonym. */
   linkedTo?: string
+  /** The format of the presentation that created the account: circuit_zk (mdoc) or mms_zk (BBS). */
+  format?: 'circuit_zk' | 'mms_zk'
 }
 
 export interface UserComment {
@@ -99,12 +108,23 @@ interface Store {
   comments: UserComment[]
   /** Browser sessions logged out by a ban, so the UI can say why. */
   bannedNotices: Map<string, string>
+  /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
+   *  configured ones, runtime config acceptedProofSystems). */
+  acceptedProofSystems: string[]
 }
 
 const g = globalThis as unknown as { __readditStore?: Store }
 
+/** The proof systems accepted at start (runtime config acceptedProofSystems). */
+export function configuredProofSystems(): string[] {
+  return String(useRuntimeConfig().acceptedProofSystems)
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+}
+
 function fresh(): Store {
-  return { sessions: new Map(), byState: new Map(), accounts: new Map(), comments: [], bannedNotices: new Map() }
+  return { sessions: new Map(), byState: new Map(), accounts: new Map(), comments: [], bannedNotices: new Map(), acceptedProofSystems: configuredProofSystems() }
 }
 
 /** In-memory demo state. Survives hot reload, not restarts. */
