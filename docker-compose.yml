@@ -1,4 +1,4 @@
-# Readdit demo in a container: the site with its two proof backends built in (Rust addons: Vega and BBS).
+# Readdit demo in a container: the site with its three proof backends built in (Rust addons: Vega, Longfellow and BBS).
 #
 #   docker compose up -d --build        http://localhost:3000   (the first build takes several minutes)
 #   docker compose down

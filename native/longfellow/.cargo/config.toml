@@ -1,0 +1,9 @@
+# The GF(2^128) arithmetic of Google's runtime (runtime/algebra/src/arch) needs carry-less
+# multiplication: PCLMULQDQ on x86-64, otherwise a slower portable fallback; PMULL (+aes) on
+# AArch64, without which it does not compile (Apple Silicon has it by default, Linux arm64 does
+# not). A RUSTFLAGS environment variable replaces these flags.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-feature=+pclmulqdq,+sse2"]
+
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["-C", "target-feature=+aes,+sha2"]

@@ -1,0 +1,40 @@
+[package]
+name = "nym-longfellow"
+version = "0.1.0"
+edition = "2024"
+description = "Prover and verifier of the nym_auth age and pseudonym statement (Longfellow), as Readdit runs them"
+publish = false
+
+[dependencies]
+# Google's runtime, vendored (vendor/longfellow-zk).
+core-algebra = { workspace = true }
+core-proto = { workspace = true }
+runtime-algebra = { workspace = true }
+runtime-ligero = { workspace = true }
+runtime-random = { workspace = true }
+runtime-zk = { workspace = true }
+# circuits/mdoc/circuits.zst.
+zstd = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+# CircuitZkPresentation (rulebook, "Presentation encoding"), read from untrusted input.
+ciborium = "0.2"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+# The device key's ES256 signature, the holder's signature checks, and the off-circuit ECDSA
+# arithmetic of the signature circuit's witness (SPEC.md L5).
+p256 = { version = "0.13", features = ["arithmetic", "expose-field", "ecdsa", "pkcs8"] }
+# The Document Signer certificate in issuer_key_set.
+x509-cert = "0.2"
+der = "0.7"
+# The site's clock (RFC 3339).
+time = { version = "0.3", features = ["parsing", "formatting"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+let_underscore_must_use = "deny"
+let_underscore_untyped = "deny"

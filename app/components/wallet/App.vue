@@ -259,9 +259,10 @@ async function onPin() {
       metrics.value = { sign_ms: bbs.device_sign_ms, prove_ms, presentation_bytes, bbs }
       presentation = out.presentation
     } else {
-      const signed = await unlockAndSign({ request: req, credential: focus.value })
+      const circuitId = view.value!.circuit!.circuit_id
+      const signed = await unlockAndSign({ request: req, credential: focus.value, circuitId })
       metrics.value = { sign_ms: signed.metrics.sign_ms }
-      const out: ProveOutput = await prove({ request: req, queryId, circuitId: view.value!.circuit!.circuit_id, deviceSignature: signed.device_signature, credential: focus.value })
+      const out: ProveOutput = await prove({ request: req, queryId, circuitId, deviceSignature: signed.device_signature, credential: focus.value })
       metrics.value = {
         ...metrics.value,
         witness_ms: out.witness_ms ?? out.metrics.witness_ms,

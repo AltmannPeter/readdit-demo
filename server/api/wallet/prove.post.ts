@@ -2,7 +2,7 @@ import type { RequestObject } from '#shared/types/oid4vp'
 
 /**
  * Mock phone, the proof.
- * circuit_zk (Vega), native steps 2 and 3: the witness from the credential, then the proof. The
+ * circuit_zk (Vega or Longfellow, by `circuit_id`), native steps 2 and 3: the witness from the credential, then the proof. The
  * phone sends its credential, its secret_seed and the device signature of step 1; the prover keeps
  * none of them, and the witness lives only for this call.
  * mms_zk (BBS): one step. The phone sends its BBS credential and its device key, which signs inside
@@ -55,12 +55,13 @@ export default defineEventHandler(async (event) => {
       if (result.witness) addTrace(s, 'witness', 'Witness built', { ...result.witness })
       addTrace(s, 'prove', 'Proof created', {
         circuit_id: result.circuit_id,
+        backend: result.backend,
         metrics: result.metrics,
         presentation_bytes: result.presentation.length,
         round_trip_ms: Date.now() - t0,
       })
     }
-    const { witness, ...out } = result
+    const { witness, backend: _backend, ...out } = result
     return { ...out, witness_ms: witness?.metrics.witness_ms }
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : 'error'

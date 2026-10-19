@@ -62,6 +62,7 @@ export default defineEventHandler(async (event) => {
   try {
     offer = await verifierOffer()
   } catch (e) {
+    if (e instanceof NothingAccepted) throw refusal(503, 'none_accepted', 'Readdit accepts no proof system. Switch one on in /tech.')
     console.error(`[vp] no offer: ${(e as Error).message}`)
     throw refusal(503, 'unavailable', 'The verifier is not available.')
   }

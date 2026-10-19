@@ -1,0 +1,27 @@
+{
+  "issuer_key": "b626aa933b215bc28f3b4924bf675454d2121f28bbb146415c181092f7fd9080,bf779357652d68be5ab61c667bde4ebff67b9efa2535c1138508fad656a2ab63",
+  "mdoc": {
+    "doc_type": "eu.europa.ec.eudi.nym_auth.1",
+    "namespace": "eu.europa.ec.eudi.nym_auth.1",
+    "element_identifier": "birth_date",
+    "time": "2026-10-07T12:00:00Z",
+    "earliest": "0000-00-00",
+    "cutoff": "2008-10-07",
+    "origin": "https://verifier.example",
+    "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+    "challenge_digest": "7eea0f8e073961c3e82e9562e0f79edaa66dbfc17eaf0ac0596a987733516dd9",
+    "device_signature": "610ac8c0dddb465931a9f4fdb2038dd698117c90534bcd56b58f41a7ab71e17e6b7d05162bbbae4c4e43f6a7d004bc4ef764d897d5eb0174cdb5863ef1c5c658"
+  },
+  "sdjwt": {
+    "vct": "urn:europa:attestation:nym_auth:1",
+    "claim": "birthdate",
+    "time": "1791374400",
+    "earliest": "0000-00-00",
+    "cutoff": "2008-10-07",
+    "client_id": "x509_san_dns:verifier.example",
+    "origin": "https://verifier.example",
+    "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+    "challenge_digest": "ebc9ac479fef0bec895d4b426f76d988e24f796007c7ea39b2f5ee071f0419da",
+    "device_signature": "5f7107341bed7842d1aef23193a87a5dea5d53ecba34c8d50f57b7fe5a4a616d1bff918cf110d917047e8767a4ee9a60fed324fc30e29c944d6ce84e442a6736"
+  }
+}

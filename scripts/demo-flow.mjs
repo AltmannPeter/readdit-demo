@@ -6,12 +6,15 @@
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
 //        (needs: npm i --no-save playwright && npx playwright install chromium)
 //
-// Order: sign-up on the teen's phone (QR, credential, scan, consent, PIN, proving, success), an
+// Order: the operator switches Vega on in /tech (the site accepts no proof system at the start),
+// sign-up on the teen's phone (QR, credential, scan, consent, PIN, proving, success), an
 // open community, c/afterdark (requirement not met; then the adult's phone swapped in at the QR
 // code, refused with "Pseudonym does not match"), c/teenspace (age range granted), c/afterdark
 // refused by the site, c/france joined with its own pseudonym (linked), a comment, the ban from
-// /mod, the second sign-up ending in "Account banned", /tech, and then BBS only (switched in /tech
-// after a reset): sign-up with the teen's BBS card and c/teenspace with the date-range plugin.
+// /mod, the second sign-up ending in "Account banned", /tech, then BBS only (switched in /tech
+// after a reset): sign-up with the teen's BBS card and c/teenspace with the date-range plugin, and
+// then Longfellow only, over the same mdoc as Vega: sign-up, c/afterdark tried first and refused
+// by the wallet, c/teenspace granted.
 // At each step it checks that the guide panel shows the matching step.
 // Exits 1 on a console error or when a step does not reach its expected state.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
@@ -105,6 +108,17 @@ const enterPin = async (pin) => {
 
 try {
   await page.request.post(`${BASE}/api/demo/reset`)
+
+  // 0. The site accepts no proof system at the start: the operator switches Vega on in /tech.
+  step('0. /tech: accept Vega')
+  const tech = await context.newPage()
+  watch(tech)
+  await tech.goto(`${BASE}/tech`)
+  await ready(tech)
+  await tech.locator('[data-none-accepted]').waitFor()
+  await tech.locator('[data-accept="vega-v1"]').check()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'vega-v1')
+  await page.bringToFront()
 
   // 1. Sign up: QR, the credential, scan, consent, PIN, proving, success.
   step('1. sign up')
@@ -268,9 +282,7 @@ try {
   await page.getByText('Anyone want to swap phone numbers?').waitFor()
   await shot('comment')
 
-  const tech = await context.newPage()
-  watch(tech)
-  await tech.goto(`${BASE}/tech`)
+  await tech.reload()
   await ready(tech)
   await tech.getByText('Capability negotiation').waitFor()
 
@@ -318,7 +330,6 @@ try {
   await tech.reload()
   await ready(tech)
   await tech.locator('[data-accept="bbs-cd-plugins-v0.1"]').check()
-  await tech.locator('[data-accept="vega-v1"]').uncheck()
   await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'bbs-cd-plugins-v0.1')
   await page.bringToFront()
   await page.goto(BASE)
@@ -351,6 +362,58 @@ try {
   await openDetails()
   await shot('bbs-age-granted')
   await phone.getByRole('button', { name: 'Close', exact: true }).click()
+
+  // 10. Longfellow: reset, and Readdit accepts only Longfellow, the other circuit_zk backend. The
+  // teen's phone answers with its mdoc, as for Vega: the same pseudonym function, so a new account
+  // only because the demo was reset. c/afterdark first (refused by the wallet), then c/teenspace.
+  step('10. Longfellow only')
+  await tech.request.post(`${BASE}/api/demo/reset`)
+  await tech.reload()
+  await ready(tech)
+  await tech.locator('[data-accept="longfellow-libzk-v1"]').check()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'longfellow-libzk-v1')
+  await page.bringToFront()
+  await page.goto(BASE)
+  await ready(page)
+  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
+  await scan()
+  await readRequest()
+  await guide('consent')
+  await openDetails()
+  await guidePanel.getByText('Longfellow nym_auth v1 (longfellow-libzk-v1)').first().waitFor()
+  await shot('longfellow-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText(/^Account created: u\//).waitFor({ timeout: 30_000 })
+  await guide('account-created')
+  await openDetails()
+  await guidePanel.getByText('the Longfellow addon').first().waitFor()
+  await shot('longfellow-account-created')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.click('a[href="/c/afterdark"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Requirement Not Met').waitFor()
+  await phone.getByRole('button', { name: 'Close' }).click()
+  await page.getByText('Not completed').first().waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
+  await page.click('a[href="/c/teenspace"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Age proof: 13–17').waitFor()
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText('Age verified').first().waitFor({ timeout: 30_000 })
+  await openDetails()
+  await shot('longfellow-age-granted')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
   await tech.request.post(`${BASE}/api/demo/reset`)
 } catch (e) {
   // Leave the state the run stopped in.
@@ -364,10 +427,10 @@ console.log(`phone traffic:\n  ${net.join('\n  ')}`)
 // The use cases, as the phone's traffic shows them.
 const count = (line) => net.filter((l) => l === line).length
 const expect = [
-  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 5],
-  ["c/afterdark on the teen's phone: the wallet answers access_denied, once", count('response_uri error=access_denied 200') === 1],
-  ["seven presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, and with BBS sign-up and c/teenspace", count('/api/wallet/prove 200') === 7],
-  ['seven vp_token responses', count('response_uri vp_token 200') === 7],
+  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 7],
+  ["c/afterdark on the teen's phone: the wallet answers access_denied, with Vega and with Longfellow", count('response_uri error=access_denied 200') === 2],
+  ["nine presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, with BBS sign-up and c/teenspace, and with Longfellow sign-up and c/teenspace", count('/api/wallet/prove 200') === 9],
+  ['nine vp_token responses', count('response_uri vp_token 200') === 9],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)

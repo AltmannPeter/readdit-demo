@@ -11,3 +11,6 @@ native/vega/readdit-vega.node.tmp
 native/bbs/target
 native/bbs/readdit-bbs.node
 native/bbs/readdit-bbs.node.tmp
+native/longfellow/target
+native/longfellow/readdit-longfellow.node
+native/longfellow/readdit-longfellow.node.tmp

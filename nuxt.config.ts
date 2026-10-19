@@ -12,6 +12,11 @@ export default defineNuxtConfig({
     vegaAddon: 'native/vega/readdit-vega.node',
     vegaShapes: 'native/vega/circuits/mdoc/shapes.zst',
     vegaTrustAnchors: 'native/vega/demo/document-signer.pem',
+    // Longfellow backend: the Rust Node addon, the directory of circuits.zst, params.tsv and
+    // hash-semantic.tsv, and the verifier's trust anchors (the same demo issuer as Vega's).
+    longfellowAddon: 'native/longfellow/readdit-longfellow.node',
+    longfellowCircuits: 'native/longfellow/circuits/mdoc',
+    longfellowTrustAnchors: 'native/vega/demo/document-signer.pem',
     // BBS backend (mms_zk): the Rust Node addon and the issuer parameters the verifier trusts.
     bbsAddon: 'native/bbs/readdit-bbs.node',
     bbsIssuerParams: 'native/bbs/demo/issuer-params.bin',
@@ -19,11 +24,12 @@ export default defineNuxtConfig({
     proofTimeToleranceS: 300,
     // Comma-separated circuit ids (circuit_zk) and scheme ids (mms_zk) the site can accept, in
     // order of preference.
-    acceptedCircuits: 'urn:circuits:vega:nym_auth:v1',
+    acceptedCircuits: 'urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1',
     acceptedSchemes: 'urn:mms:bbs-cd:nym_auth:v1',
     // The proof systems accepted when the site starts (and after a demo reset); /tech switches
-    // them. Comma-separated: vega-v1, bbs-cd-plugins-v0.1.
-    acceptedProofSystems: 'vega-v1',
+    // them. Comma-separated: vega-v1, longfellow-libzk-v1, bbs-cd-plugins-v0.1. Empty: none, so
+    // the site asks for nothing until one is switched on.
+    acceptedProofSystems: '',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',

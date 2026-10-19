@@ -1,8 +1,8 @@
 import type { RequestObject } from '#shared/types/oid4vp'
 import { holders, mdocMaterial } from './holder'
 
-// The phone's native steps, through the site's /api/wallet/* routes to the provers (the Vega and
-// BBS addons). Each call carries the holder material that step needs; the prover keeps none of it.
+// The phone's native steps, through the site's /api/wallet/* routes to the provers (the Vega,
+// Longfellow and BBS addons). Each call carries the holder material that step needs; the prover keeps none of it.
 
 export interface SignOutput {
   /** r ‖ s, hex */
@@ -43,11 +43,11 @@ function failure(route: string, e: unknown): ProverError {
 
 /** Step 1, once the PIN screen has unlocked the wallet (any PIN does): the device key signs
  *  DeviceAuthentication for this request. No PIN leaves the phone. */
-export async function unlockAndSign(o: { request: RequestObject; credential: number }): Promise<SignOutput> {
+export async function unlockAndSign(o: { request: RequestObject; credential: number; circuitId: string }): Promise<SignOutput> {
   try {
     return await $fetch<SignOutput>('/api/wallet/sign', {
       method: 'POST',
-      body: { request: o.request, device_key: mdocMaterial(o.credential).device_key },
+      body: { request: o.request, circuit_id: o.circuitId, device_key: mdocMaterial(o.credential).device_key },
     })
   } catch (e) {
     throw failure('/api/wallet/sign', e)

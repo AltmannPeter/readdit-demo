@@ -5,9 +5,11 @@ import { NYM_DOCTYPE } from '#shared/types/oid4vp'
  * Mock phone, native step 1: the device key signs DeviceAuthentication over the SessionTranscript
  * of this request. The phone unlocked the key with its PIN screen, where any PIN does; no PIN
  * reaches the server. The phone sends its device key with the call; the prover keeps nothing.
+ * `circuit_id`, the circuit the wallet chose, picks the addon (Vega or Longfellow); the message
+ * is the same for both.
  */
 export default defineEventHandler(async (event) => {
-  const { request, device_key } = await readObject<{ request: RequestObject; device_key: DeviceKeyJwk }>(event)
+  const { request, device_key, circuit_id } = await readObject<{ request: RequestObject; device_key: DeviceKeyJwk; circuit_id?: unknown }>(event)
   if (
     typeof request?.client_id !== 'string' ||
     typeof request.nonce !== 'string' ||
@@ -24,11 +26,14 @@ export default defineEventHandler(async (event) => {
 
   const t0 = Date.now()
   try {
-    const result = await prover.sign({
-      device_key,
-      doc_type: NYM_DOCTYPE,
-      handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
-    })
+    const result = await prover.sign(
+      {
+        device_key,
+        doc_type: NYM_DOCTYPE,
+        handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
+      },
+      typeof circuit_id === 'string' ? circuit_id : undefined,
+    )
     if (s) {
       addTrace(s, 'sign', 'Device key signed', {
         metrics: result.metrics,

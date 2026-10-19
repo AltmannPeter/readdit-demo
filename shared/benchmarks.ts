@@ -54,7 +54,7 @@ export const SYSTEMS: SystemModel[] = [
         where: 'circuit provider',
         frequency: 'Once per circuit version',
         desktopMs: [5_500, 8_000],
-        detail: 'Keys ~200 kB, published; the phone downloads them once',
+        detail: 'No keys: the circuits, 396 kB compressed, are published; the phone downloads them once',
         source: CACHE,
       },
       {

@@ -4,7 +4,12 @@ Readdit is a small Reddit-style site. You sign up with a pseudonym from an EU Di
 Wallet, prove your age range without showing your date of birth, and stay banned if a moderator
 bans you. The phone on screen plays the SIROS ID wallet. The site and the phone are mocked. The
 OpenID4VP messages, the signed requests, the circuit negotiation and the zero-knowledge proofs are
-real: the site's server proves and verifies with Vega, compiled from Rust into a Node addon.
+real: the site's server proves and verifies with Vega, Longfellow or BBS, each compiled from Rust
+into a Node addon.
+
+**Before you start:** Readdit accepts no proof system when it starts or after a demo reset. Tick
+one under **Readdit accepts** in the technical view (section 3) first; until then, sign-up, log-in
+and age checks stop at "No proof accepted".
 
 The demo has three views, each in its own browser window:
 
@@ -27,15 +32,15 @@ https://rustup.rs).
 ```sh
 cd readdit-demo
 npm install
-npm run build:native   # builds the Vega and BBS addons (Rust), a few minutes the first time
+npm run build:native   # builds the Vega, Longfellow and BBS addons (Rust), a few minutes the first time
 npm run dev            # the site
 ```
 
-`npm run build:native` compiles `native/vega` and `native/bbs` and copies the addons to
-`native/vega/readdit-vega.node` and `native/bbs/readdit-bbs.node` (`npm run build:native -- bbs`
-builds one). Run it again after changing the Rust code. When the site starts, it loads both and
-logs `[vega] prover and verifier ready` and `[bbs] prover and verifier ready`. It starts with one
-of them if the other does not load.
+`npm run build:native` compiles `native/vega`, `native/longfellow` and `native/bbs` and copies the
+addons to `native/vega/readdit-vega.node`, `native/longfellow/readdit-longfellow.node` and
+`native/bbs/readdit-bbs.node` (`npm run build:native -- longfellow` builds one). Run it again after
+changing the Rust code. When the site starts, it loads the three and logs `[vega] prover and
+verifier ready`, `[longfellow] …` and `[bbs] …`. It starts with the ones that load.
 
 ### With Docker (no Node.js needed)
 
@@ -43,11 +48,11 @@ of them if the other does not load.
 
 ```sh
 cd readdit-demo
-docker compose up -d --build      # first run takes several minutes: it compiles the Rust addon
+docker compose up -d --build      # first run takes several minutes: it compiles the Rust addons
 docker compose down               # to stop
 ```
 
-The image builds the addon in a Rust stage and runs the site with it. There are no separate
+The image builds each addon in its own Rust stage and runs the site with them. There are no separate
 prover or verifier containers. On a shared machine, `docker compose build --build-arg JOBS=4`
 limits the Rust build's parallel jobs.
 
@@ -61,11 +66,12 @@ and `/mod`). Step by step, for people who do not code: `TRY-IT.md`.
 Then open the three addresses above in three separate browser windows. A good layout: the site
 full screen on the projector, and the technical and moderation views on the laptop screen.
 
-**Proof backend.** Proofs come from a **prover** and a **verifier**, both in the Vega addon that
-the site's server loads. The prover plays the phone's native steps: the PIN unlocks the device key,
-which signs the request; then the witness and the proof. The verifier checks the proof against
-Readdit's own request. The circuits are the nym_auth Vega circuits from the nym-auth-circuits
-archive (`native/vega`).
+**Proof backends.** Proofs come from a **prover** and a **verifier**, in addons that the site's
+server loads. The prover plays the phone's native steps: the PIN unlocks the device key, which signs
+the request; then the witness and the proof. The verifier checks the proof against Readdit's own
+request. Vega (`native/vega`) and Longfellow (`native/longfellow`) prove the same nym_auth statement
+over the same mdoc credential, each with its own circuits from the nym-auth-circuits archive; BBS
+(`native/bbs`) proves it over a BBS credential.
 
 ## 2. The site view
 
@@ -155,14 +161,16 @@ Logged-in users can vote, join communities and comment.
 session; the chips under the service cards select earlier ones, and name the phone that was on
 screen.
 
-- **Badge (top right).** The addons that are loaded: "Vega and BBS addons, in process".
-- **Readdit accepts.** Switches for the proof systems Readdit accepts: Vega (mdoc, `circuit_zk`)
-  and BBS (`mms_zk`). The default is Vega only. With both on, the request offers both formats and
-  the teen's phone offers **Switch credential** between its two cards; each card gives its own
-  pseudonym, so its own account. Only the ticked ones count, also for a QR code already on screen:
-  to ask for BBS only, untick Vega. **Reset demo** restores Vega only.
-- **Prover and verifier cards** (Vega and BBS). Whether they are loaded, their implementation and version, the
-  time they took to build their keys once at start, and the circuit they run. The verifier card
+- **Badge (top right).** The addons that are loaded: "Vega, Longfellow and BBS addons, in process".
+- **Readdit accepts.** Switches for the proof systems Readdit accepts: Vega and Longfellow (mdoc,
+  `circuit_zk`) and BBS (`mms_zk`). None is ticked at start or after **Reset demo**: tick one
+  before the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the
+  same account; with both ticked the request lists both circuits, Vega first, and the wallet uses
+  Vega. With BBS and an mdoc system on, the request offers both formats and the teen's phone offers
+  **Switch credential** between its two cards; each card gives its own pseudonym, so its own
+  account. Only the ticked ones count, also for a QR code already on screen.
+- **Prover and verifier cards** (Vega, Longfellow and BBS). Whether they are loaded, their
+  implementation and version, the time they took to load once at start, and the circuit they run. The verifier card
   shows its trust anchor and the `proof_time` tolerance. **Request signing** shows the certificate
   that signs Readdit's requests.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
@@ -182,7 +190,7 @@ screen.
   request, and what each plugin proves.
 - **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
 - **Estimates per step.** Setup, precompute, prove, send and verify, for Longfellow, VegaMC and
-  BBS. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
+  BBS, from published measurements; the tiles above show this machine's. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
 
@@ -203,6 +211,7 @@ gives Readdit the same pseudonym.
 
 ## 5. A full run through all three views
 
+0. **Technical:** tick Vega under "Readdit accepts" (nothing is ticked at start).
 1. **Site:** sign up on the teen's phone (scan, **Share**, any 6-digit PIN, **Close** on the phone).
    You get a pseudonym such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
@@ -220,20 +229,25 @@ gives Readdit the same pseudonym.
    **Site:** the ban notice appears.
 8. **Site:** sign up again with the same wallet. Readdit shows "Account banned". **Moderation:**
    it is still the same single account.
-9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Readdit accepts" (and
-   untick Vega to ask for BBS only). **Site:** sign up on the teen's phone; with both formats on,
-   **Switch credential** to the BBS card. Then c/teenspace: the age range is proven with BBS.
-   **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age range) and sizes.
+9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Readdit accepts" (the
+   reset unticked Vega; tick it too to offer both formats). **Site:** sign up on the teen's phone;
+   with both formats on, **Switch credential** to the BBS card. Then c/teenspace: the age range is
+   proven with BBS. **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age
+   range) and sizes.
+10. **Longfellow.** **Moderation:** **Reset demo**. **Technical:** tick Longfellow. **Site:** sign up
+   on the teen's phone, try c/afterdark (requirement not met), then c/teenspace. **Technical:** the
+   circuit used is `urn:circuits:longfellow:nym_auth:v1`; the proof is about 344 kB. Without the
+   reset, logging in with Longfellow reaches the account made with Vega: the pseudonym is the same.
 
 **Start over:** in the moderation view, click **Reset demo** twice, then reload the site window.
 
 ## 6. When the proof backend fails
 
-Readdit has two proof backends, the Vega addon and the BBS addon. There is no fallback.
+Readdit has three proof backends, the Vega, Longfellow and BBS addons. There is no fallback.
 
-- **An addon is missing or cannot load.** The site starts with the other one and logs `[vega] not
-  loaded: …` or `[bbs] not loaded: …`; the technical view's cards say why, and its switch for that
-  proof system is off. With neither, the built site (`npm run start`, Docker) stops at start with
+- **An addon is missing or cannot load.** The site starts with the others and logs, for example,
+  `[longfellow] not loaded: …`; the technical view's cards say why, and its switch for that proof
+  system is off. With none, the built site (`npm run start`, Docker) stops at start with
   `[backends] Readdit cannot start without a proof backend. Build the addons with npm run
   build:native, then start the site again.` The development server keeps running, so that a
   rebuilt addon is picked up on restart; until then every wallet dialog says "Verification is not
@@ -241,10 +255,11 @@ Readdit has two proof backends, the Vega addon and the BBS addon. There is no fa
 - **One proof or one verification fails.** The phone shows "Signing Failed" (the proof was not
   made) or "Response Error" (Readdit could not verify it), and the dialog "Not completed:
   Verification is not available right now". Nothing is applied. **Try again** starts a new request.
-  The server log has a `[vega] … failed` line with the reason (for either addon), and the technical view the session.
+  The server log has a `[vega] … failed`, `[longfellow] …`, `[bbs] …` or `[circuit_zk] …` line
+  with the reason, and the technical view the session.
 
-**Before the event:** build the addon on the presentation laptop (`npm run build:native`), start the
-site and run the whole demo once.
+**Before the event:** build the addons on the presentation laptop (`npm run build:native`), start the
+site, tick the proof system you will show in the technical view, and run the whole demo once.
 
 ## Settings
 
@@ -254,10 +269,13 @@ site and run the whole demo once.
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1` | Circuits the site accepts, in preference order |
+| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/readdit-longfellow.node` | The Longfellow addon |
+| `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
+| `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
+| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits the site can accept, in preference order |
 | `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
-| `NUXT_ACCEPTED_PROOF_SYSTEMS` | `vega-v1` | Proof systems accepted at start and after a reset (`vega-v1`, `bbs-cd-plugins-v0.1`); the technical view switches them |
+| `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
 | `NUXT_PUBLIC_SITE_HOST` | `readdit.example` | DNS name in `client_id` and the request-signing certificate |
 | `NUXT_VP_SESSION_TTL_S` | `600` | How long a wallet request (its QR code) stays valid, in seconds |
 
@@ -270,8 +288,10 @@ The demo person's birth date is in the credential itself (`app/wallet/demo-walle
   `npm run build:native`, then start the site again.
 - **"Connection Error" on the phone** (development server). No addon is loaded. The technical
   view's prover cards say why. Run `npm run build:native` and restart the site.
-- **"Verification is not available" with BBS off.** The Vega addon did not load and the site still
-  accepts Vega only: tick BBS in the technical view.
+- **"No proof accepted" in the dialog.** Nothing is ticked under "Readdit accepts" (the start
+  state, and after **Reset demo**): tick a proof system in the technical view.
+- **"Verification is not available".** The addon of every ticked proof system failed to load: tick
+  one whose cards are green in the technical view.
 - **Port already in use** (3000). Stop whatever uses it. On macOS or Linux, `lsof -i :3000` finds it.
 - **`npm install` warns about vulnerabilities.** They are in Nuxt's build and dev tools, not in the
   demo code. Do not run `npm audit fix --force`: it downgrades Nuxt and breaks the site.
@@ -283,8 +303,8 @@ The demo person's birth date is in the credential itself (`app/wallet/demo-walle
 
 The phone carries two real `eu.europa.ec.eudi.nym_auth.1` mdocs (born 14 March 2011 and 20 May
 1990), each with its own device key and secret seed, in `app/wallet/demo-wallet.json`. The demo has
-no true holder binding: a real wallet keeps the device key in secure hardware. The verifier trusts
-the demo issuer's Document Signer certificate, `native/vega/demo/document-signer.pem`, which signed
+no true holder binding: a real wallet keeps the device key in secure hardware. Vega and Longfellow
+prove over the same mdocs. Their verifiers trust the demo issuer's Document Signer certificate, `native/vega/demo/document-signer.pem`, which signed
 both. They come from `nym-issuer`, which issues under the nym-auth-circuits profile, prints each
 credential's three lengths (Sig_structure 423 B, birth_date item 95 B, ssc item 108 B) and checks
 them before writing:
@@ -321,6 +341,8 @@ npm run vega:check                              # real proofs of both credential
 (cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
 (cd native/bbs && cargo test --release -p nym-bbs)  # BBS: prove, verify, the same pseudonym, refusals
 (cd native/bbs && sha256sum -c --quiet VENDOR-SHA256SUMS)  # vendored bbs-cd-plugins unchanged
+(cd native/longfellow && cargo test --release -p nym-longfellow)  # Longfellow: the archive's test vectors, then prove and verify the demo mdocs
+(cd native/longfellow && sha256sum -c --quiet VENDOR-SHA256SUMS)  # vendored longfellow-zk and the archive's circuits unchanged
 npx nuxi typecheck                              # first: npm i --no-save typescript@5 vue-tsc
 node scripts/demo-flow.mjs http://localhost:3000    # the presentation order, with screenshots
 node scripts/flows-check.mjs http://localhost:3000  # every flow, happy and unhappy (server settings below)
@@ -339,7 +361,7 @@ node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log 
 Requests then expire after 40 s, so the expiry paths take a minute. `READDIT_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
-`--only M` runs one self-contained group (M is BBS).
+`--only M` runs one self-contained group (L is Longfellow, M is BBS).
 
 ## More
 
@@ -347,7 +369,7 @@ paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (1
   attestation, how pseudonyms and age checks are requested and proven, and how presentations are
   verified.
 - `AGENTS.md` – design decisions, architecture, open work. Written for developers and coding agents.
-- `docs/backend-api.md` – the prover and verifier interface (the Vega and BBS addons).
+- `docs/backend-api.md` – the prover and verifier interface (the Vega, Longfellow and BBS addons).
 - `docs/mms_zk.md` – the BBS request profile (`mms_zk`): credential, request, binding, results.
 - `scripts/demo-flow.mjs` – runs the walkthrough headlessly, checks that the guide panel follows
   each step, and saves a viewport screenshot of each step. Needs Playwright:

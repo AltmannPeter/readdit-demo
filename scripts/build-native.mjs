@@ -1,9 +1,11 @@
 // Builds the proof backends' Node addons (Rust) and copies each where the site's server loads it
 // (server/utils/services.ts):
-//   native/vega/node -> native/vega/readdit-vega.node   (circuit_zk: Vega)
-//   native/bbs/node  -> native/bbs/readdit-bbs.node     (mms_zk: BBS committed disclosures)
-// Needs Rust (https://rustup.rs).
-// Usage: npm run build:native [-- vega|bbs]   (default: both)
+//   native/vega/node       -> native/vega/readdit-vega.node              (circuit_zk: Vega)
+//   native/longfellow/node -> native/longfellow/readdit-longfellow.node  (circuit_zk: Longfellow)
+//   native/bbs/node        -> native/bbs/readdit-bbs.node                (mms_zk: BBS committed disclosures)
+// Needs Rust (https://rustup.rs). Longfellow's target features (carry-less multiply) are in
+// native/longfellow/.cargo/config.toml.
+// Usage: npm run build:native [-- vega|longfellow|bbs]   (default: all three)
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, renameSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +13,7 @@ import { join } from 'node:path'
 
 const ADDONS = {
   vega: { dir: '../native/vega/', crate: 'readdit-vega-node', lib: 'readdit_vega_node', out: 'readdit-vega.node' },
+  longfellow: { dir: '../native/longfellow/', crate: 'readdit-longfellow-node', lib: 'readdit_longfellow_node', out: 'readdit-longfellow.node' },
   bbs: { dir: '../native/bbs/', crate: 'readdit-bbs-node', lib: 'readdit_bbs_node', out: 'readdit-bbs.node' },
 }
 const only = process.argv[2]

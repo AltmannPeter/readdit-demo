@@ -11,7 +11,7 @@ interface Service {
   service?: string
   implementation?: string
   version?: string
-  circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null }>
+  circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null; artifact_sha256?: string | null }>
   schemes?: Array<{ scheme_id: string; proof_system: string; schema_id: string; plugins: string[] }>
   issuers?: Array<{ issuer_pk: string; schema_id: string }>
   load_ms?: number
@@ -50,7 +50,7 @@ interface Formats {
   mms_zk?: { scheme_id_values?: string[]; proof_system_values?: string[] }
 }
 interface Overview {
-  services: { prover: Service; verifier: Service; bbsProver: Service; bbsVerifier: Service }
+  services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
@@ -89,8 +89,14 @@ const purposeText = (p: Session['purpose']) =>
       : `Age check, ${COMMUNITY_PREFIX}${p.community}`
 const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(1)} kB` : `${n} B`)
 const mb = (n?: number | null) => (n == null ? '' : `${Math.round(n)} MB`)
-const values = (c?: { shared: number; precommitted: number; rest: number; public: number } | null) =>
-  c ? `${(c.shared + c.precommitted + c.rest).toLocaleString('en-GB')} values (shared ${c.shared}, precommitted ${c.precommitted.toLocaleString('en-GB')}, rest ${c.rest.toLocaleString('en-GB')}), ${c.public} public` : ''
+type Counts = { shared: number; precommitted: number; rest: number; public: number } | { hash: { inputs: number; public: number }; signature: { inputs: number; public: number } }
+const n = (x: number) => x.toLocaleString('en-GB')
+const values = (c?: Counts | null) =>
+  !c
+    ? ''
+    : 'hash' in c
+      ? `hash circuit ${n(c.hash.inputs)} inputs (${c.hash.public} public), signature circuit ${n(c.signature.inputs)} (${n(c.signature.public)} public)`
+      : `${n(c.shared + c.precommitted + c.rest)} values (shared ${c.shared}, precommitted ${n(c.precommitted)}, rest ${n(c.rest)}), ${c.public} public`
 const ms = (n?: number | null) => (n == null ? '–' : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`)
 const time = (t: number) => new Date(t).toLocaleTimeString('en-GB')
 const since = (t: number) => (session.value ? `+${t - session.value.createdAt} ms` : '')
@@ -100,17 +106,29 @@ const reqText = (r: Session['dcql']['credentials'][number]['req'][number]) =>
     : `${r.id}  ${r.params.config}${r.params.verifier_id_type ? `, ${r.params.verifier_id_type}` : ''}`
 const services = computed((): Record<string, Service> => {
   const s = data.value?.services
-  return s ? { 'Vega prover': s.prover, 'Vega verifier': s.verifier, 'BBS prover': s.bbsProver, 'BBS verifier': s.bbsVerifier } : {}
+  return s
+    ? {
+        'Vega prover': s.prover,
+        'Vega verifier': s.verifier,
+        'Longfellow prover': s.lfProver,
+        'Longfellow verifier': s.lfVerifier,
+        'BBS prover': s.bbsProver,
+        'BBS verifier': s.bbsVerifier,
+      }
+    : {}
 })
 /** Whether the backend of a proof system is loaded (both its sides). */
 const loaded = (id: string) => {
   const s = data.value?.services
   if (!s) return false
-  return id === 'vega-v1' ? s.prover.up && s.verifier.up : s.bbsProver.up && s.bbsVerifier.up
+  if (id === 'vega-v1') return s.prover.up && s.verifier.up
+  if (id === 'longfellow-libzk-v1') return s.lfProver.up && s.lfVerifier.up
+  return s.bbsProver.up && s.bbsVerifier.up
 }
 const backendsText = computed(() => {
   const up = PROOF_SYSTEMS.filter((p) => loaded(p.id)).map((p) => p.label.split(' ')[0])
-  return up.length ? `${up.join(' and ')} addon${up.length > 1 ? 's' : ''}, in process` : 'No backend loaded'
+  const list = up.length > 1 ? `${up.slice(0, -1).join(', ')} and ${up.at(-1)}` : up[0]
+  return up.length ? `${list} addon${up.length > 1 ? 's' : ''}, in process` : 'No backend loaded'
 })
 const acceptError = ref('')
 async function setAccepted(id: string, accept: boolean) {
@@ -175,13 +193,16 @@ const statusTone = (s: string) =>
           </label>
         </div>
         <p class="mt-1 text-xs text-muted">
-          Only the ticked ones: a wallet request offers their formats when the phone fetches it, so a QR code already on screen follows too, and a presentation in a format unticked meanwhile is refused. With both, the DCQL query carries one credential query per format as alternatives (credential_sets). A demo reset restores Vega only.
+          Only the ticked ones: a wallet request offers their circuits and formats when the phone fetches it, so a QR code already on screen follows too, and a presentation in a proof system unticked meanwhile is refused. Vega and Longfellow share circuit_zk and the mdoc: the request lists both circuits, Vega first. With BBS as well, the DCQL query carries one credential query per format as alternatives (credential_sets). Nothing is ticked when the demo starts or after a reset.
+        </p>
+        <p v-if="!data.acceptedProofSystems.length" class="mt-2 text-xs font-semibold text-adult" data-none-accepted>
+          Readdit accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
         </p>
         <p v-if="acceptError" class="mt-1 text-xs text-adult">{{ acceptError }}</p>
       </section>
 
       <!-- services -->
-      <section class="grid gap-4 md:grid-cols-3">
+      <section class="grid gap-4 md:grid-cols-2">
         <div v-for="(svc, name) in services" :key="name" class="card p-4">
           <div class="flex items-center gap-2">
             <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
@@ -191,7 +212,7 @@ const statusTone = (s: string) =>
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>
             <p class="text-xs text-muted">Version {{ svc.version }}</p>
             <p v-if="svc.load_ms != null" class="text-xs text-muted">
-              {{ svc.schemes ? 'Tables built once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ svc.threads }} thread{{ svc.threads === 1 ? '' : 's' }}
+              {{ svc.schemes ? 'Tables built once at start' : svc.implementation?.startsWith('Longfellow') ? 'Circuits read once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ svc.threads }} thread{{ svc.threads === 1 ? '' : 's' }}
             </p>
             <p v-if="svc.trust_anchors?.length" class="text-xs text-muted">
               Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
@@ -285,7 +306,7 @@ const statusTone = (s: string) =>
                     commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
                   </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
-                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} threads</template>
+                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.backend"> · {{ t.data.backend }} addon</template>
                   </p>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
@@ -294,7 +315,7 @@ const statusTone = (s: string) =>
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · keys built at start {{ ms(t.data.metrics.load_ms) }}</template>
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>

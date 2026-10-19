@@ -117,6 +117,7 @@ const FAILURES: Record<string, string> = {
   invalid_request: `Nothing was shared with ${siteName}.`,
   invalid: `${siteName} could not verify the response.`,
   unavailable: 'Verification is not available right now. Try again later.',
+  none_accepted: `${siteName} does not accept any proof yet. Switch one on in the technical view, then try again.`,
   expired: 'The code has expired. Try again.',
   cancelled: 'The request was cancelled. Try again.',
   gone: 'This code is no longer valid. Try again.',
@@ -133,6 +134,7 @@ const FAILURES: Record<string, string> = {
   age_verified: 'Your age is already verified for this community.',
 }
 const TITLES: Record<string, string> = {
+  none_accepted: 'No proof accepted',
   community_banned: 'Account banned',
   other_pseudonym: 'Pseudonym does not match',
   linked_elsewhere: 'Linked to another account',

@@ -1,13 +1,18 @@
 # Proof backend contract
 
-There are two backends, each a Node addon (Rust, napi-rs) loaded in the site's server process:
-the Vega addon (`native/vega`, `circuit_zk` over the nym_auth mdoc), described first, and the BBS
-addon (`native/bbs`, `mms_zk` over the nym_auth BBS credential, `docs/mms_zk.md`), in its own
-section below. Only `server/utils/services.ts` calls them. Each loads on its own; the site starts
-when at least one loads and offers only the formats of those that did. The Vega prover and
-verifier They replaced the earlier HTTP
-services (and their stubs) at Frédéric's request (2026-10-13), so a presentation costs no network
-hop on the server side.
+There are three backends, each a Node addon (Rust, napi-rs) loaded in the site's server process:
+the Vega addon (`native/vega`, `circuit_zk` over the nym_auth mdoc), described first; the
+Longfellow addon (`native/longfellow`, `circuit_zk` over the same mdoc, with the same interface),
+in its own section; and the BBS addon (`native/bbs`, `mms_zk` over the nym_auth BBS credential,
+`docs/mms_zk.md`). Only `server/utils/services.ts` calls them. Each loads on its own; the site
+starts when at least one loads and offers only the circuits and formats of those that did. The
+addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
+a presentation costs no network hop on the server side.
+
+`circuit_zk` calls go to the addon of the circuit: `sign` and the witness and proof steps to the
+addon of the `circuit_id` the wallet chose, `verify` to the addon of the `circuit_id` the
+presentation names (an unknown one goes to the first loaded addon, which refuses it with code
+`circuit`). `info` merges both addons' `circuits`, Vega first.
 
 - **Prover:** the phone's native steps. The mocked SIROS ID wallet holds the credential, the device
   key and `secret_seed` (`app/wallet/demo-wallet.json`, no true holder binding) and sends each step
@@ -19,12 +24,12 @@ hop on the server side.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and peak memory are its own.
 
-When neither addon loads, the built server stops at start with the reasons (exit code 1,
+When no addon loads, the built server stops at start with the reasons (exit code 1,
 `server/plugins/backends.ts`); the development server keeps running and answers 503
-`unavailable`. When one does not load, the site starts with the other and logs `[vega] not
-loaded: …` or `[bbs] not loaded: …`; `/tech` shows which. An addon call that fails at runtime (it
-throws, or its result is not JSON) is `500 backend_error` (`services.ts`), logged as
-`[vega] <step> failed: <reason>`.
+`unavailable`. When one does not load, the site starts with the others and logs, for example,
+`[longfellow] not loaded: …`; `/tech` shows which. An addon call that fails at runtime (it throws,
+or its result is not JSON) is `500 backend_error` (`services.ts`), logged as `[<addon>] <step>
+failed: <reason>` (`[circuit_zk]` for the merged `info`).
 
 Configuration (Nuxt runtime config, environment variables):
 
@@ -34,11 +39,14 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The verifier's trust anchors (PEM) |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far `proof_time` may lie from the verifier's clock |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1` | Circuits Readdit accepts, comma-separated, in preference order |
+| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/readdit-longfellow.node` | The Longfellow addon |
+| `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
+| `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
+| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Readdit can accept, comma-separated, in preference order |
 | `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
 | `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `mms_zk` schemes Readdit can accept |
-| `NUXT_ACCEPTED_PROOF_SYSTEMS` | `vega-v1` | Proof systems accepted at start and after a demo reset; `/tech` switches them (`vega-v1`, `bbs-cd-plugins-v0.1`) |
+| `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a demo reset; `/tech` switches them (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`). Empty: none, and a wallet request answers 503 `none_accepted` |
 
 ## The circuit
 
@@ -138,7 +146,9 @@ the one-time key build at start. The mocked phone sends `circuits` as `wallet_me
 
 ### Prover step 1: sign
 
-The device key signs DeviceAuthentication over the SessionTranscript of the handover. The phone's
+The device key signs DeviceAuthentication over the SessionTranscript of the handover. The message
+is the same for both circuits; `POST /api/wallet/sign` takes the wallet's chosen `circuit_id` and
+calls that circuit's addon. The phone's
 PIN screen stands for the unlock, and any PIN unlocks; the prover takes no PIN, and an input field
 it does not know (such as a `pin`) is ignored.
 
@@ -254,6 +264,68 @@ The verifier takes only `issuer_key_set`, `proof_time` and `results` from the pr
 
 Readdit repeats the circuit and results-key checks after the call, as a second line of defence.
 
+## The Longfellow addon (`circuit_zk`)
+
+`native/longfellow/node` (crate `readdit-longfellow-node`) around `native/longfellow/nym-longfellow`,
+on Google's longfellow-zk Rust runtime. It has the Vega addon's interface, objects and JSON, with
+these differences.
+
+| Item | Value |
+| --- | --- |
+| Circuit id | `urn:circuits:longfellow:nym_auth:v1` |
+| Proof system | `longfellow-libzk-v1`: google/longfellow-zk `61a8a73`, Rust runtime; Ligero (rate 1/7, 132 columns) over sumcheck. The 11 runtime crates are vendored unchanged in `native/longfellow/vendor/longfellow-zk` (`native/longfellow/VENDOR-SHA256SUMS`) |
+| Circuits | the nym-auth-circuits archive's `longfellow/mdoc`, unchanged: an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
+| Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
+| `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
+| Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
+| Threads | 1 |
+
+`loadProver(circuits)` and `loadVerifier(circuits, trustAnchorsPem, toleranceS)` take the directory
+of `circuits.zst`, `params.tsv` and `hash-semantic.tsv`, read both circuits once and check them
+against `params.tsv` (sizes and circuit ids). There are no keys. `info` reports `artifact_sha256`
+(of `circuits.zst`) where Vega reports `shapes_sha256`.
+
+Public inputs, in the registry order: the two circuits' public slots, grouped by input (SPEC.md
+L3). Values are elements in the hash circuit plus the signature circuit.
+
+| # | Input | Values | From |
+| ---: | --- | ---: | --- |
+| 1 | `proof_time` | 160 | presentation: the bits of T, `YYYY-MM-DDThh:mm:ssZ` (hash) |
+| 2 | `age_check.ge` | 80 | verifier: the bits of E; `0000-00-00` when absent (hash) |
+| 3 | `age_check.le` | 80 | verifier: the bits of C; `9999-12-31` when absent (hash) |
+| 4 | `pseudonym.verifier_input` | 256 | verifier: the bits of SHA-256(client_id) (hash) |
+| 5 | `mac.tags` | 6 + 768 | presentation: the proof's 6 tags, (a_p,k ⊕ a_v)·m_k in GF(2^128), as elements (hash) and bits (signature) |
+| 6 | `mac.a_v` | 1 + 128 | verifier: a_v, 16 bytes of the Fiat–Shamir transcript after both commitments |
+| 7 | `results.nym` | 2 | presentation: the pseudonym, two GF(2^128) halves (hash) |
+| 8 | `issuer_key_set` | 2 | presentation: one DER Document Signer certificate, validated against the trust anchors; its key is Q (signature) |
+| 9 | `session_transcript` | 256 | verifier: the bits of e2 (signature); the SessionTranscript bytes seed the Fiat–Shamir transcript |
+
+The MAC ties the circuits together: the hash circuit reads the signed message's digest e and the
+device key (x, y) from the credential, the signature circuit verifies the issuer's signature on e
+and the device's on e2 under (x, y), and the tags on m = (e, x, y) halves show both used the same
+values.
+
+Session binding is the B.2.6.1 SessionTranscript above, as for Vega. The archive's fixtures use
+the Digital Credentials API handover instead (`OpenID4VPDCAPIHandover`); the circuits see only e2
+and the transcript only seeds Fiat–Shamir, so the same circuits serve both (`nym-longfellow`
+tests: the archive's witness slot for slot and its proof, then Readdit's handover end to end).
+
+**Witness summary.** `public_inputs` gives T, E and C as text and the other inputs as hex, with
+`mac.tags` and `mac.a_v` empty (they exist only once the proof is made); `counts` is `{ hash: {
+inputs, public }, signature: { inputs, public } }`.
+
+**Verifier refusals.** As the Vega verifier's, except: `proof_encoding` (the 6 tags and two proofs
+of these circuits' geometry do not read, or bytes remain; at most 1 MiB); `proof_invalid` with
+`input` `hash` or `signature`, the circuit whose proof fails. Longfellow does not say which public
+input differs: a wrong T, E, C, verifier_input or pseudonym fails the hash circuit; a wrong issuer
+key or e2 the signature circuit; a presentation for another request fails on the transcript.
+There is no `public_input` code.
+
+**Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
+GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on
+arm64, without which the runtime does not compile (Apple Silicon has it by default, Linux arm64 does
+not). A `RUSTFLAGS` environment variable replaces these flags.
+
 ## The BBS addon (`mms_zk`)
 
 `native/bbs/node` (crate `readdit-bbs-node`) around `native/bbs/nym-bbs`, which implements the
@@ -303,25 +375,26 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 401 `login_required` | An age check without a logged-in (and not banned) account |
 | | 403 `age_refused` | The ages already proven for the account do not overlap the community's requirement |
 | | 409 `age_verified` | The ages already proven already meet it: no new request |
+| | 503 `none_accepted` | Readdit accepts no proof system (the start state, and after a demo reset) |
 | | 503 `unavailable` | The verifier could not make an offer |
 | request_uri | 404 `unknown_session` | |
 | | 405 `method_not_allowed` | Not GET or POST |
 | | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `circuit_zk` or `mms_zk` values are not lists of strings |
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
-| | 503 `unavailable` | The site has no format to offer now (the offer is made again at this point, from `/tech`'s switches) |
+| | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no format to offer (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
 | | 400 `state_mismatch` | `state` is not the session's; checked first |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
 | | 400 `already_answered` | A second response, for example a replay; logged as `[vp] <id>: refused a second response` |
-| | 200 | The response was processed. The vp_token must answer exactly one of the request's credential queries, in a format the site still accepts (else refused with code `format`). A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
+| | 200 | The response was processed. The vp_token must answer exactly one of the request's credential queries, in a format, and for `circuit_zk` with a circuit, whose proof system the site still accepts (else refused with code `format`). A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
 | | 503 `unavailable` | The verifier failed; the session ends as `unavailable` |
 | `GET /api/vp/session/:id`, `…/complete`, `…/cancel` | 404 `unknown_session`, 403 `other_browser` | Only the browser that started the session |
 | `POST …/complete` | 409 `not_verified` | Before a verified presentation |
 | `POST /api/wallet/sign`, `/prove` | 400 `bad_request` | Missing or mistyped fields; the prover's refusals above otherwise |
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
-| `POST /api/tech/accept` | 400 `bad_request`, 409 `last_proof_system` | An unknown proof system; switching off the last accepted one |
+| `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
 
 `{ purpose: 'signin', intent, community }` is the request of a logged-out visitor at an
 age-restricted community: one presentation of the pseudonym and the community's age range, which

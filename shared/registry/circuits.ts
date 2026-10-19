@@ -3,10 +3,9 @@
 // supported functions and parameters, issuer key set representation, and the
 // ordered public inputs with how the Verifier derives each one.
 //
-// The Vega entry is what the Vega addon (native/vega) loads: the site offers a circuit only when
-// the verifier reports the same id, proof system, public-input names and order, and the SHA-256
-// of the circuits as data (server/utils/vp.ts). The Longfellow entry is the demo's working value;
-// nothing in this package runs it.
+// Each entry is what an addon loads: Vega (native/vega) and Longfellow (native/longfellow). The
+// site offers a circuit only when its verifier reports the same id, proof system, public-input
+// names and order, and the SHA-256 of the circuits as data (server/utils/vp.ts).
 
 import { NYM_BBS_SCHEMA, NYM_DOCTYPE, type PseudonymConfig } from '../types/oid4vp'
 
@@ -38,17 +37,6 @@ export interface CircuitEntry {
   artifact?: { name: string; sha256: string }
 }
 
-const NYM_PUBLIC_INPUTS: PublicInput[] = [
-  { name: 'issuer_key_set', source: 'presentation', derivation: 'DER Document Signer certificates, validated against trust anchors' },
-  { name: 'proof_time', source: 'presentation', derivation: 'checked against the verifier clock within tolerance' },
-  { name: 'session_transcript', source: 'verifier', derivation: '[null, null, OpenID4VPHandover] from client_id, nonce, jwk_thumbprint, response_uri' },
-  { name: 'pseudonym.config', source: 'verifier', derivation: 'req params as sent' },
-  { name: 'pseudonym.verifier_input', source: 'verifier', derivation: 'SHA-256(verifier_id), verifier_id = client_id' },
-  { name: 'age_check.ge', source: 'verifier', derivation: 'req params as sent (absent = unbounded)' },
-  { name: 'age_check.le', source: 'verifier', derivation: 'req params as sent (absent = unbounded)' },
-  { name: 'results', source: 'presentation', derivation: 'pseudonym (32 bytes) and predicate result' },
-]
-
 // Vega nym_auth (nym-auth-circuits, SPEC.md V3.2): 18 core public values in this order.
 const VEGA_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q' },
@@ -62,27 +50,21 @@ const VEGA_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes' },
 ]
 
-const NYM_FUNCTIONS: CircuitEntry['functions'] = {
-  'pseudonym-v1-sha256': {
-    configs: ['known-offender-matching-ssc', 'known-offender-matching-psc', 'account-recovery-ssc', 'user-managed-pseudonym-xsite-ssc'],
-    verifier_id_types: ['x509_san_dns', 'semantic'],
-  },
-  age_check: { params: ['ge', 'le'] },
-}
+// Longfellow nym_auth (nym-auth-circuits, SPEC.md L3): the public slots of the hash circuit
+// (GF(2^128)) and of the signature circuit (P-256), by input; values = elements in both.
+const LONGFELLOW_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'proof_time', source: 'presentation', values: 160, derivation: 'T, the bits of YYYY-MM-DDThh:mm:ssZ (hash circuit), checked against the verifier clock within tolerance' },
+  { name: 'age_check.ge', source: 'verifier', values: 80, derivation: 'E = req params as sent; 0000-00-00 when absent (hash circuit)' },
+  { name: 'age_check.le', source: 'verifier', values: 80, derivation: 'C = req params as sent; 9999-12-31 when absent (hash circuit)' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 256, derivation: 'SHA-256(verifier_id), verifier_id = client_id (x509_san_dns), as bits (hash circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 774, derivation: 'the 6 MAC tags at the head of the proof, in both circuits: they tie the signed message and the device key the hash circuit reads to those the signature circuit verifies' },
+  { name: 'mac.a_v', source: 'verifier', values: 129, derivation: "the verifier's MAC key share, drawn from the Fiat–Shamir transcript after both commitments, in both circuits" },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, as two GF(2^128) halves (hash circuit)' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (signature circuit)' },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the SessionTranscript [null, null, OpenID4VPHandover] also seeds the Fiat–Shamir transcript' },
+]
 
 export const CIRCUIT_REGISTRY: CircuitEntry[] = [
-  {
-    circuit_id: 'urn:circuits:longfellow:nym_auth:v1',
-    proof_system: 'longfellow-libzk-v1',
-    label: 'Longfellow nym_auth v1',
-    credential_format: 'mso_mdoc',
-    doctype: NYM_DOCTYPE,
-    profile: 'any',
-    functions: NYM_FUNCTIONS,
-    issuer_key_set: 'x509-ds-cert-list',
-    checks_validity: true,
-    public_inputs: NYM_PUBLIC_INPUTS,
-  },
   {
     circuit_id: 'urn:circuits:vega:nym_auth:v1',
     proof_system: 'vega-v1',
@@ -98,6 +80,22 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     checks_validity: true,
     public_inputs: VEGA_PUBLIC_INPUTS,
     artifact: { name: 'shapes.zst', sha256: 'b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df' },
+  },
+  {
+    circuit_id: 'urn:circuits:longfellow:nym_auth:v1',
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v1',
+    credential_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'compact',
+    functions: {
+      'pseudonym-v1-sha256': { configs: ['known-offender-matching-ssc'], verifier_id_types: ['x509_san_dns'], required: true },
+      age_check: { params: ['ge', 'le'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_PUBLIC_INPUTS,
+    artifact: { name: 'circuits.zst', sha256: '6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b' },
   },
 ]
 
@@ -164,6 +162,7 @@ export function findScheme(id: string): SchemeEntry | undefined {
 /** The proof systems the site can accept, by backend: a label for /tech and the guide. */
 export const PROOF_SYSTEMS = [
   { id: 'vega-v1', format: 'circuit_zk', label: 'Vega (mdoc circuit)' },
+  { id: 'longfellow-libzk-v1', format: 'circuit_zk', label: 'Longfellow (mdoc circuits)' },
   { id: 'bbs-cd-plugins-v0.1', format: 'mms_zk', label: 'BBS (committed disclosures)' },
 ] as const
 export type ProofSystemId = (typeof PROOF_SYSTEMS)[number]['id']

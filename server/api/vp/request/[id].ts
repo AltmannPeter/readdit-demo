@@ -55,6 +55,10 @@ export default defineEventHandler(async (event) => {
   try {
     offer = await verifierOffer()
   } catch (e) {
+    if (e instanceof NothingAccepted) {
+      addTrace(s, 'refused', 'Request refused: no proof system accepted', { code: 'none_accepted' })
+      throw refusal(503, 'none_accepted', 'Readdit accepts no proof system.')
+    }
     console.error(`[vp] ${s.id}: no offer: ${(e as Error).message}`)
     throw refusal(503, 'unavailable', 'The verifier is not available.')
   }

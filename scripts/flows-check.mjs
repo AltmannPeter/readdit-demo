@@ -8,7 +8,10 @@
 //
 // Two phones, one person each (app/wallet/holder.ts, PHONES): the teen's phone holds the teen's
 // mdoc (born 2011) and the teen's BBS credential (mms_zk, used only when the site accepts BBS:
-// group M), the adult's phone the adult's mdoc (born 1990). The dialog shows one at a time;
+// group M), the adult's phone the adult's mdoc (born 1990).
+//
+// The site accepts no proof system after a demo reset (the demo's start). resetDemo() switches
+// Vega on again, which every group but L and M assumes; group L runs Longfellow, group M BBS. The dialog shows one at a time;
 // Swap phone hands over while the QR code is on screen. Every dialog here picks its phone
 // explicitly (open). Any PIN unlocks the wallet.
 //
@@ -22,7 +25,7 @@
 //
 // --server-log  the server's output: each refused presentation must be logged with its rule
 // --startup     also starts the built server without the addons and checks that it refuses to run,
-//               and that it starts with either one
+//               and that it starts with any one of them
 // --shots       saves the screenshots of this run (19-33) there
 // --only        runs only the named self-contained groups, for example --only M
 // (needs: npm i --no-save playwright && npx playwright install chromium)
@@ -41,7 +44,7 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
-// --only K,M: run only these groups that need no earlier state (E F H I J K M G), after the preconditions.
+// --only K,M: run only these groups that need no earlier state (E F H I J K L M G), after the preconditions.
 const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
@@ -54,6 +57,7 @@ const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
 const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:vega:nym_auth:v1'
 const LONGFELLOW = 'urn:circuits:longfellow:nym_auth:v1'
+const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
 const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: ['vega-v1'], circuit_id_values: [VEGA] } } })
 if (SHOTS) mkdirSync(SHOTS, { recursive: true })
 
@@ -103,17 +107,17 @@ async function newSession(ctx, body) {
   return r.body
 }
 /** The wallet's request_uri POST; returns the decoded Request Object. */
-async function fetchRequest(ctx, session) {
-  const r = await call(ctx, 'POST', requestUriOf(session.authorizationUrl), { form: { wallet_nonce: randomUUID(), wallet_metadata: WALLET_METADATA } })
+async function fetchRequest(ctx, session, walletMetadata = WALLET_METADATA) {
+  const r = await call(ctx, 'POST', requestUriOf(session.authorizationUrl), { form: { wallet_nonce: randomUUID(), ...(walletMetadata && { wallet_metadata: walletMetadata }) } })
   if (r.status !== 200) throw new Error(`request_uri ${answer(r)}`)
   return payloadOf(r.text.trim())
 }
 /** The phone's native steps for `wallet`, through the site's /api/wallet routes. */
-async function present(ctx, request, wallet) {
-  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, device_key: wallet.device_key } })
+async function present(ctx, request, wallet, circuit = VEGA) {
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, circuit_id: circuit, device_key: wallet.device_key } })
   if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
-    data: { request, circuit_id: VEGA, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
+    data: { request, circuit_id: circuit, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
   })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
@@ -151,11 +155,14 @@ async function accounts() {
   await ctx.dispose()
   return o.body.accounts
 }
-async function resetDemo() {
+/** Resets the demo, then switches on `accepted` (Vega unless said otherwise). */
+async function resetDemo(accepted = ['vega-v1']) {
   const ctx = await client()
   await call(ctx, 'POST', '/api/demo/reset')
+  for (const id of accepted) await call(ctx, 'POST', '/api/tech/accept', { data: { proof_system: id, accept: true } })
   await ctx.dispose()
 }
+const acceptedNow = async () => (await call(page.request, 'GET', '/api/tech/overview')).body.acceptedProofSystems
 async function armFault(step) {
   const ctx = await client()
   const r = await call(ctx, 'POST', '/api/test/fault', { data: { step } })
@@ -430,19 +437,26 @@ function startServer(env, until) {
 
 async function startupWithoutAddon() {
   begin('S16', 'the server refuses to start without any proof backend')
-  let r = await startServer({ NUXT_VEGA_ADDON: '/nonexistent/readdit-vega.node', NUXT_BBS_ADDON: '/nonexistent/readdit-bbs.node' })
+  const none = { NUXT_VEGA_ADDON: '/nonexistent/readdit-vega.node', NUXT_LONGFELLOW_ADDON: '/nonexistent/readdit-longfellow.node', NUXT_BBS_ADDON: '/nonexistent/readdit-bbs.node' }
+  let r = await startServer(none)
   eq('exit code', r.code, 1)
   check('says why and what to run', r.out.includes('Readdit cannot start without a proof backend') && r.out.includes('npm run build:native'), r.out.trim().split('\n').slice(-2).join(' | '))
   begin('S16b', 'the server starts with one backend')
-  r = await startServer({ NUXT_BBS_ADDON: '/nonexistent/readdit-bbs.node' }, ['[vega] prover and verifier ready', '[bbs] not loaded'])
-  eq('without the BBS addon: running with Vega', r.code, 'running')
-  r = await startServer({ NUXT_VEGA_ADDON: '/nonexistent/readdit-vega.node' }, ['[bbs] prover and verifier ready', '[vega] not loaded'])
-  eq('without the Vega addon: running with BBS', r.code, 'running')
+  for (const [name, env] of [['vega', 'NUXT_VEGA_ADDON'], ['longfellow', 'NUXT_LONGFELLOW_ADDON'], ['bbs', 'NUXT_BBS_ADDON']]) {
+    const only = { ...none }
+    delete only[env]
+    r = await startServer(only, [`[${name}] prover and verifier ready`, ...['vega', 'longfellow', 'bbs'].filter((x) => x !== name).map((x) => `[${x}] not loaded`)])
+    eq(`with the ${name} addon only: running`, r.code, 'running')
+  }
 }
 
 async function preconditions() {
   begin('pre', 'the server is started for this run')
   const ctx = await client()
+  await resetDemo([])
+  const nothing = await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'signin', intent: 'signup' } })
+  expectAnswer('nothing accepted after a reset: no request', nothing, 503, 'none_accepted')
+  await resetDemo()
   const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   const fault = await call(ctx, 'POST', '/api/test/fault', { data: { step: 'none' } })
   await ctx.dispose()
@@ -1250,7 +1264,7 @@ async function groupH() {
   await guideIs('unavailable')
   await guideSays('could not start the request')
   check('session: 503', has(m, 'POST', '/api/vp/session', 503))
-  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[vega] verifier.info failed: test fault'))
+  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[circuit_zk] verifier.info failed: test fault'))
   await shot('25-backend-unavailable')
   await scan()
   await phoneShows('Unsupported QR code')
@@ -1565,7 +1579,8 @@ async function groupG() {
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.waitForLoadState('networkidle')
-  await tech.getByText('Vega and BBS addons, in process').waitFor()
+  await tech.getByText('Vega, Longfellow and BBS addons, in process').waitFor()
+  check('six service cards: a prover and a verifier per addon', (await tech.getByText(/^(Vega|Longfellow|BBS) (prover|verifier)$/).count()) === 6)
   await tech.getByText('Capability negotiation').waitFor()
   check('the technical view loads', true)
   await tech.close()
@@ -1782,12 +1797,13 @@ async function groupM() {
   await resetDemo()
   await openPage()
 
-  begin('M1', "the site's accepted proof systems: Vega only by default, switched in /tech")
+  begin('M1', "the site's accepted proof systems, switched in /tech")
   let o = (await call(page.request, 'GET', '/api/tech/overview')).body
-  eq('accepted after a reset', o.acceptedProofSystems, ['vega-v1'])
-  check('both backends loaded', o.services.bbsProver.up && o.services.bbsVerifier.up && o.services.prover.up && o.services.verifier.up)
-  expectAnswer('server: turning off the last proof system', await accept('vega-v1', false), 409, 'last_proof_system')
-  expectAnswer('server: an unknown proof system', await accept('longfellow-libzk-v1', true), 400, 'bad_request')
+  eq('accepted: Vega (switched on by this run)', o.acceptedProofSystems, ['vega-v1'])
+  check('all three backends loaded', o.services.bbsProver.up && o.services.bbsVerifier.up && o.services.prover.up && o.services.verifier.up && o.services.lfProver.up && o.services.lfVerifier.up)
+  eq('server: turning off the last proof system is allowed', (await accept('vega-v1', false)).body.acceptedProofSystems, [])
+  await accept('vega-v1', true)
+  expectAnswer('server: an unknown proof system', await accept('vega-v2', true), 400, 'bad_request')
   {
     const ctx = await client()
     const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -2013,9 +2029,185 @@ async function groupM() {
     await c.dispose()
   }
 
-  begin('M9', 'a demo reset restores Vega only')
-  await resetDemo()
-  eq('accepted', (await call(page.request, 'GET', '/api/tech/overview')).body.acceptedProofSystems, ['vega-v1'])
+  begin('M9', 'a demo reset switches every proof system off')
+  await resetDemo([])
+  eq('accepted', await acceptedNow(), [])
+}
+
+// ---- L. Longfellow: the second circuit_zk backend, over the same mdoc (SPEC.md L) ----
+
+async function groupL() {
+  await resetDemo([])
+  await openPage()
+
+  begin('L1', 'nothing accepted (the demo\'s start): the dialog stops before the QR code')
+  let m = mark()
+  await headerButton('Sign up').click()
+  await dialogShows('No proof accepted')
+  await dialogShows('Readdit does not accept any proof yet. Switch one on in the technical view, then try again.')
+  await guideIs('none-accepted')
+  check('session: 503', has(m, 'POST', '/api/vp/session', 503))
+  await closeDialog('escape')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await visible('/tech says nothing is accepted', tech.locator('[data-none-accepted]'))
+  check('/tech: three proof systems to tick', (await tech.locator('[data-accept]').count()) === 3)
+  await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).check()
+  for (let k = 0; k < 30 && !(await acceptedNow()).includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('/tech: Longfellow switched on', await acceptedNow(), [LONGFELLOW_SYSTEM])
+  await tech.close()
+
+  begin('L2', 'Longfellow only: the teen signs up; the request offers the Longfellow circuit')
+  m = mark()
+  await open(headerButton('Sign up'), TEEN)
+  await scan()
+  await readRequest()
+  let sv = await sessionView(lastSession())
+  eq('circuit_zk with the Longfellow circuit only', sv.request.client_metadata.vp_formats_supported.circuit_zk, { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] })
+  eq('one credential query, circuit_zk', sv.request.dcql_query.credentials.map((q) => q.format), ['circuit_zk'])
+  await phoneShows('Request to Share Data')
+  await guideIs('consent')
+  await openDetails()
+  await guideSays('Longfellow nym_auth v1 (longfellow-libzk-v1)')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  await expectVerification()
+  await guideSays('the Longfellow addon')
+  sv = await sessionView(lastSession())
+  eq('the circuit used', sv.circuit?.circuit_id, LONGFELLOW)
+  const proveTrace = sv.trace.find((t) => t.step === 'prove')?.data
+  check('proved by the Longfellow addon, about 344 kB', proveTrace?.backend === 'longfellow' && proveTrace.metrics.proof_bytes > 300_000, `${proveTrace?.backend}, ${proveTrace?.metrics?.proof_bytes} bytes`)
+  const witnessTrace = sv.trace.find((t) => t.step === 'witness')?.data
+  eq('the witness: both circuits', witnessTrace?.counts, { hash: { inputs: 97032, public: 586 }, signature: { inputs: 4765, public: 1155 } })
+  check('sign and prove went to /api/wallet', has(m, 'POST', '/api/wallet/sign', 200) && has(m, 'POST', '/api/wallet/prove', 200))
+  await closeFromPhone()
+  const lf = (await me()).account
+
+  begin('L3', 'the teen tries c/afterdark first, then proves 13–17 for c/teenspace with Longfellow')
+  await goto('/c/afterdark')
+  m = mark()
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Requirement Not Met')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed')
+  check('no proof was made', count(m, 'POST', '/api/wallet/prove') === 0)
+  await closeDialog('escape')
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.circuit_id, LONGFELLOW)
+  await closeFromPhone()
+  check('the age range is recorded', !!(await me()).account?.birthDateRange)
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+
+  begin('L4', 'Vega only: the same pseudonym, so the teen logs in to the same account')
+  await accept('vega-v1', true)
+  await accept(LONGFELLOW_SYSTEM, false)
+  await goto('/')
+  await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await headerButton('Log in').waitFor()
+  await signIn('Log in', `Logged in as u/${lf.handle}`)
+  eq('with Vega', (await sessionView(lastSession())).circuit?.circuit_id, VEGA)
+
+  begin('L5', 'both accepted: Vega first; a wallet that runs only Longfellow is sent Longfellow')
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('accepted, in order', await acceptedNow(), ['vega-v1', LONGFELLOW_SYSTEM])
+  const ctx = await client()
+  let s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  let req = await fetchRequest(ctx, s, null)
+  eq('without wallet_metadata: both circuits, Vega first', req.client_metadata.vp_formats_supported.circuit_zk.circuit_id_values, [VEGA, LONGFELLOW])
+  s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  const lfOnly = JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] } } })
+  req = await fetchRequest(ctx, s, lfOnly)
+  eq('tailored to the wallet', req.client_metadata.vp_formats_supported.circuit_zk, { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] })
+  let p = await present(ctx, req, teen, LONGFELLOW)
+  eq('prove: the Longfellow circuit', p.circuit_id, LONGFELLOW)
+  eq('the same pseudonym as the account', p.results.nym, lf.pseudonym)
+  expectAnswer('the response', await respond(ctx, req, vpForm(req, p.presentation)), 200)
+  let done = (await complete(ctx, s.id)).body
+  check('logged in to the same account', done.ok === true && done.kind === 'logged_in' && done.handle === lf.handle, JSON.stringify(done))
+  {
+    const r = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, circuit_id: LONGFELLOW, credential: adult.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) } })
+    expectAnswer("prove: another holder's seed", r, 400, 'bad_credential')
+  }
+
+  begin('L6', 'the adult signs up with Longfellow and proves 18+ for c/afterdark')
+  await accept('vega-v1', false)
+  await goto('/')
+  await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await headerButton('Sign up').waitFor()
+  await signIn('Sign up', 'Account created: u/', ADULT)
+  await goto('/c/afterdark')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 18+')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.circuit_id, LONGFELLOW)
+  await closeFromPhone()
+
+  begin('L7', 'over HTTP: the Longfellow verifier refuses tampering and a presentation for another request')
+  const tampers = {
+    ...TAMPER,
+    'another circuit_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
+  }
+  const expected = {
+    'a flipped proof byte': ['proof_invalid:hash', 'proof_invalid:signature', 'proof_encoding'],
+    'a changed results.nym': ['proof_invalid:hash'],
+    'a results key that is not the request handle': ['results'],
+    'proof_time changed by one second': ['proof_invalid:hash'],
+    'another circuit_id': ['circuit'],
+  }
+  for (const [what, tamper] of Object.entries(tampers)) {
+    const t = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, t, lfOnly)
+    const pt = await present(ctx, r, teen, LONGFELLOW)
+    const changed = tamper(Buffer.from(pt.presentation, 'base64url'), pt).toString('base64url')
+    await respond(ctx, r, vpForm(r, changed))
+    const v = await sessionView(t.id)
+    const got = rejectedTrace(v)
+    const label = got ? (got.input ? `${got.code}:${got.input}` : got.code) : 'accepted'
+    check(`${what}: refused as ${expected[what].join(' or ')}`, v.status === 'failed' && expected[what].includes(label), `${v.status}, ${label}`)
+  }
+  {
+    const a = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const ra = await fetchRequest(ctx, a, lfOnly)
+    const pa = await present(ctx, ra, teen, LONGFELLOW)
+    const b = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const rb = await fetchRequest(ctx, b, lfOnly)
+    await respond(ctx, rb, vpForm(rb, pa.presentation))
+    const got = rejectedTrace(await sessionView(b.id))
+    check("another session's presentation: refused, proof_invalid", got?.code === 'proof_invalid', got ? `${got.code}:${got.input}` : 'accepted')
+  }
+
+  begin('L8', 'Longfellow switched off after the scan: its presentation is refused')
+  await accept('vega-v1', true)
+  s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  req = await fetchRequest(ctx, s, lfOnly)
+  p = await present(ctx, req, teen, LONGFELLOW)
+  await accept(LONGFELLOW_SYSTEM, false)
+  await respond(ctx, req, vpForm(req, p.presentation))
+  const v8 = await sessionView(s.id)
+  const r8 = rejectedTrace(v8)
+  check('refused: format, Longfellow no longer accepted', v8.status === 'failed' && r8?.code === 'format', r8 ? `${r8.code}: ${r8.reason}` : v8.status)
+  await ctx.dispose()
+
+  begin('L9', 'a demo reset switches every proof system off')
+  await resetDemo([])
+  eq('accepted', await acceptedNow(), [])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2025,7 +2217,7 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, M: groupM, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, G: groupG }
     for (const g of ONLY) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2039,6 +2231,7 @@ try {
   await groupI()
   await groupJ()
   await groupM()
+  await groupL()
   await groupK()
   await groupG()
 } catch (e) {

@@ -153,8 +153,10 @@ function consentSections(c: ConsentView, site: string, i: GuideInput): GuideSect
   ].filter((s): s is GuideSection => !!s)
 }
 
-/** The addon that runs a request's proofs: Vega for circuit_zk, BBS for mms_zk. */
-const addonOf = (v: RequestView | null | undefined) => (v?.scheme ? 'the BBS addon' : 'the Vega addon')
+/** The addon that runs a request's proofs: Vega or Longfellow for circuit_zk (by the circuit), BBS
+ *  for mms_zk. */
+const addonOf = (v: RequestView | null | undefined) =>
+  v?.scheme ? 'the BBS addon' : v?.circuit?.proof_system === 'longfellow-libzk-v1' ? 'the Longfellow addon' : v?.circuit ? 'the Vega addon' : 'its proof addons'
 
 function proofSection(w: WalletFlow, site: string): GuideSection | null {
   const m = w.metrics
@@ -204,8 +206,13 @@ function checksSection(view: RequestView | null | undefined, site: string): Guid
     code: true,
     value: `${p.source === 'presentation' ? 'From the presentation' : `Computed by ${site}`}: ${p.derivation}`,
   }))
-  const items = circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : undefined
-  return { heading: `What ${site} checks`, rows, items, stacked: true }
+  const items = circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : []
+  if (circuit.proof_system === 'longfellow-libzk-v1') {
+    items.push(
+      'Two circuits: the hash circuit (GF(2^128)) reads the credential, the dates and the pseudonym; the signature circuit (P-256) checks the issuer and device signatures. The MAC tags tie the two to the same message and device key.',
+    )
+  }
+  return { heading: `What ${site} checks`, rows, items: items.length ? items : undefined, stacked: true }
 }
 
 /** mms_zk: what the BBS verifier derives itself, and what each plugin proves (the registry entry). */
@@ -313,6 +320,7 @@ const REFUSALS: Record<string, string> = {
   state_mismatch: 'the state does not match the request',
   already_answered: 'the request already has an answer',
   unavailable: 'its verifier failed',
+  none_accepted: 'it accepts no proof system now (all switched off in the technical view)',
 }
 
 /** The wallet stopped on its own error: what happened and what the site sees, from the error's cause. */
@@ -330,7 +338,7 @@ function walletErrorStep(i: GuideInput, context: string): GuideStep {
   } else if (endpoint === 'response_uri' && status) {
     summary = `${i.siteName} refused the wallet's response (${status}): ${REFUSALS[code ?? ''] ?? 'see the technical view'}. Nothing was applied.`
   } else if (endpoint === '/api/wallet/capabilities') {
-    summary = `The wallet could not reach the provers in ${i.siteName}'s server (the Vega and BBS addons), so it cannot answer requests. ${waits}`
+    summary = `The wallet could not reach the provers in ${i.siteName}'s server (the Vega, Longfellow and BBS addons), so it cannot answer requests. ${waits}`
   } else if (endpoint?.startsWith('/api/wallet/')) {
     summary = `The prover in ${i.siteName}'s server (${addonOf(i.wallet.view)}) did not ${endpoint.endsWith('sign') ? 'sign' : 'create the proof'}. ${waits}`
   } else if (e?.title === 'Verifier is not Trusted') {
@@ -766,6 +774,14 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         id: 'unavailable',
         title: 'Verifier not available',
         summary: `${i.siteName}'s proof backend, ${addonOf(i.wallet.view)} in its server, failed, so ${i.siteName} could not ${i.dialog.authUrl ? 'verify the response' : 'start the request'}. Nothing was applied. The technical view and the server log show the error.`,
+        details: [],
+      }
+    case 'none_accepted':
+      return {
+        ...base,
+        id: 'none-accepted',
+        title: 'No proof system accepted',
+        summary: `${i.siteName} accepts none of its proof systems, so it has nothing to ask a wallet for and shows no QR code. The demo starts this way. Tick Vega, Longfellow or BBS under "Readdit accepts" in the technical view, then try again.`,
         details: [],
       }
     case 'expired':

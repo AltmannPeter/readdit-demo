@@ -73,9 +73,9 @@ the full offer.
 
 ### Both formats
 
-The site accepts the proof systems switched on in `/tech` (default: Vega only). With both, the
-DCQL query holds both credential queries, `circuit_zk` first (the preference), and one credential
-set whose options are the alternatives:
+The site accepts the proof systems switched on in `/tech` (none at start). With BBS and a
+`circuit_zk` system (Vega, Longfellow), the DCQL query holds both credential queries, `circuit_zk`
+first (the preference), and one credential set whose options are the alternatives:
 
 ```json
 "credential_sets": [{ "options": [["nym_attestation"], ["nym_attestation_bbs"]] }]
