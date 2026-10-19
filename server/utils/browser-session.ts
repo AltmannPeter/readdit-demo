@@ -3,6 +3,8 @@ import type { H3Event } from 'h3'
 interface BrowserSessionData {
   sid?: string
   pseudonym?: string
+  /** Community accounts this browser is logged in to: community slug -> pseudonym. */
+  communities?: Record<string, string>
 }
 
 /** Cookie session of the browser that shows Readdit (never the phone). */

@@ -1,21 +1,26 @@
 import { findCommunity } from '#shared/data/communities'
-import { buildCredentialQuery, authorizationUrl, requestUriFor } from '#shared/utils/dcql'
+import { buildCredentialQuery, authorizationUrl, clientIdFor, requestUriFor } from '#shared/utils/dcql'
 import { decideGate, gateRange, todayISO } from '#shared/utils/age'
 import { randomHex } from '#shared/utils/bytes'
 import type { VpPurpose, VpSessionRecord } from '../../utils/store'
 
 /**
  * Site: start a cross-device OpenID4VP session.
- * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community },
- * and optionally `origin`, the page's address, for request_uri and response_uri (see publicOrigin).
+ * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community }
+ * | { purpose: 'community', community }, and optionally `origin`, the page's address, for
+ * request_uri and response_uri (see publicOrigin), and `phone`, the demo phone on screen.
+ * community: the pseudonym of a community with its own verifier identity (Community.nymHost); the
+ * request's client_id is x509_san_dns:<nymHost>, so the pseudonym is specific to that community.
  * signin with `community` (a logged-out visitor at an age-restricted community): one request for
  * the pseudonym and the community's age range, which logs in (or signs up) and records the age.
  * An age check alone needs a logged-in account, and only when the site cannot decide from the ages
  * already proven (shared/utils/age.ts, decideGate): a settled gate gets no wallet request.
  */
 export default defineEventHandler(async (event) => {
-  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown; origin: unknown }>(event)
+  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown; origin: unknown; phone: unknown; link: unknown }>(event)
   const b = await browserSession(event)
+  const cfg = useRuntimeConfig(event)
+  let host = String(cfg.public.siteHost)
 
   let purpose: VpPurpose
   let gate
@@ -33,13 +38,22 @@ export default defineEventHandler(async (event) => {
   } else if (body.purpose === 'age' && typeof body.community === 'string') {
     const c = findCommunity(body.community)
     if (!c?.gate) throw refusal(400, 'bad_request', 'This community has no age requirement.')
-    const account = b.data.pseudonym ? store().accounts.get(b.data.pseudonym) : undefined
+    const account = mainAccount(b.data.pseudonym)
     if (!account || account.banned) throw refusal(401, 'login_required', 'Log in to verify your age.')
     const decision = decideGate(c.gate, account.birthDateRange, todayISO())
     if (decision === 'deny') throw refusal(403, 'age_refused', 'The age already verified for this account does not meet this requirement.')
     if (decision === 'allow') throw refusal(409, 'age_verified', 'The age already verified for this account meets this requirement.')
     purpose = { kind: 'age', community: c.slug }
     gate = c.gate
+  } else if (body.purpose === 'community' && typeof body.community === 'string') {
+    const c = findCommunity(body.community)
+    if (!c?.nymHost) throw refusal(400, 'bad_request', 'This community has no pseudonym of its own.')
+    const main = mainAccount(b.data.pseudonym)
+    const loggedIn = !!main && !main.banned
+    // Logged in, the person chooses: join and link, or log out first and join separately.
+    if (loggedIn && body.link !== true) throw refusal(400, 'link_required', 'Logged in: join and link, or log out first.')
+    purpose = { kind: 'community', community: c.slug, link: loggedIn }
+    host = c.nymHost
   } else {
     throw refusal(400, 'bad_request', 'Unknown purpose.')
   }
@@ -52,7 +66,6 @@ export default defineEventHandler(async (event) => {
     throw refusal(503, 'unavailable', 'The verifier is not available.')
   }
 
-  const cfg = useRuntimeConfig(event)
   const origin = publicOrigin(event, body.origin)
   const id = randomHex(16)
   const ttl = sessionTtlMs()
@@ -62,6 +75,8 @@ export default defineEventHandler(async (event) => {
     purpose,
     gate,
     ownerSid: b.data.sid!,
+    host,
+    ...(typeof body.phone === 'string' && body.phone.length <= 40 && { phone: body.phone }),
     createdAt: Date.now(),
     expiresAt: Date.now() + ttl,
     origin,
@@ -74,9 +89,9 @@ export default defineEventHandler(async (event) => {
   }
   store().sessions.set(id, s)
   store().byState.set(s.state, id)
-  addTrace(s, 'created', 'Session created', { purpose, req: query.req, offer })
+  addTrace(s, 'created', 'Session created', { purpose, client_id: clientIdFor(host), req: query.req, offer, ...(s.phone && { phone: s.phone }) })
 
-  return { id, authorizationUrl: authorizationUrl(String(cfg.public.siteHost), requestUriFor(origin, id)), expiresIn: Math.round(ttl / 1000) }
+  return { id, authorizationUrl: authorizationUrl(host, requestUriFor(origin, id)), expiresIn: Math.round(ttl / 1000) }
 })
 
 /**

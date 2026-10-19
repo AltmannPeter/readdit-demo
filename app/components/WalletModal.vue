@@ -2,11 +2,14 @@
 import { findCommunity, COMMUNITY_PREFIX } from '#shared/data/communities'
 import type { DialogPhase, VerificationMetrics } from '~/composables/useFlow'
 import type { WalletPurpose } from '~/composables/useWallet'
+import { ageOn, loadCredentials } from '~/wallet/holder'
 
 // Site side of the cross-device flow. The server owns the OpenID4VP session and runs
 // the verifier; this dialog shows the QR code, follows the status and applies the result
 // to this browser's login. It publishes its state for the guide panel (useDialogFlow).
 // Closing it before the request ends cancels the session on the server.
+// The phone beside it is one of the demo's phones; Swap phone hands over to the other one while
+// the QR code is on screen (the site records the swap for the technical view).
 
 interface Completion {
   ok: boolean
@@ -14,10 +17,46 @@ interface Completion {
   handle?: string
   /** The age proof was recorded too (a sign-in at an age-restricted community). */
   age?: boolean
+  /** A community account: its community, and whether it was just linked to the Readdit account. */
+  community?: string
+  linked?: boolean
 }
 
 const { state, close } = useWallet()
-const { refresh } = useAccount()
+const { refresh, account } = useAccount()
+const { phone, swap: swapPhone } = usePhone()
+const today = useToday()
+/** Each phone's owner's age today, from the birth date in the phone's credential. */
+const ages = ref<Record<string, number>>({})
+onMounted(async () => {
+  try {
+    const creds = await loadCredentials()
+    for (const c of creds) ages.value[String(c.index)] = ageOn(c.attributes.birth_date, today.value)
+  } catch {
+    /* the label goes without the age */
+  }
+})
+/** The phone was swapped during this request. */
+const swapped = ref(false)
+/** A swap is animating (a new request replaces the phone without animation). */
+const swapAnimating = ref(false)
+let swapTimer: ReturnType<typeof setTimeout> | undefined
+const phoneAge = computed(() => ages.value[String(phone.value.credentials[0])])
+/** Swapping makes sense until the phone on screen has scanned the code. */
+const canSwap = computed(() => phase.value !== 'scanned' && phase.value !== 'verifying')
+function swap() {
+  if (!canSwap.value) return
+  swapAnimating.value = true
+  clearTimeout(swapTimer)
+  swapTimer = setTimeout(() => (swapAnimating.value = false), 600)
+  swapPhone()
+  if (sessionId.value) swapped.value = true
+  if (sessionId.value && (phase.value === 'waiting' || phase.value === 'starting')) {
+    $fetch(`/api/vp/session/${sessionId.value}/phone`, { method: 'POST', body: { phone: phone.value.label } }).catch(() => {
+      /* the technical view misses the swap */
+    })
+  }
+}
 const guide = useGuidePanel()
 const siteName = useRuntimeConfig().public.siteName as string
 
@@ -41,14 +80,15 @@ let pollErrors = 0
 const dialogFlow = useDialogFlow()
 const lastOutcome = useLastOutcome()
 watchEffect(() => {
-  dialogFlow.value = { phase: phase.value, authUrl: authUrl.value, failure: failure.value, completion: completion.value, verification: verification.value }
+  dialogFlow.value = { phase: phase.value, authUrl: authUrl.value, failure: failure.value, completion: completion.value, verification: verification.value, swapped: swapped.value }
 })
 
 const community = computed(() => {
   const p = state.value.purpose
-  const slug = p?.kind === 'age' ? p.community : p?.kind === 'signin' ? p.community : undefined
+  const slug = p?.kind === 'age' || p?.kind === 'community' ? p.community : p?.kind === 'signin' ? p.community : undefined
   return slug ? findCommunity(slug) : undefined
 })
+const communityName = computed(() => (community.value ? `${COMMUNITY_PREFIX}${community.value.slug}` : ''))
 const ageText = computed(() => {
   const g = community.value?.gate
   if (!g) return ''
@@ -58,11 +98,16 @@ const ageText = computed(() => {
 })
 const title = computed(() => {
   const p = state.value.purpose
+  if (p?.kind === 'community') return `Join ${communityName.value}`
   if (p?.kind === 'age' || community.value) return 'Verify your age'
   return p?.intent === 'signup' ? `Sign up for ${siteName}` : `Log in to ${siteName}`
 })
 const subtitle = computed(() => {
   if (!community.value) return ''
+  const p = state.value.purpose
+  if (p?.kind === 'community') {
+    return `${communityName.value} asks for proof of human: one account per person, not linked to your other accounts unless you choose to.${p.link && account.value ? ` You chose to link it to u/${account.value.handle}.` : ''}`
+  }
   const gated = `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
   return state.value.purpose?.kind === 'signin' ? `${gated} The same step logs you in with a pseudonym.` : gated
 })
@@ -76,6 +121,9 @@ const FAILURES: Record<string, string> = {
   cancelled: 'The request was cancelled. Try again.',
   gone: 'This code is no longer valid. Try again.',
   banned: `This wallet's ${siteName} account has been banned.`,
+  community_banned: 'This wallet\'s account in this community has been banned.',
+  other_pseudonym: 'Your Readdit account is linked to another account in this community, from another wallet. Nothing was changed.',
+  linked_elsewhere: 'This account in the community is linked to another Readdit account. Nothing was changed.',
   mismatch: 'The pseudonym in this proof does not match your account. The age proof was not applied.',
   no_account: `There is no ${siteName} account for this wallet. Sign up to create one.`,
   account_exists: 'There is already an account associated with this user. Log in instead.',
@@ -84,9 +132,13 @@ const FAILURES: Record<string, string> = {
   age_refused: 'Your verified age does not meet this requirement.',
   age_verified: 'Your age is already verified for this community.',
 }
-const TITLES: Record<string, string> = { mismatch: 'Pseudonym does not match', banned: 'Account banned', no_account: 'No account', account_exists: 'Account already exists' }
+const TITLES: Record<string, string> = {
+  community_banned: 'Account banned',
+  other_pseudonym: 'Pseudonym does not match',
+  linked_elsewhere: 'Linked to another account',
+  mismatch: 'Pseudonym does not match', banned: 'Account banned', no_account: 'No account', account_exists: 'Account already exists' }
 /** Failures that a new request would not change. */
-const FINAL = new Set(['no_account', 'account_exists', 'logged_out', 'login_required', 'age_refused', 'age_verified'])
+const FINAL = new Set(['other_pseudonym', 'linked_elsewhere', 'community_banned', 'no_account', 'account_exists', 'logged_out', 'login_required', 'age_refused', 'age_verified'])
 const retryable = computed(() => !failure.value || !FINAL.has(failure.value))
 
 /** The refusal code in an error body (`data.error`), and the HTTP status. */
@@ -117,6 +169,7 @@ async function start() {
   attempt.value++
   activePurpose = p
   phoneFinished = false
+  swapped.value = false
   phase.value = 'starting'
   failure.value = null
   completion.value = null
@@ -131,8 +184,8 @@ async function start() {
       method: 'POST',
       body:
         p.kind === 'signin'
-          ? { purpose: 'signin', intent: p.intent, ...(p.community && { community: p.community }), origin: window.location.origin }
-          : { purpose: 'age', community: p.community, origin: window.location.origin },
+          ? { purpose: 'signin', intent: p.intent, ...(p.community && { community: p.community }), origin: window.location.origin, phone: phone.value.label }
+          : { purpose: p.kind, community: p.community, ...(p.kind === 'community' && { link: p.link }), origin: window.location.origin, phone: phone.value.label },
     })
   } catch (e) {
     if (mine !== run) return
@@ -198,12 +251,15 @@ async function complete(id: string, mine: number) {
   if (mine !== run) return
   if (!c.ok) {
     if (c.kind === 'banned' || c.kind === 'logged_out') await refresh()
-    return failWith(c.kind)
+    return failWith(c.kind === 'banned' && c.community ? 'community_banned' : c.kind)
   }
   await refresh()
   completion.value = c
   const account = c.kind === 'created' ? `Account created: u/${c.handle}` : c.kind === 'logged_in' ? `Logged in as u/${c.handle}` : ''
-  if (c.age) {
+  if (c.community) {
+    message.value = c.kind === 'created' ? `Joined ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}` : `In ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}`
+    note.value = c.linked ? 'Linked to your Readdit account.' : ''
+  } else if (c.age) {
     message.value = 'Age verified'
     note.value = account
   } else {
@@ -342,9 +398,27 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <!-- the person's phone -->
-          <section class="hidden items-center justify-center border-l border-line bg-canvas px-10 py-8 md:flex">
-            <WalletApp :key="attempt" :url="authUrl" @finished="onPhoneFinished" />
+          <!-- the phone in use: one of the demo's phones, swappable while the QR code is on screen -->
+          <section class="hidden flex-col items-center justify-center gap-3 border-l border-line bg-canvas px-10 py-5 md:flex">
+            <div class="flex w-[330px] items-center justify-between">
+              <p class="flex items-center gap-2 text-sm font-semibold" aria-live="polite" data-phone-label>
+                <span class="size-2.5 rounded-full" :style="{ backgroundColor: phone.tone }" aria-hidden="true" />
+                {{ phone.label }}<span v-if="phoneAge != null" class="font-normal text-muted">· {{ phoneAge }}</span>
+              </p>
+              <button
+                class="flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="!canSwap"
+                :title="canSwap ? 'Hand over to the other phone' : 'The phone on screen has already scanned the code'"
+                @click="swap"
+              >
+                <AppIcon name="swap" class="size-3.5" />
+                Swap phone
+              </button>
+            </div>
+            <!-- a swap slides the other phone in; a new request replaces the phone at once -->
+            <div :key="phone.id" :class="swapAnimating && 'phone-swap-in'">
+              <WalletApp :key="`${attempt}-${phone.id}`" :url="authUrl" :phone="phone" @finished="onPhoneFinished" />
+            </div>
           </section>
         </div>
       </div>

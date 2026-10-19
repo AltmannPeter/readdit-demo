@@ -96,3 +96,23 @@
   font-family: var(--font-sid);
   -webkit-font-smoothing: antialiased;
 }
+
+/* The demo's Swap phone: the other phone slides in (WalletModal.vue). */
+@keyframes phone-swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(48px) rotate(3deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.phone-swap-in {
+  animation: phone-swap-in 320ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .phone-swap-in {
+    animation: none;
+  }
+}

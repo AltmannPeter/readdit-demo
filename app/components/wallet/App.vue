@@ -7,7 +7,7 @@ import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
 import { analyzeRequest, consentFor, parseAuthorizationUrl } from '~/wallet/engine'
 import { TransportError, httpTransport } from '~/wallet/transport'
-import { loadCredentials, nymCard } from '~/wallet/holder'
+import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
 import { ProverError, prove, unlockAndSign } from '~/wallet/prover'
 import { findCircuit } from '#shared/registry/circuits'
 
@@ -26,6 +26,8 @@ const props = withDefaults(
   defineProps<{
     /** What the camera sees: the openid4vp:// URL in the QR code on screen. */
     url: string | null
+    /** The phone this wallet runs on: its credentials, its history, its selected card. */
+    phone: PhoneDef
     transport?: WalletTransport
   }>(),
   { transport: () => httpTransport },
@@ -50,11 +52,12 @@ const screen = ref<WalletScreen>('home')
 const request = ref<RequestObject | null>(null)
 const view = ref<RequestView | null>(null)
 const consent = ref<ConsentView | null>(null)
+/** This phone's credentials (CredentialView.index points into holders). */
 const credentials = ref<CredentialView[] | null>(null)
-/** The credential in focus: the one whose details are open, or the one the request uses. */
-const focus = ref(0)
+/** The credential in focus (its index): the one whose details are open, or the one the request uses. */
+const focus = ref(props.phone.credentials[0] ?? 0)
 /** The credential shown on the home screen or opened last; the next request starts with it. */
-const selected = useState('siros-selected', () => 0)
+const selected = useState(`siros-selected-${props.phone.id}`, () => props.phone.credentials[0] ?? 0)
 /** The credentials that match the current request's document type, and the "Switch credential" popup. */
 const matching = ref<CredentialView[]>([])
 const switching = ref(false)
@@ -68,8 +71,11 @@ const sentError = ref<'access_denied' | 'invalid_request' | null>(null)
 const declinedAt = ref<'request' | 'pin' | null>(null)
 const today = useToday()
 /** Presentations made from this page, per credential, for Recent History and Presentations. */
-const history = useState<Array<{ audience: string; at: number; credential: number }>>('siros-history', () => [])
-const current = computed(() => credentials.value?.[focus.value] ?? null)
+const history = useState<Array<{ audience: string; at: number; credential: number }>>(`siros-history-${props.phone.id}`, () => [])
+const current = computed(() => credentials.value?.find((c) => c.index === focus.value) ?? null)
+/** The home screen's card position of the selected credential, and back. */
+const selectedPosition = computed(() => Math.max(0, credentials.value?.findIndex((c) => c.index === selected.value) ?? 0))
+const selectPosition = (k: number) => (selected.value = credentials.value?.[k]?.index ?? selected.value)
 const alternatives = computed(() => matching.value.filter((c) => c.index !== focus.value))
 const timers: Array<ReturnType<typeof setTimeout>> = []
 let alive = true
@@ -77,6 +83,7 @@ let alive = true
 const flow = useWalletFlow()
 watchEffect(() => {
   flow.value = {
+    phone: props.phone.label,
     screen: screen.value,
     credential: current.value,
     matching: matching.value.length,
@@ -94,7 +101,7 @@ watchEffect(() => {
 /** The credential and the circuits this wallet runs; tried again at the next scan when it failed. */
 async function prepare(): Promise<boolean> {
   try {
-    credentials.value ??= await loadCredentials()
+    credentials.value ??= (await loadCredentials()).filter((c) => props.phone.credentials.includes(c.index))
     circuitIds.value ??= (await $fetch<{ circuits: Array<{ circuit_id: string }> }>('/api/wallet/capabilities')).circuits.map((c) => c.circuit_id)
     return true
   } catch (e) {
@@ -283,7 +290,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <PhoneFrame>
+  <PhoneFrame :bezel="props.phone.bezel">
     <div class="sid-font relative h-full">
       <Transition
         mode="out-in"
@@ -297,8 +304,8 @@ onBeforeUnmount(() => {
           key="home"
           :credentials="credentials"
           :history="history"
-          :selected="selected"
-          @select="selected = $event"
+          :selected="selectedPosition"
+          @select="selectPosition"
           @scan="startScan"
           @open="openDetails"
         />

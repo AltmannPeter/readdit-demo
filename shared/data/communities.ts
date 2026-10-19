@@ -84,7 +84,28 @@ export const communities: Community[] = [
     gate: { minAge: 18 },
     rules: ['Members must be 18 or older. Age is checked with your wallet.', 'Use content warnings.', 'No personal attacks.'],
   },
+  {
+    slug: 'france',
+    name: 'France',
+    description: 'French politics and society. Proof of human: one account per person, no bots.',
+    members: 41_270,
+    online: 388,
+    color: '#1d4ed8',
+    createdYear: 2025,
+    gate: null,
+    nymHost: 'france.readdit.example',
+    rules: [
+      'One account per person, proven with your wallet. Your c/france pseudonym is not linked to other sites.',
+      'Argue the point, not the person.',
+      'Sources for claims about facts.',
+    ],
+  },
 ]
+
+/** DNS names Readdit signs requests for: its own and those of communities with their own pseudonym. */
+export function verifierHosts(siteHost: string): string[] {
+  return [siteHost, ...communities.flatMap((c) => (c.nymHost ? [c.nymHost] : []))]
+}
 
 export function findCommunity(slug: string): Community | undefined {
   return communities.find((c) => c.slug === slug)

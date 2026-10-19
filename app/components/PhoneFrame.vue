@@ -3,6 +3,8 @@
 // at a phone's logical width (about 350 px, as on a real phone) and draws it at SCALE, so the
 // wallet's screens keep their real proportions and the frame still fits the dialog.
 const SCALE = 0.88
+/** The frame's colour: each demo phone has its own, so the audience sees which one is in use. */
+const props = withDefaults(defineProps<{ bezel?: string }>(), { bezel: '#171717' })
 const time = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 const tick = () => {
@@ -24,7 +26,7 @@ onBeforeUnmount(() => clearInterval(timer))
     <span class="absolute top-[232px] -left-[3px] h-14 w-[3px] rounded-l bg-neutral-700" />
     <span class="absolute top-[180px] -right-[3px] h-20 w-[3px] rounded-r bg-neutral-700" />
 
-    <div class="h-full w-full rounded-[52px] bg-neutral-900 p-[10px] shadow-2xl ring-1 ring-neutral-700">
+    <div class="h-full w-full rounded-[52px] p-[10px] shadow-2xl ring-1 ring-neutral-700 transition-colors duration-300" :style="{ backgroundColor: props.bezel }">
       <div class="relative flex h-full w-full flex-col overflow-hidden rounded-[42px] bg-white">
         <!-- status bar -->
         <div class="relative z-20 flex h-11 shrink-0 items-center justify-between bg-white px-7 pt-1 text-[13px] font-semibold text-sid-gray-900">

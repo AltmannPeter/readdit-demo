@@ -33,7 +33,7 @@ export interface WalletMaterial {
   secret_seed: string
 }
 
-/** Each credential's material, in the wallet's order (the first is the default for a request). */
+/** Each credential's material, in demo-wallet.json's order. A phone holds some of them (PHONES). */
 export const holders: WalletMaterial[] = walletFile.holders.map((h) => ({
   credential: h.credential as WalletCredential,
   device_key: h.device_key as DeviceKeyJwk,
@@ -57,6 +57,34 @@ export interface CredentialView {
   mso: { version: string; digestAlgorithm: string; signatureAlgorithm: string }
   deviceKey: { kty: string; crv: string; jwkThumbprint: string }
   sizes: { issuerSigned: number }
+}
+
+/**
+ * The demo's phones, one person each: the wallet on a phone holds only that person's credentials
+ * (indexes into holders). The site's dialog shows one phone at a time and can swap them, so the
+ * audience sees someone try another person's phone. Colours match the credential cards.
+ */
+export interface PhoneDef {
+  id: 'teen' | 'adult'
+  label: string
+  credentials: number[]
+  /** The phone frame's colour, and the credential cards' (CARD_COLOURS). */
+  bezel: string
+  tone: string
+}
+
+export const PHONES: PhoneDef[] = [
+  { id: 'teen', label: "Teen's phone", credentials: [0], bezel: '#3c434e', tone: '#5B6573' },
+  { id: 'adult', label: "Adult's phone", credentials: [1], bezel: '#5c1d25', tone: '#8C2F39' },
+]
+
+export const findPhone = (id: string) => PHONES.find((p) => p.id === id) ?? PHONES[0]!
+
+/** Whole years from a birth date (YYYY-MM-DD) to a day. */
+export function ageOn(birthDate: string, today: string): number {
+  const [by, bm, bd] = birthDate.split('-').map(Number) as [number, number, number]
+  const [ty, tm, td] = today.split('-').map(Number) as [number, number, number]
+  return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0)
 }
 
 /** The credential's display name (the issuer gives no display metadata, so the wallet names the type). */

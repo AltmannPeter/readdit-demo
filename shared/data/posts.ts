@@ -179,6 +179,40 @@ export const posts: Post[] = [
     hoursAgo: 10,
     comments: [],
   },
+  {
+    id: 'p20',
+    community: 'france',
+    author: 'calm-otter-3e81',
+    title: 'How do you follow the debates in the Assemblée?',
+    body: 'I watch the sessions on LCP but they are long. Any summaries that stay neutral?',
+    score: 1_204,
+    hoursAgo: 3,
+    comments: [
+      { id: 'c20', author: 'dry-fern-71c0', body: 'The official compte rendu is dry but complete. I read it on Fridays.', score: 230, hoursAgo: 2 },
+    ],
+  },
+  {
+    id: 'p21',
+    community: 'france',
+    author: 'quiet-plover-0b9d',
+    title: 'Why do so few young people vote in municipal elections?',
+    body: 'Genuine question. I am 24 and most of my friends skip them. What would make you vote locally?',
+    score: 640,
+    hoursAgo: 7,
+    comments: [],
+  },
+  {
+    id: 'p22',
+    community: 'france',
+    author: 'amber-ibex-55f2',
+    title: 'Rents in medium-sized cities',
+    body: 'Our rent went up again this year. Is it the same where you live, and what is your city doing about it?',
+    score: 418,
+    hoursAgo: 12,
+    comments: [
+      { id: 'c21', author: 'slow-heron-9a04', body: 'Same here. The town council held a public meeting on it last month.', score: 77, hoursAgo: 10 },
+    ],
+  },
 ]
 
 export function findPost(id: string): Post | undefined {

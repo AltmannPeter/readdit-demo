@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { CompactSign, importPKCS8 } from 'jose'
+import { verifierHosts } from '#shared/data/communities'
 
 // Signs Request Objects (JWS, ES256, x5c). The leaf certificate's dNSName SAN must equal
 // the client_id host (x509_san_dns). Without configured PEM files a self-signed P-256
-// certificate is generated at start; fine for the mocked wallet, not for a real one.
+// certificate is generated at start, with a SAN for Readdit's host and one for each community
+// with its own verifier identity (verifierHosts); fine for the mocked wallet, not for a real one.
 
 const ALG = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
 
@@ -42,7 +44,7 @@ async function load(): Promise<Signer> {
     notAfter: new Date(Date.now() + 365 * 86_400_000),
     signingAlgorithm: ALG,
     keys,
-    extensions: [new x509.SubjectAlternativeNameExtension([{ type: 'dns', value: host }])],
+    extensions: [new x509.SubjectAlternativeNameExtension(verifierHosts(host).map((value) => ({ type: 'dns' as const, value })))],
   })
   return { key: keys.privateKey, x5c: [Buffer.from(cert.rawData).toString('base64')], subject: cert.subject, selfSigned: true }
 }

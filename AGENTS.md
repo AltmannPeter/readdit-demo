@@ -20,15 +20,20 @@ over cross-device OpenID4VP (QR code).
 - **Sign up and log in** with a pseudonym derived from the `eu.europa.ec.eudi.nym_auth.1`
   attestation. The pseudonym is the account identifier. There is no email, password or name.
 - **Age-gated communities.** `c/teenspace` requires 13–17 and `c/afterdark` requires 18+.
+- **Communities with their own pseudonym.** `c/france` wants proof of a real person, against bot
+  accounts: it asks for a pseudonym under its own verifier identity (`france.readdit.example`), so
+  each person gets one `c/france` account, not linked to their Readdit account unless they choose to.
+- **Two phones.** The teen's phone and the adult's phone, one credential each. Swapping phones at
+  the QR code shows someone trying another person's phone.
 - **Ban.** A moderator bans the account. The same wallet always yields the same pseudonym for
   Readdit, so signing up again lands on the banned account (known-offender matching within one site).
 - **Interfaces are mocked, transactions are real.** The site and phone UIs are mocked. The OpenID4VP
   request and response, proof generation and proof verification are real. The last two run in the
   site's server, in a Rust Node addon (`native/vega`).
 
-The phone on screen is part of the website UI. It plays the person's wallet, the SIROS ID wallet.
+The phone on screen is part of the website UI. It plays a person's wallet, the SIROS ID wallet.
 In the real world the wallet would build the proof on the phone. Here the Vega prover in the site's
-server builds it. There is no true holder binding: the mocked wallet carries its two credentials,
+server builds it. There is no true holder binding: the mocked wallets carry their credentials,
 their device keys and seeds outright (`app/wallet/demo-wallet.json`) and sends what each native step
 needs from the credential the person chose; the prover keeps none of it.
 
@@ -65,8 +70,10 @@ current decisions; the replaced ones are quoted in them.
 | Copy | Tight and plain. It must not sound like marketing or AI-written text. The wallet uses the SIROS ID wallet's English strings (`src/locales/en.json`) wherever one exists; screens the real wallet lacks ("Requirement Not Met") are written in the same style. |
 | Guide | **Added 2026-10-13 (Frédéric):** a guide panel docked at the right edge, styled apart from the product, collapsible. It follows the flow state by itself (`app/guide/steps.ts`): for the current step a title and a neutral summary of 1 to 3 sentences, and optional Details with the technical facts, each derived from the request, the credential, the circuit's registry entry, the rulebook properties (`app/wallet/rulebook.ts`) and the measured metrics (the prover's and, apart, the verifier's). It claims nothing the rulebook or the code does not. **Added 2026-10-13 (Peter):** the presenter can step back and forward through the steps shown so far (‹ › in the guide header, up to 50); any new step jumps back to the present. |
 | Flow | Nothing is scripted. Each community has a gate `{ minAge?, maxAge? }` and the site reacts to any click order. |
-| Credential | **Changed 2026-10-13 (Frédéric):** the wallet holds two `nym_auth` credentials from one Document Signer: the teen's (born 2011-03-14) and an adult's (born 1990-05-20); a request starts with the credential shown on the wallet's home screen (or opened last), the teen's until another is chosen. Each covers both pseudonym and age, with its own seed, so each gives its own pseudonym and account. Each card has its own colour (teen grey `#5B6573`, adult red `#8C2F39`, `CARD_COLOURS` in `app/wallet/holder.ts`) and shows the holder's birth date ("Birth Date"), which tell them apart. The birth date stays on the phone; the request screen does not show it. The wallet holds no other card (the Personal ID placeholder was removed on 2026-10-13, Peter). They do not expire: validUntil `9999-12-31T23:59:59Z` and the Document Signer's notAfter `99991231235959Z`; the product shows no expiry. When both match a request, the request screen offers "Switch credential", as the SIROS ID app does. Was: "One `nym_auth` attestation covers both pseudonym and age." |
-| Pseudonym config | `known-offender-matching-ssc` with `verifier_id_type: x509_san_dns`. `client_id = x509_san_dns:<siteHost>` is also the `verifier_id`. |
+| Phones | **Added 2026-10-19 (Peter):** two phones, one person each (`PHONES` in `app/wallet/holder.ts`): "Teen's phone" holds the teen's credential (and, later, the mocked BBS credential), "Adult's phone" the adult's. The dialog shows one at a time, named above it with the owner's age from the credential ("Teen's phone · 15"), in a frame colour per phone (grey, red), with **Swap phone**, which works until the phone on screen has scanned. The choice stays across dialogs until swapped (a page reload starts on the teen's phone). Each phone keeps its own history and selected card. The site records a swap in the session (`POST /api/vp/session/:id/phone`) for `/tech`; the guide names the phone in every step's context and says when the phones were swapped. The cheating attempt: logged in as the teen, swap to the adult's phone at c/afterdark's QR code; it proves 18+, and Readdit answers "Pseudonym does not match". |
+| Credential | **Changed 2026-10-13 (Frédéric), split over two phones 2026-10-19 (Peter):** two `nym_auth` credentials from one Document Signer: the teen's (born 2011-03-14) and an adult's (born 1990-05-20), one per phone; a request starts with the credential shown on the phone's home screen (or opened last). Each covers both pseudonym and age, with its own seed, so each gives its own pseudonym and account. Each card has its own colour (teen grey `#5B6573`, adult red `#8C2F39`, `CARD_COLOURS` in `app/wallet/holder.ts`) and shows the holder's birth date ("Birth Date"), which tell them apart. The birth date stays on the phone; the request screen does not show it. The wallet holds no other card (the Personal ID placeholder was removed on 2026-10-13, Peter). They do not expire: validUntil `9999-12-31T23:59:59Z` and the Document Signer's notAfter `99991231235959Z`; the product shows no expiry. When more than one credential on a phone matches a request, the request screen offers "Switch credential", as the SIROS ID app does; with one credential per phone it does not appear. Was: "One `nym_auth` attestation covers both pseudonym and age." |
+| Pseudonym config | `known-offender-matching-ssc` with `verifier_id_type: x509_san_dns`. `client_id = x509_san_dns:<siteHost>` is also the `verifier_id`; a community with its own pseudonym uses `x509_san_dns:<nymHost>` instead. |
+| Own-pseudonym communities | **Added 2026-10-19 (Peter):** a community can set `nymHost` (`shared/data/communities.ts`); c/france uses `france.readdit.example`. Its requests carry `client_id = x509_san_dns:<nymHost>`, and the request-signing certificate lists that name too (`verifierHosts`). The Vega circuit takes `verifier_input` = SHA-256(client_id) as a public input, so the same credential gives a different, unlinkable pseudonym there, with no circuit change (the circuit fixes the DST, `prover_input` = zeros and `ssc`; it cannot do a user-chosen input or `psc`). One account per person, known-offender matching within c/france, bans stick. The issuer can still link (ssc); the ideal is `private_seed` (psc), which needs a new circuit. Rules: c/france posts and comments are visible only with a c/france account, and appear under its pseudonym only. Logged out, joining creates or opens a standalone c/france account. Logged in to Readdit, only the c/france account linked to that account counts. Without one, the person chooses (Peter, 2026-10-19; no extra confirm step): **Join and link to u/…** (creates the c/france account or links a standalone one), or **Log out and join separately** (no link). The server refuses a logged-in join that does not say `link: true` (`400 link_required`). Linking refused as `other_pseudonym` when the Readdit account is already linked to another c/france pseudonym (another person's wallet), and as `linked_elsewhere` when the c/france account is linked to another Readdit account. A Readdit account cannot be added from a c/france-only login. A ban in c/france applies to the c/france pseudonym only. A ban of a Readdit account also bans the community accounts linked to it (`banned.cascade`); unbanning the Readdit account lifts those, not a community account's own ban (Peter, 2026-10-19). Age ranges live on the Readdit account only, so a linked c/france account from another phone opens no age-gated community. Accounts of both kinds share one store, keyed by pseudonym; `community` and `linkedTo` mark community accounts. Badge and notice: "Proof of human"; copy says the c/france pseudonym is not linked to other accounts "unless you choose to" (Peter, 2026-10-19). With only a c/france account, the header shows it like a Readdit account, marked with the community, and its menu offers Log in to Readdit and Log out. |
 | Age binding | Every age request also asks for the pseudonym in the same `req`. The site accepts the age result only if the pseudonym equals the logged-in account's pseudonym; otherwise the dialog says "Pseudonym does not match" and nothing is applied (for example an adult credential's proof while logged in with the teen's account). |
 | Logged-out gated community | **Changed 2026-10-13 (Frédéric's report "the after dark is locked without having verified the age"):** a logged-out visitor at an age-restricted community sees its age requirement and one button, which starts one request for the pseudonym and the age range: it creates the account or logs in to it, and records the age. Plain log-in and sign-up still ask for the pseudonym only. Was: "Log in to view" with a lock, then a second request for the age. |
 | Logged-out pages | **Added 2026-10-13 (Peter):** the home feed and the open communities show no posts when logged out. They show one notice (`app/components/LoginNotice.vue`) with three short paragraphs (pseudonym and no personal information, age-limited communities, accounts bound to an identity attestation so no bot accounts) and Sign up / Log in. Age-restricted communities keep their age notice (row above). Sign up is an outline button and Log in a filled one, everywhere. |
@@ -84,16 +91,17 @@ current decisions; the replaced ones are quoted in them.
 
 ### Presentation order (not hardcoded)
 
-1. Log in / sign up with QR, scan, consent and PIN. Optionally open the phone's "Age and pseudonym"
-   card; the guide's Details then show the credential's technical facts.
+1. Sign up on the teen's phone with QR, scan, consent and PIN. Optionally open the phone's "Age and
+   pseudonym" card; the guide's Details then show the credential's technical facts.
 2. Browse the open communities.
 3. Open `c/afterdark` (18+). The wallet says "Requirement Not Met" and the site shows "Not completed".
-4. Open `c/teenspace` (13–17). Access is granted. `c/afterdark` is now refused by the site itself.
-5. Comment in `c/teenspace`. In the `/mod` window, ban the user. The user window shows the ban.
-6. Sign up again with the same wallet. The site shows "Account banned".
-
-Optional: logged in with the teen's account, select the adult card on the wallet's home screen and
-verify at `c/afterdark`. The wallet makes the proof; the site rejects it ("Pseudonym does not match").
+   **Try again**, then **Swap phone** to the adult's phone at the QR code: it proves 18+, and the site
+   rejects it ("Pseudonym does not match").
+4. Open `c/teenspace` (13–17) on the teen's phone. Access is granted. `c/afterdark` is now refused by
+   the site itself.
+5. Open `c/france`, **Join and link** with the teen's phone: a c/france pseudonym, linked to the account.
+6. Comment in `c/teenspace`. In the `/mod` window, ban the user. The user window shows the ban.
+7. Sign up again with the same wallet. The site shows "Account banned".
 
 `/tech` shows each step live: the request, the negotiation, the circuit, sizes and times. The guide
 panel beside the site names the current step and summarises it.
@@ -104,7 +112,10 @@ panel beside the site names the current step and summarises it.
 app/
   components/WalletModal.vue     site dialog: QR, polls the server session, completes it for this browser
   components/LoginNotice.vue     logged-out notice on the home feed and the open communities
-  components/GateNotice.vue      a community's gate: log-in notice, age notice, or refused
+  components/GateNotice.vue      a community's gate: log-in notice, age notice, refused, join (own pseudonym), banned there
+  components/HumanBadge.vue      "Proof of human", for communities with their own pseudonym
+  components/UserMenu.vue        the header's account: Readdit, or a community-only account marked with its community
+  composables/usePhone.ts        the demo phone on screen and Swap phone
   components/GuidePanel.vue      the guide panel (docked right, collapsible); shows guide/steps.ts's current step
   guide/steps.ts                 the guide's steps: title, summary and details, derived from the flow state
   composables/useFlow.ts         the flow state the wallet and the dialog publish for the guide
@@ -116,6 +127,7 @@ app/
                                  outcome, Switch credential), with the wallet's own strings
   components/wallet/THIRD-PARTY-NOTICES.txt  BSD-2-Clause (SIROS ID), ISC (lucide), OFL (Inter)
   wallet/demo-wallet.json        two holders' mdocs, device keys and seeds (issued by nym-issuer under one signer)
+                                 (holder.ts PHONES: which phone holds which)
   wallet/holder.ts               the holder material and the credential decoded for the screens
   wallet/engine.ts               wallet-side rulebook checks, circuit selection, the consent model (product fields
                                  for the request screen, the technical account for the guide)
@@ -124,7 +136,8 @@ app/
   wallet/prover.ts               the phone's native steps through /api/wallet/sign and /api/wallet/prove
   composables/useAccount.ts      account from /api/me
   pages/tech.vue                 technical view (separate window)
-  pages/mod.vue                  moderation: comments, accounts, ban/unban, reset demo (separate window)
+  pages/mod.vue                  moderation: comments, accounts (linked community accounts under their Readdit
+                                 account, components/ModAccount.vue), ban/unban, reset demo (separate window)
 server/
   utils/services.ts              THE ONLY CODE THAT CALLS THE PROOF BACKEND (the Vega addon)
   plugins/vega.ts                builds both sides' keys when the server starts; stops the built server without the addon
@@ -137,7 +150,8 @@ server/
   api/vp/request/[id].ts         request_uri, GET or POST (wallet_metadata, wallet_nonce), returns signed JWT
   api/vp/response/[id].post.ts   response_uri (direct_post), calls the verifier
   api/vp/session/[id]*.ts        status polling, completion (created / logged in / no account / account exists / age / ban /
-                                 mismatch), cancel
+                                 mismatch; community: created / logged in / linked / other_pseudonym / linked_elsewhere),
+                                 cancel, phone (a swap, for /tech)
   api/test/fault.post.ts         test only (READDIT_TEST_FAULTS=1), 404 otherwise
   api/wallet/*.ts                mocked phone → prover (capabilities, sign, prove)
   api/me, logout, notice, comments, mod/*, demo/reset, tech/overview
@@ -210,6 +224,14 @@ and the phone's speed (proofs run on the server's CPU).
      macro's pseudonym as computed from an issuer-signed `seed` element, while the rulebook and the demo
      credentials carry `ssc = SHA-256(secret_seed)` with `secret_seed` held by the wallet; the generated
      circuit has to prove the latter, as the Vega circuit does.
+
+6. **BBS (next, on branch `bbs-longfellow`).** A BBS credential on the teen's phone only, next to the
+   mdoc (BBS does not work over the mdoc MSO). Attributes: a birth-date-based attribute and a
+   pseudonym secret seed commitment. Mock it first; model it fully once the BBS backend and its
+   cryptography are settled. It needs its own credential format in the request (not `circuit_zk` over
+   mdoc), its own per-site pseudonym (BBS does not use SHA-256 as `pseudonym-v1-sha256` does), and
+   its own backend next to Vega and Longfellow in `server/utils/services.ts`. Own-pseudonym
+   communities rely on the verifier identity only, so they should carry over.
 
 ## 5. Rules for changing the code
 

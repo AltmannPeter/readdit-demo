@@ -17,6 +17,8 @@ export interface ProofMetrics {
 
 /** What the wallet on the phone shows and knows about the current request. */
 export interface WalletFlow {
+  /** The phone the wallet runs on ("Teen's phone"). */
+  phone: string
   screen: WalletScreen
   /** The credential in focus: the one whose details are open, or the one the request uses. */
   credential: CredentialView | null
@@ -53,7 +55,9 @@ export interface DialogFlow {
   phase: DialogPhase
   authUrl: string | null
   failure: string | null
-  completion: { kind: string; handle?: string; age?: boolean } | null
+  completion: { kind: string; handle?: string; age?: boolean; community?: string; linked?: boolean } | null
+  /** The phone was swapped while this request's QR code was on screen. */
+  swapped: boolean
   verification: VerificationMetrics | null
 }
 
@@ -67,6 +71,7 @@ export interface LastOutcome {
 }
 
 export const initialWalletFlow = (): WalletFlow => ({
+  phone: '',
   screen: 'home',
   credential: null,
   matching: 0,
@@ -83,6 +88,6 @@ export const initialWalletFlow = (): WalletFlow => ({
 export const useWalletFlow = () => useState<WalletFlow>('flow-wallet', initialWalletFlow)
 
 export const useDialogFlow = () =>
-  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null }))
+  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null, swapped: false }))
 
 export const useLastOutcome = () => useState<LastOutcome | null>('flow-last', () => null)

@@ -21,6 +21,13 @@ export interface Community {
   color: string
   createdYear: number
   gate: AgeGate | null
+  /**
+   * Communities that need bot protection have their own pseudonym: requests for them use this DNS
+   * name as the verifier identity (client_id x509_san_dns:<nymHost>), so a person gets one
+   * pseudonym here that cannot be linked to their Readdit account or other sites. Absent: the
+   * community uses the Readdit account.
+   */
+  nymHost?: string
   rules: string[]
 }
 
@@ -48,6 +55,16 @@ export interface AgeProof {
   label: string
   range: BirthDateRange
   at: string
+}
+
+/** A community account (a community with its own pseudonym), as this browser sees it. */
+export interface CommunityMembership {
+  handle: string
+  /** Linked to the logged-in Readdit account. */
+  linked: boolean
+  banned: boolean
+  /** Banned because the Readdit account it is linked to was banned: that account's handle. */
+  bannedWith: string | null
 }
 
 export interface Account {

@@ -13,7 +13,7 @@ import type { WalletPurpose } from '~/composables/useWallet'
 import type { CommunityAccess } from '~/composables/useCommunityAccess'
 import type { ConsentView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
-import { credentialLabel, neverExpires } from '~/wallet/holder'
+import { PHONES, credentialLabel, neverExpires } from '~/wallet/holder'
 import { ageText, birthRangeText, fmtDate, parseAuthorizationUrl } from '~/wallet/engine'
 
 export interface GuideRow {
@@ -60,6 +60,8 @@ export interface GuideInput {
   access: CommunityAccess | null
   account: Account | null
   bannedHandle: string | null
+  /** The community account this browser has in the community on screen, if it has its own pseudonym. */
+  membership: { handle: string; linked: boolean; banned: boolean; bannedWith: string | null } | null
   /** The wallet's credentials (the one in focus is wallet.credential). */
   credentials: CredentialView[]
 }
@@ -221,12 +223,31 @@ function credentialSection(c: CredentialView | null): GuideSection | null {
 // Steps while the dialog is open
 
 function requestContext(i: GuideInput): string {
+  const phone = i.wallet.phone ? ` · ${i.wallet.phone}` : ''
+  return purposeContext(i) + phone
+}
+
+function purposeContext(i: GuideInput): string {
   const p = i.dialog.purpose
+  if (p?.kind === 'community') return `Join · ${communityName(p.community)}`
   if (p?.kind === 'age') return `Age check · ${communityName(p.community)}`
   if (p?.community) return `Log-in and age check · ${communityName(p.community)}`
   const name = p?.intent === 'login' ? 'Log-in' : 'Sign-up'
   if (i.bannedHandle || (i.last && !i.last.ok && i.last.kind === 'banned')) return `${name} after the ban`
   return name
+}
+
+/** The context of a request that has ended, for the site's steps. */
+function lastContext(p: WalletPurpose): string {
+  if (p.kind === 'community') return `Join · ${communityName(p.community)}`
+  if (p.kind === 'age') return `Age check · ${communityName(p.community)}`
+  if (p.community) return `Log-in and age check · ${communityName(p.community)}`
+  return p.intent === 'login' ? 'Log-in' : 'Sign-up'
+}
+
+/** The verifier identity of a request: Readdit's, or a community's own (Community.nymHost). */
+function hostOf(i: GuideInput): string {
+  return i.wallet.consent?.verifier.host ?? (i.page.kind === 'community' && i.dialog.purpose?.kind === 'community' ? (i.page.community.nymHost ?? i.siteHost) : i.siteHost)
 }
 
 /** What a refusal code from request_uri or response_uri means (server/api/vp/*). */
@@ -344,8 +365,11 @@ function qrStep(i: GuideInput, context: string): GuideStep {
         },
       ]
     : []
+  if (auth && i.wallet.phone) details.push({ heading: 'Phone', rows: [{ label: 'In front of the QR code', value: i.wallet.phone }] })
   let summary: string
-  if (p?.kind === 'signin' && p.community) {
+  if (p?.kind === 'community') {
+    summary = `${communityName(p.community)} asks for its own pseudonym. The QR code's client_id is ${auth?.clientId ?? 'the community’s'}, so the wallet derives a pseudonym for that name, unrelated to the one for ${i.siteHost}.`
+  } else if (p?.kind === 'signin' && p.community) {
     const c = i.page.kind === 'community' ? i.page.community : null
     summary = `${communityName(p.community)}${c?.gate ? ` is for ${gateText(c.gate)}` : ' has an age requirement'}. The visitor is not logged in, so ${i.siteName} shows one QR code that asks for the pseudonym and the age range together.`
   } else if (p?.kind === 'age') {
@@ -359,13 +383,17 @@ function qrStep(i: GuideInput, context: string): GuideStep {
   } else {
     summary = `${i.siteName} shows a QR code that points to a signed OpenID4VP request. The person scans it with the SIROS ID wallet on their phone.`
   }
-  const id = p?.kind === 'age' ? 'age-qr' : p?.community ? 'signin-age-qr' : 'signin-qr'
+  if (i.dialog.swapped) {
+    summary = `The phones were swapped: the ${i.wallet.phone.toLowerCase() || 'other phone'} now faces the QR code. The request names no wallet, so any phone can answer it; only what its presentation proves counts. ${summary}`
+  }
+  const id = p?.kind === 'community' ? 'community-qr' : p?.kind === 'age' ? 'age-qr' : p?.community ? 'signin-age-qr' : 'signin-qr'
   return { id, context, stage: 0, title: 'QR code', summary, details }
 }
 
 function credentialStep(i: GuideInput, context: string): GuideStep {
   const c = focusOf(i)
-  const n = i.credentials.length
+  const phone = PHONES.find((p) => p.label === i.wallet.phone)
+  const n = phone ? phone.credentials.length : i.credentials.length
   return {
     id: 'credential',
     context,
@@ -421,7 +449,9 @@ function consentStep(i: GuideInput, context: string): GuideStep {
   const host = c?.verifier.host ?? i.siteHost
   const signinAge = !!c?.age && i.dialog.purpose?.kind === 'signin'
   let summary: string
-  if (signinAge) {
+  if (i.dialog.purpose?.kind === 'community') {
+    summary = `${communityName(i.dialog.purpose.community)} asks for a pseudonym for ${host}, its own name. The wallet derives it from the same secret seed as for ${i.siteHost}, but the different verifier_id gives a pseudonym that cannot be linked to the Readdit one.`
+  } else if (signinAge) {
     summary = `${i.siteName} asks for a pseudonym and proof that the holder is ${c!.age!.text}, in one presentation. The pseudonym logs in to the account, or creates it; the birth date stays on the phone.`
   } else if (c?.age) {
     summary = `${i.siteName} asks for the account's pseudonym and proof that the holder is ${c.age.text}. The wallet proves both from the credential; the birth date stays on the phone.`
@@ -430,7 +460,8 @@ function consentStep(i: GuideInput, context: string): GuideStep {
   } else {
     summary = `${i.siteName} asks for a pseudonym. The wallet derives one that is specific to ${host} and proves that it comes from a valid credential, without revealing the credential.`
   }
-  return { id: signinAge ? 'signin-age-consent' : c?.age ? 'age-consent' : 'consent', context, stage: 2, title: 'Consent', summary, details: c ? consentSections(c, i.siteName, i) : [] }
+  const id = i.dialog.purpose?.kind === 'community' ? 'community-consent' : signinAge ? 'signin-age-consent' : c?.age ? 'age-consent' : 'consent'
+  return { id, context, stage: 2, title: 'Consent', summary, details: c ? consentSections(c, i.siteName, i) : [] }
 }
 
 function pinStep(i: GuideInput, context: string): GuideStep {
@@ -522,6 +553,36 @@ function successStep(i: GuideInput, context: string): GuideStep {
   const checks = checksSection(i.wallet.view?.circuit, i.siteName)
   const proof = proofSection(i.wallet, i.siteName)
   const verification = verificationSection(i.dialog.verification, i.siteName)
+  const done = i.dialog.completion
+  if (done?.community) {
+    const name = communityName(done.community)
+    const host = hostOf(i)
+    const linkNote = done.linked && i.account ? ` ${i.siteName} recorded that it belongs to u/${i.account.handle}, because that account was logged in.` : ''
+    return {
+      id: done.linked ? 'community-linked' : kind === 'created' ? 'community-created' : 'community-joined',
+      context,
+      stage: 5,
+      title: kind === 'created' ? `Joined ${name}` : `Back in ${name}`,
+      summary:
+        (kind === 'created'
+          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is for ${host} only; nothing in it connects to the person's Readdit pseudonym.`
+          : `The pseudonym for ${host} belongs to an existing ${name} account, u/${handle}.`) + linkNote,
+      details: [
+        {
+          heading: `${name} account`,
+          rows: [
+            { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
+            { label: 'Handle', value: `u/${handle}` },
+            { label: 'Linked to a Readdit account', value: done.linked || i.membership?.linked ? 'Yes, by the person logging in to both' : 'No' },
+          ],
+          stacked: true,
+        },
+        proof,
+        verification,
+        checks,
+      ].filter((s): s is GuideSection => !!s),
+    }
+  }
   if (i.dialog.completion?.age && (kind === 'created' || kind === 'logged_in')) {
     const age = i.wallet.consent?.age
     return {
@@ -570,6 +631,37 @@ function failedStep(i: GuideInput, context: string, failure: string): GuideStep 
 function failedStepFor(i: GuideInput, context: string, failure: string): GuideStep {
   const p = i.dialog.purpose
   const base = { context, stage: 5 }
+  if (p?.kind === 'community') {
+    const name = communityName(p.community)
+    const host = hostOf(i)
+    if (failure === 'community_banned' || failure === 'banned') {
+      return {
+        ...base,
+        id: 'community-ban-refused',
+        title: 'Account banned',
+        summary: `This wallet's ${name} account is banned. The wallet always derives the same pseudonym for ${host}, so it cannot open a new ${name} account either.`,
+        details: [],
+      }
+    }
+    if (failure === 'other_pseudonym') {
+      return {
+        ...base,
+        id: 'community-other-pseudonym',
+        title: 'Pseudonym does not match',
+        summary: `u/${i.account?.handle ?? ''} is already linked to a ${name} account from another wallet. This wallet's pseudonym for ${host} is a different one, so ${i.siteName} does not link a second account: one ${name} account per person.`,
+        details: [],
+      }
+    }
+    if (failure === 'linked_elsewhere') {
+      return {
+        ...base,
+        id: 'community-linked-elsewhere',
+        title: 'Linked to another account',
+        summary: `This wallet's ${name} account is already linked to another Readdit account. ${i.siteName} links each ${name} account to one Readdit account at most.`,
+        details: [],
+      }
+    }
+  }
   switch (failure) {
     case 'banned':
       return bannedSignupStep(i, context, p?.kind === 'age')
@@ -643,7 +735,7 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         ...base,
         id: 'mismatch',
         title: 'Pseudonym does not match',
-        summary: `The wallet made a valid proof, but with a different credential: its pseudonym for ${i.siteHost} is not the logged-in account's. ${i.siteName} binds every age result to the account's pseudonym, so it rejects the presentation and applies nothing.`,
+        summary: `${i.wallet.phone ? `The ${i.wallet.phone.toLowerCase()}` : 'The wallet'} made a valid proof, but from a credential that is not the account's: its pseudonym for ${i.siteHost} is not the logged-in account's. ${i.siteName} binds every age result to the account's pseudonym, so it rejects the presentation and applies nothing.`,
         details: [],
       }
     default:
@@ -692,14 +784,7 @@ function siteStep(i: GuideInput): GuideStep {
   if (last && !last.ok && last.kind === 'closed') {
     return {
       id: 'request-closed',
-      context:
-        last.purpose.kind === 'age'
-          ? `Age check · ${communityName(last.purpose.community)}`
-          : last.purpose.community
-            ? `Log-in and age check · ${communityName(last.purpose.community)}`
-            : last.purpose.intent === 'login'
-              ? 'Log-in'
-              : 'Sign-up',
+      context: lastContext(last.purpose),
       title: 'Request closed',
       summary: `The dialog was closed before the request ended. ${i.siteName} cancelled the request on its server, so an answer the wallet sends later is refused and nothing is applied.`,
       details: [{ heading: 'Request', rows: [{ label: 'Status', value: 'failed, cancelled', mono: true }, { label: 'Later answers', value: '410 cancelled', mono: true }] }],
@@ -735,7 +820,13 @@ function siteStep(i: GuideInput): GuideStep {
         {
           heading: 'Demo setup',
           rows: [
-            ...i.credentials.map((c, k) => ({ label: `Wallet credential ${k + 1}`, value: `${c.title} (${c.docType}), issued by ${c.issuer.name}, birth date ${fmtDate(c.attributes.birth_date)}` })),
+            ...PHONES.map((p) => ({
+              label: p.label,
+              value: i.credentials
+                .filter((c) => p.credentials.includes(c.index))
+                .map((c) => `${c.title} (${c.docType}), issued by ${c.issuer.name}, birth date ${fmtDate(c.attributes.birth_date)}`)
+                .join('; '),
+            })),
             { label: 'Mocked', value: 'The site and the phone screens' },
             { label: 'Real', value: 'The OpenID4VP requests and responses, the proofs and their verification' },
             { label: 'Posts and other accounts', value: 'Sample data' },
@@ -772,6 +863,7 @@ function siteStep(i: GuideInput): GuideStep {
 function communityStep(i: GuideInput, c: Community): GuideStep {
   const name = communityName(c)
   const context = name
+  if (c.nymHost) return ownPseudonymStep(i, c)
   if (i.access === 'ask-signin' && c.gate) {
     const lastHere = i.last?.purpose.community === c.slug ? i.last : null
     return {
@@ -859,6 +951,54 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
         ? [proofSection(i.wallet, i.siteName), verificationSection(i.dialog.verification, i.siteName), checksSection(i.wallet.view?.circuit, i.siteName)]
         : []),
     ].filter((s): s is GuideSection => !!s),
+  }
+}
+
+/** A community with its own pseudonym (Community.nymHost): one account per person, unlinkable to Readdit's. */
+function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
+  const name = communityName(c)
+  const host = c.nymHost!
+  const identity: GuideSection = {
+    heading: 'Own pseudonym',
+    rows: [
+      { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
+      { label: "Readdit's", value: `x509_san_dns:${i.siteHost}`, mono: true },
+      { label: 'Pseudonym', value: 'pseudonym-v1-sha256, known-offender-matching-ssc', mono: true },
+    ],
+    items: [
+      `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Readdit account, if any, a ${name} account belongs to, unless the person chooses to link them.`,
+      `Known-offender matching still holds for ${host}: one wallet, one ${name} account, and a ban sticks.`,
+      `A ban of the Readdit account also bans the ${name} account linked to it; a ban in ${name} leaves the Readdit account alone.`,
+      `Linking moves no age: age checks always use the logged-in Readdit account's own proven range, so a ${name} account from another phone opens nothing else.`,
+      'The issuer can still link the pseudonym to the person, because it knows the secret seed. A private seed (psc) would prevent that; it needs a new circuit.',
+    ],
+    stacked: true,
+  }
+  const m = i.membership
+  if (i.access === 'member-banned' && m) {
+    return { id: 'community-banned', context: name, title: 'Account banned', summary: m.bannedWith
+        ? `A moderator banned the Readdit account u/${m.bannedWith}, and with it u/${m.handle}, the ${name} account linked to it. Unbanning u/${m.bannedWith} lifts both.`
+        : `A moderator banned u/${m.handle} in ${name}. The ban is stored against the ${name} pseudonym; the person's Readdit account is not affected.`, details: [identity] }
+  }
+  if (i.access === 'join' || !m) {
+    return {
+      id: 'community-join',
+      context: name,
+      title: 'Proof of human',
+      summary: `${name} wants proof of a real person and no bots. It asks the wallet for a pseudonym for ${host}, its own name, so a person gets one ${name} account, not linked to their other accounts unless they choose to.${
+        i.account
+          ? ` Logged in as u/${i.account.handle}, the person chooses: join and link the two, or log out and join separately.`
+          : ' No Readdit account is needed.'
+      }`,
+      details: [identity],
+    }
+  }
+  return {
+    id: 'community-member',
+    context: name,
+    title: `Member of ${name}`,
+    summary: `This browser acts as u/${m.handle} in ${name}${m.linked && i.account ? `, linked to u/${i.account.handle}` : ''}. Posts and comments here appear under the ${name} pseudonym only.`,
+    details: [identity],
   }
 }
 

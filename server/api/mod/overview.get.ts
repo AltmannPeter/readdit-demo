@@ -6,6 +6,8 @@ export default defineEventHandler(() => {
   return {
     accounts: [...accounts.values()].map((a) => ({
       ...publicAccount(a),
+      community: a.community ?? null,
+      linkedTo: a.linkedTo ? (accounts.get(a.linkedTo)?.handle ?? null) : null,
       banned: a.banned ?? null,
       comments: comments.filter((c) => c.pseudonym === a.pseudonym).length,
     })),

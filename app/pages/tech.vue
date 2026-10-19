@@ -26,7 +26,8 @@ interface Trace {
 }
 interface Session {
   id: string
-  purpose: { kind: 'signin'; intent?: 'signup' | 'login'; community?: string } | { kind: 'age'; community: string }
+  purpose: { kind: 'signin'; intent?: 'signup' | 'login'; community?: string } | { kind: 'age' | 'community'; community: string }
+  phone?: string
   status: string
   createdAt: number
   query: { req: Array<{ id: string; return: string; params: Record<string, string> }> }
@@ -74,7 +75,9 @@ const verify = computed(() => step('verify')?.data)
 const purposeText = (p: Session['purpose']) =>
   p.kind === 'signin'
     ? `${p.intent === 'login' ? 'Log in' : 'Sign up'}${p.community ? ` and age check, ${COMMUNITY_PREFIX}${p.community}` : ''}`
-    : `Age check, ${COMMUNITY_PREFIX}${p.community}`
+    : p.kind === 'community'
+      ? `Join ${COMMUNITY_PREFIX}${p.community}`
+      : `Age check, ${COMMUNITY_PREFIX}${p.community}`
 const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(1)} kB` : `${n} B`)
 const mb = (n?: number | null) => (n == null ? '' : `${Math.round(n)} MB`)
 const values = (c?: { shared: number; precommitted: number; rest: number; public: number } | null) =>
@@ -166,7 +169,7 @@ const statusTone = (s: string) =>
             :class="s.id === session.id ? 'border-brand bg-brand-soft font-semibold text-brand' : 'border-line bg-surface text-muted'"
             @click="selected = s.id"
           >
-            {{ time(s.createdAt) }} · {{ purposeText(s.purpose) }}
+            {{ time(s.createdAt) }} · {{ purposeText(s.purpose) }}<template v-if="s.phone"> · {{ s.phone }}</template>
           </button>
         </div>
 

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-const { account } = useAccount()
+const { account, memberships } = useAccount()
 const wallet = useWallet()
+/** Logged in somewhere: Readdit, or only a community with its own pseudonym. */
+const signedIn = computed(() => !!account.value || Object.values(memberships.value).some((m) => !m.banned))
 </script>
 
 <template>
@@ -21,7 +23,7 @@ const wallet = useWallet()
       </label>
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
-        <template v-if="!account">
+        <template v-if="!signedIn">
           <button class="btn-outline" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
           <button class="btn-primary" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
         </template>

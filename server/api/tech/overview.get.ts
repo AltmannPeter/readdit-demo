@@ -12,6 +12,7 @@ export default defineEventHandler(async () => {
       return {
         id: s.id,
         purpose: s.purpose,
+        phone: s.phone ?? null,
         status: s.status,
         createdAt: s.createdAt,
         query: s.query,

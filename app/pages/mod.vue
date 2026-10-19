@@ -1,23 +1,25 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
+import type { ModAccountRow } from '~/components/ModAccount.vue'
 
 definePageMeta({ layout: false })
 useHead({ title: 'Moderation · Readdit' })
 
 interface Overview {
-  accounts: Array<{
-    pseudonym: string
-    handle: string
-    joinedAt: string
-    ageProofs: Array<{ label: string }>
-    banned: { at: string; reason: string } | null
-    comments: number
-  }>
+  accounts: ModAccountRow[]
   comments: Array<{ id: string; handle: string; pseudonym: string; community: string; postTitle: string; body: string; at: number; banned: boolean }>
 }
 
 const data = ref<Overview>({ accounts: [], comments: [] })
 const confirmReset = ref(false)
+/** Readdit accounts with their linked community accounts under them; unlinked community accounts on their own. */
+const groups = computed(() => {
+  const mains = new Set(data.value.accounts.filter((a) => !a.community).map((a) => a.handle))
+  const nested = (a: ModAccountRow) => !!a.community && !!a.linkedTo && mains.has(a.linkedTo)
+  return data.value.accounts
+    .filter((a) => !nested(a))
+    .map((a) => ({ account: a, linked: a.community ? [] : data.value.accounts.filter((c) => nested(c) && c.linkedTo === a.handle) }))
+})
 const load = async () => {
   try {
     data.value = await $fetch<Overview>('/api/mod/overview')
@@ -92,31 +94,12 @@ const time = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-d
         <h2 class="border-b border-line px-5 py-3 text-sm font-semibold">Accounts</h2>
         <p v-if="!data.accounts.length" class="px-5 py-8 text-center text-sm text-muted">No accounts yet.</p>
         <ul class="divide-y divide-line">
-          <li v-for="a in data.accounts" :key="a.pseudonym" class="px-5 py-4">
-            <div class="flex items-center gap-3">
-              <UserAvatar :seed="a.handle" size="sm" />
-              <span class="min-w-0 flex-1 truncate text-sm font-semibold">u/{{ a.handle }}</span>
-              <button v-if="a.banned" class="btn-ghost" @click="unban(a.pseudonym)">Unban</button>
-              <button v-else class="btn-ghost !text-adult" @click="ban(a.pseudonym)">Ban</button>
+          <li v-for="g in groups" :key="g.account.pseudonym" class="px-5 py-4">
+            <ModAccount :account="g.account" @ban="ban" @unban="unban" />
+            <div v-if="g.linked.length" class="mt-3 ml-3 space-y-3 border-l-2 border-line pl-4">
+              <p class="text-[11px] font-semibold tracking-wide text-muted uppercase">Linked</p>
+              <ModAccount v-for="c in g.linked" :key="c.pseudonym" :account="c" nested @ban="ban" @unban="unban" />
             </div>
-            <dl class="mt-2 space-y-1 text-xs">
-              <div class="flex gap-2">
-                <dt class="w-20 shrink-0 text-muted">Pseudonym</dt>
-                <dd class="font-mono break-all">{{ a.pseudonym }}</dd>
-              </div>
-              <div class="flex gap-2">
-                <dt class="w-20 shrink-0 text-muted">Joined</dt>
-                <dd>{{ a.joinedAt }}</dd>
-              </div>
-              <div class="flex gap-2">
-                <dt class="w-20 shrink-0 text-muted">Age checks</dt>
-                <dd>{{ a.ageProofs.map((p) => p.label).join(', ') || 'None' }}</dd>
-              </div>
-              <div class="flex gap-2">
-                <dt class="w-20 shrink-0 text-muted">Status</dt>
-                <dd :class="a.banned ? 'font-semibold text-adult' : ''">{{ a.banned ? `Banned (${a.banned.reason})` : 'Active' }}</dd>
-              </div>
-            </dl>
           </li>
         </ul>
       </section>

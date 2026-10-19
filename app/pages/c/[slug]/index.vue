@@ -13,7 +13,8 @@ useHead(() => ({ title: community.value ? `${COMMUNITY_PREFIX}${community.value.
 <template>
   <div v-if="!community" class="card p-8 text-center text-muted">Community not found.</div>
   <div v-else class="space-y-4">
-    <CommunityHeader :community="community" :can-join="access === 'allow'" />
+    <!-- a community with its own pseudonym: joining is the wallet request, not a bookmark -->
+    <CommunityHeader :community="community" :can-join="access === 'allow' && !community.nymHost" />
     <div class="flex gap-6">
       <div class="min-w-0 flex-1 space-y-3">
         <template v-if="access === 'allow'">

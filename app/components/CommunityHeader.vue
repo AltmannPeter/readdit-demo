@@ -15,6 +15,7 @@ const { joined, toggle } = useJoined()
         <h1 class="flex items-center gap-2 text-2xl font-bold">
           {{ COMMUNITY_PREFIX }}{{ props.community.slug }}
           <AgeBadge v-if="props.community.gate" :gate="props.community.gate" />
+          <HumanBadge v-else-if="props.community.nymHost" />
         </h1>
         <p class="text-sm text-muted">{{ props.community.name }}</p>
       </div>

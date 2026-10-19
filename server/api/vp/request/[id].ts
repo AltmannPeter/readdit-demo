@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
   const { formats, tailored } = tailorFormats(s.offer, walletMetadata?.vp_formats_supported?.circuit_zk)
   const cfg = useRuntimeConfig(event)
   const request = buildRequestObject({
-    host: String(cfg.public.siteHost),
+    host: s.host,
     origin: s.origin,
     siteName: String(cfg.public.siteName),
     sessionId: s.id,

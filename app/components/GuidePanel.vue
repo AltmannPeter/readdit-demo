@@ -10,7 +10,7 @@ import { STAGES, guideStep } from '~/guide/steps'
 // (app/guide/steps.ts).
 const guide = useGuidePanel()
 const route = useRoute()
-const { account, bannedHandle } = useAccount()
+const { account, bannedHandle, memberships } = useAccount()
 const wallet = useWallet()
 const walletFlow = useWalletFlow()
 const dialogFlow = useDialogFlow()
@@ -47,6 +47,7 @@ const step = computed(() =>
     access: community.value ? access.value : null,
     account: account.value,
     bannedHandle: bannedHandle.value,
+    membership: community.value?.nymHost ? (memberships.value[community.value.slug] ?? null) : null,
     credentials: credentials.value,
   }),
 )

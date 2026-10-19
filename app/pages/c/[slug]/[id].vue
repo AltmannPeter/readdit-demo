@@ -9,7 +9,9 @@ const post = computed(() => {
   return p && p.community === community.value?.slug ? p : undefined
 })
 const { access } = useCommunityAccess(community)
-const { account, refresh } = useAccount()
+const { account, memberships, refresh } = useAccount()
+/** Who comments: the community account in a community with its own pseudonym, else the Readdit account. */
+const author = computed(() => (community.value?.nymHost ? memberships.value[community.value.slug]?.handle : account.value?.handle) ?? null)
 
 interface UserComment {
   id: string
@@ -85,13 +87,13 @@ useHead(() => ({ title: post.value ? `${post.value.title} · Readdit` : 'Readdit
               v-model="draft"
               rows="3"
               maxlength="2000"
-              :placeholder="account ? `Comment as u/${account.handle}` : 'Log in to comment'"
-              :disabled="!account"
+              :placeholder="author ? `Comment as u/${author}` : 'Log in to comment'"
+              :disabled="!author"
               class="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand disabled:bg-canvas"
             />
             <div class="mt-2 flex items-center justify-end gap-3">
               <p v-if="postError" class="text-sm text-adult" role="alert">{{ postError }}</p>
-              <button class="btn-primary" type="submit" :disabled="!account || !draft.trim() || posting">Comment</button>
+              <button class="btn-primary" type="submit" :disabled="!author || !draft.trim() || posting">Comment</button>
             </div>
           </form>
           <div class="mt-4 space-y-5">

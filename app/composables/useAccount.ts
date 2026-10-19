@@ -1,14 +1,17 @@
-import type { Account, AgeGate } from '#shared/types'
+import type { Account, AgeGate, CommunityMembership } from '#shared/types'
 
 interface Me {
   account: Account | null
   bannedHandle: string | null
+  /** Community accounts (communities with their own pseudonym) this browser can act as. */
+  communities: Record<string, CommunityMembership>
 }
 
 /** The logged-in account, kept by the server (GET /api/me). */
 export function useAccount() {
-  const me = useState<Me>('me', () => ({ account: null, bannedHandle: null }))
+  const me = useState<Me>('me', () => ({ account: null, bannedHandle: null, communities: {} }))
   const account = computed(() => me.value.account)
+  const memberships = computed(() => me.value.communities ?? {})
   const bannedHandle = computed(() => me.value.bannedHandle)
   const today = useToday()
 
@@ -23,7 +26,7 @@ export function useAccount() {
 
   async function signOut() {
     await $fetch('/api/logout', { method: 'POST' })
-    me.value = { account: null, bannedHandle: null }
+    me.value = { account: null, bannedHandle: null, communities: {} }
   }
 
   async function dismissBanNotice() {
@@ -36,5 +39,5 @@ export function useAccount() {
     return decideGate(gate, account.value?.birthDateRange ?? null, today.value)
   }
 
-  return { account, bannedHandle, refresh, signOut, dismissBanNotice, decide }
+  return { account, bannedHandle, memberships, refresh, signOut, dismissBanNotice, decide }
 }

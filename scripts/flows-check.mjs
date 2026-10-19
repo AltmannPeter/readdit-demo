@@ -6,8 +6,10 @@
 // error that is not one of the deliberate ones (ALLOWED, by status and route).
 // scripts/demo-flow.mjs stays the presentation order and its screenshots.
 //
-// The wallet holds two credentials (app/wallet/demo-wallet.json): the teen's (born 2011, the
-// default for every request) and an adult's (born 1990). Any PIN unlocks the wallet.
+// Two phones, one person each (app/wallet/holder.ts, PHONES): the teen's phone holds the teen's
+// credential (born 2011), the adult's phone the adult's (born 1990). The dialog shows one at a time;
+// Swap phone hands over while the QR code is on screen. Every dialog here picks its phone
+// explicitly (open). Any PIN unlocks the wallet.
 //
 // The server is started for this run with two settings; the run checks them first:
 //   NUXT_VP_SESSION_TTL_S=40        requests expire after 40 s, so the expiry paths take a minute
@@ -262,6 +264,11 @@ async function guideIs(id, timeout = 10_000) {
 }
 // textContent, not innerText: the guide's context line is uppercased by CSS.
 const guideSays = async (text) => check(`guide says "${text}"`, (await guidePanel().textContent()).includes(text))
+/** The guide comes to say `text` (after its step transition). */
+const guideComesToSay = async (text) => {
+  await page.waitForFunction((t) => document.querySelector('aside[data-guide-step]')?.textContent?.includes(t), text, { timeout: 5_000 }).catch(() => {})
+  return guideSays(text)
+}
 async function visible(what, locator, timeout = 10_000) {
   try {
     await locator.first().waitFor({ timeout })
@@ -297,9 +304,21 @@ async function expectVerification() {
   return check('guide: the verification time is shown', re.test(text), m ? `decoding ${m[1]}, verification ${m[2]}` : 'none')
 }
 
-async function open(button) {
+const TEEN = "Teen's phone"
+const ADULT = "Adult's phone"
+const phoneLabel = async () => ((await page.locator('[data-phone-label]').innerText()) ?? '').split('\n')[0].trim()
+/** Swap to the named phone if another is on screen, while the QR code is shown. */
+async function usePhone(name) {
+  if ((await phoneLabel()) === name) return
+  await page.getByRole('button', { name: 'Swap phone' }).click()
+  await page.locator('[data-phone-label]', { hasText: name }).waitFor()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+}
+/** Opens a wallet dialog with `button`, on the named phone. */
+async function open(button, phoneName = TEEN) {
   await button.click()
   await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  await usePhone(phoneName)
 }
 const headerButton = (name) => page.getByRole('banner').getByRole('button', { name, exact: true })
 /** The id of the session the dialog created after `before`. */
@@ -325,14 +344,6 @@ async function enterPin(pin) {
   for (const d of pin) await phone().getByRole('button', { name: d, exact: true }).click()
   await phone().getByRole('button', { name: 'Submit' }).click()
 }
-/** "Switch credential" on the phone, then the one other credential the popup offers. */
-async function switchCredential() {
-  await phone().getByRole('button', { name: /^Switch credential/ }).click()
-  await phone().getByText('Select the credential to use for this request.').waitFor()
-  await phone().getByRole('button', { name: /^Select credential/ }).click()
-  await phone().getByText('Select the credential to use for this request.').waitFor({ state: 'detached' })
-  await guideLeaves('switch-credential')
-}
 /** The guide has moved on from a step, its transition included. */
 async function guideLeaves(id) {
   await page.waitForFunction((x) => document.querySelector('aside[data-guide-step]')?.getAttribute('data-guide-step') !== x, id)
@@ -345,8 +356,8 @@ async function closeDialog(how = 'escape') {
   await dialog().waitFor({ state: 'detached', timeout: 10_000 })
 }
 /** Sign up or log in through the dialog, start to end, without screenshots. */
-async function signIn(name, expectText) {
-  await open(headerButton(name))
+async function signIn(name, expectText, phoneName = TEEN) {
+  await open(headerButton(name), phoneName)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -413,19 +424,18 @@ async function groupA() {
 
   begin('H4', 'browsing logged out: the home feed and an open community')
   await guideIs('start')
-  check('home feed: no post from an age-restricted community', !(await page.locator('a[href^="/c/teenspace/"], a[href^="/c/afterdark/"]').count()))
-  check('home feed: posts from open communities', (await page.locator('a[href^="/c/photography/"]').count()) > 0)
+  check('home feed: no posts when logged out', !(await page.locator('article').count()))
+  await pageShows('Log in to see posts')
   let m = mark()
   await goto('/c/photography')
   await pageShows('Log in to view c/photography')
   await guideIs('login-required')
   check('no wallet request', count(m, 'POST', '/api/vp/session') === 0)
 
-  begin('H4b', 'voting while logged out opens the log-in; closing it at the QR code')
+  begin('H4b', "the home page's Log in opens the log-in; closing it at the QR code")
   await goto('/')
   m = mark()
-  await page.getByRole('button', { name: 'Upvote' }).first().click()
-  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  await open(page.getByRole('main').getByRole('button', { name: 'Log in', exact: true }))
   await visible('dialog: "Log in to Readdit"', site().getByRole('heading', { name: 'Log in to Readdit' }))
   await guideIs('signin-qr')
   await guideSays('Log-in')
@@ -620,7 +630,7 @@ async function groupB(created) {
   await phoneShows('Requirement Not Met')
   await guideIs('unmet')
   await guideSays('born 14 Mar 2011')
-  check('the phone offers the other credential (Switch credential)', await phone().getByRole('button', { name: 'Switch credential' }).isVisible())
+  check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed')
   await guideIs('not-completed')
@@ -686,7 +696,7 @@ async function groupB(created) {
   await expectFresh('age-qr', before)
   await scan()
   await readRequest()
-  await phoneShows('Between 13 and 17')
+  await phoneShows('Age proof: 13–17')
   await guideIs('age-consent')
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
@@ -813,16 +823,19 @@ async function groupD(ttl) {
   await signIn('Sign up', 'Account created: u/')
   const handle = (await me()).account.handle
 
-  begin('S19', "the age proof comes from the wallet's other credential")
+  begin('S19', "the age proof comes from another person's phone, swapped in at the QR code")
   expectAnswer('server: a comment in c/teenspace before an age check', await call(page.request, 'POST', '/api/comments', { data: { postId: 'p10', body: 'hi' } }), 403, 'age_required')
   await goto('/c/afterdark')
   let m = mark()
-  await open(page.getByRole('button', { name: 'Verify age with wallet' }))
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await usePhone(ADULT)
+  await guideComesToSay('The phones were swapped')
+  check('the swap is recorded for the technical view (200)', has(m, 'POST', '/api/vp/session/:id/phone', 200))
+  await shot('30-afterdark-phone-swapped')
   await scan()
   await readRequest()
-  await phoneShows('Requirement Not Met')
-  await switchCredential()
   await phoneShows('Request to Share Data')
+  await phoneShows('Age proof: 18+')
   await guideSays('born 20 May 1990')
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
@@ -1314,7 +1327,7 @@ async function groupI() {
   await scan()
   await readRequest()
   await phoneShows('Pseudonym')
-  await phoneShows('Between 13 and 17')
+  await phoneShows('Age proof: 13–17')
   await guideIs('signin-age-consent')
   await guideSays('in one presentation')
   await shot('26-signin-age-consent')
@@ -1380,53 +1393,43 @@ async function groupJ() {
   await resetDemo()
   await openPage()
 
-  begin('C0', 'two credentials in the wallet')
-  await open(headerButton('Sign up'))
+  begin('C0', 'two phones, one credential each')
+  await open(headerButton('Sign up'), TEEN)
+  check('the dialog names the phone', (await phoneLabel()) === TEEN, await phoneLabel())
   await phone().getByRole('button', { name: 'Change view' }).click()
-  const cards = phone().getByRole('button', { name: /^Open Age and pseudonym details, birth date/ })
+  let cards = phone().getByRole('button', { name: /^Open Age and pseudonym details, birth date/ })
   await cards.first().waitFor()
-  const labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
-  check('two Age and pseudonym cards, told apart by their birth dates', labels.join(' | ') === 'Open Age and pseudonym details, birth date 14/03/2011 | Open Age and pseudonym details, birth date 20/05/1990', labels.join(' | '))
+  let labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  eq("the teen's phone holds the teen's credential only", labels.join(' | '), 'Open Age and pseudonym details, birth date 14/03/2011')
   check('no card shows an expiry date (the credentials do not expire)', !(await phone().getByText(/Expiry Date/).count()))
-  await shot('27-wallet-two-credentials')
-  await cards.nth(1).click()
-  await phoneShows('20/05/1990')
-  await guideIs('credential')
-  await guideSays('issued for a birth date of 20 May 1990')
-  await phone().getByRole('button', { name: 'Back' }).click()
-  await cards.nth(0).click()
+  await cards.first().click()
   await phoneShows('14/03/2011')
-  await guideSays('issued for a birth date of 14 Mar 2011')
+  await guideIs('credential')
+  await guideSays('one Age and pseudonym credential')
   await phone().getByRole('button', { name: 'Back' }).click()
+  await phone().getByRole('button', { name: 'Change view' }).click()
+  await usePhone(ADULT)
+  await phone().getByRole('button', { name: 'Change view' }).click()
+  cards = phone().getByRole('button', { name: /^Open Age and pseudonym details, birth date/ })
+  await cards.first().waitFor()
+  labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  eq("the adult's phone holds the adult's credential only", labels.join(' | '), 'Open Age and pseudonym details, birth date 20/05/1990')
+  await shot('27-adult-phone')
   await phone().getByRole('button', { name: 'Change view' }).click()
   await closeDialog('escape')
-  await signIn('Sign up', 'Account created: u/')
+  await signIn('Sign up', 'Account created: u/', TEEN)
   const teenAccount = (await me()).account
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
   await headerButton('Sign up').waitFor()
 
-  begin('C1 C6', 'sign-up with the adult credential, choosing it on the request screen both ways')
+  begin('C1', "sign-up on the adult's phone")
   let m = mark()
-  await open(headerButton('Sign up'))
+  await open(headerButton('Sign up'), ADULT)
   await scan()
   await readRequest()
-  await phoneShows('Birth Date: 14/03/2011')
-  await guideSays('born 14 Mar 2011')
-  await phone().getByRole('button', { name: /^Switch credential/ }).click()
-  await phone().getByText('Select the credential to use for this request.').waitFor()
-  await guideIs('switch-credential')
-  await shot('28-switch-credential')
-  await phone().getByRole('button', { name: /^Select credential/ }).click()
-  await phoneShows('Birth Date: 20/05/1990')
-  await guideLeaves('switch-credential')
-  await guideIs('consent')
-  await guideSays('UsedAge and pseudonym, born 20 May 1990')
-  await switchCredential()
-  await phoneShows('Birth Date: 14/03/2011')
-  await guideSays('Used' + 'Age and pseudonym, born 14 Mar 2011')
-  await switchCredential()
-  await phoneShows('Birth Date: 20/05/1990')
+  await guideSays('born 20 May 1990')
+  await guideSays(ADULT)
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
@@ -1436,16 +1439,14 @@ async function groupJ() {
   check('a new account with another pseudonym', adultAccount.pseudonym !== teenAccount.pseudonym && adultAccount.handle !== teenAccount.handle, `u/${adultAccount.handle} vs u/${teenAccount.handle}`)
   eq('two accounts', (await accounts()).length, 2)
 
-  begin('C2', 'c/afterdark with the adult credential, logged in')
+  begin('C2', "c/afterdark on the adult's phone, logged in")
   await goto('/c/afterdark')
   await guideIs('age-ask')
   m = mark()
-  await open(page.getByRole('button', { name: 'Verify age with wallet' }))
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
   await scan()
   await readRequest()
-  await phoneShows('Requirement Not Met')
-  await switchCredential()
-  await phoneShows('18 or older')
+  await phoneShows('Age proof: 18+')
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await site().getByText('Age verified').waitFor({ timeout: 30_000 })
@@ -1456,21 +1457,19 @@ async function groupJ() {
   await shot('29-afterdark-granted-adult')
   check('the adult account has an 18+ range', !!(await me()).account.birthDateRange?.le)
 
-  begin('C3', 'c/teenspace with the adult credential: Requirement Not Met')
+  begin('C3', "c/teenspace on the adult's phone: Requirement Not Met")
   await goto('/c/teenspace')
   await guideIs('age-refused')
   check('the site refuses without a request, from the 18+ range', (await page.getByText("You can't enter c/teenspace").count()) === 1)
-  // Logged out, the combined request lets the adult credential try c/teenspace.
+  // Logged out, the combined request lets the adult's phone try c/teenspace.
   await page.getByRole('banner').getByText(`u/${adultAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
   await headerButton('Log in').waitFor()
   await goto('/c/teenspace')
   m = mark()
-  await open(page.getByRole('button', { name: 'Verify age with wallet' }))
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
   await scan()
   await readRequest()
-  await phoneShows('Request to Share Data')
-  await switchCredential()
   await phoneShows('Requirement Not Met')
   await guideIs('unmet')
   await guideSays('born 20 May 1990')
@@ -1481,14 +1480,12 @@ async function groupJ() {
   check('still logged out', (await me()).account === null)
   await closeDialog('escape')
 
-  begin('C2b', 'c/afterdark with the adult credential, logged out (one request)')
+  begin('C2b', "c/afterdark on the adult's phone, logged out (one request)")
   await goto('/c/afterdark')
   await guideIs('age-signin')
-  await open(page.getByRole('button', { name: 'Verify age with wallet' }))
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
   await scan()
   await readRequest()
-  await phoneShows('Requirement Not Met')
-  await switchCredential()
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Age verified', 30_000)
@@ -1504,15 +1501,14 @@ async function groupJ() {
   await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await goto('/')
-  await signIn('Log in', `Logged in as u/${teenAccount.handle}`)
+  await signIn('Log in', `Logged in as u/${teenAccount.handle}`, TEEN)
   check('the teen account logs in', (await me()).account?.handle === teenAccount.handle)
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
   await headerButton('Log in').waitFor()
-  await open(headerButton('Log in'))
+  await open(headerButton('Log in'), ADULT)
   await scan()
   await readRequest()
-  await switchCredential()
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Account banned', 30_000)
@@ -1535,6 +1531,211 @@ async function groupG() {
   await tech.close()
 }
 
+
+// ---- K. A community with its own pseudonym: c/france ----
+
+/** One c/france request over HTTP with `wallet`, completed by `ctx`'s browser session. */
+async function joinOverHttp(ctx, wallet, link = true) {
+  const s = await newSession(ctx, { purpose: 'community', community: 'france', link })
+  const request = await fetchRequest(ctx, s)
+  const p = await present(ctx, request, wallet)
+  await respond(ctx, request, vpForm(request, p.presentation))
+  return { request, completion: (await complete(ctx, s.id)).body }
+}
+
+async function groupK() {
+  await resetDemo()
+  await openPage()
+
+  begin('K1', 'c/france logged out: join with its own pseudonym, without a Readdit account')
+  await goto('/c/france')
+  await pageShows('c/france asks for proof of human')
+  await guideIs('community-join')
+  await guideSays('No Readdit account is needed')
+  check('no c/france posts before joining', !(await page.locator('a[href^="/c/france/p"]').count()))
+  let m = mark()
+  await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
+  await guideIs('community-qr')
+  await guideSays('x509_san_dns:france.readdit.example')
+  await scan()
+  await readRequest()
+  await phoneShows('france.readdit.example')
+  await phoneShows('Specific to france.readdit.example')
+  await guideIs('community-consent')
+  await shot('31-france-consent')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Joined c/france as u/…"', site().getByText(/^Joined c\/france as u\//), 30_000)
+  await guideIs('community-created')
+  await expectVerification()
+  let done = (await complete(page.request, lastSession())).body
+  check('server: created, not linked', done.ok === true && done.kind === 'created' && done.community === 'france' && !done.linked, JSON.stringify(done))
+  check('the presentation was verified (vp_token 200)', has(m, 'POST', '/api/vp/response/:id', 200, 'vp_token'))
+  await closeFromPhone()
+  check('c/france posts shown', (await page.locator('a[href^="/c/france/p"]').count()) > 0)
+  await guideIs('community-member')
+  check('no Readdit account', (await me()).account === null)
+  const frTeen = (await me()).communities.france
+  eq('the c/france account', frTeen?.handle, done.handle)
+  await visible('header: the c/france account', page.getByRole('banner').getByText(`u/${frTeen.handle}`))
+  await visible('header: marked c/france', page.getByRole('banner').getByText('c/france', { exact: true }))
+  check('header: no Sign up', !(await headerButton('Sign up').count()))
+
+  begin('K2', 'a comment in c/france is the c/france account’s')
+  await goto('/c/france/p22')
+  eq('comment box', await page.locator('textarea').getAttribute('placeholder'), `Comment as u/${frTeen.handle}`)
+  await page.locator('textarea').fill('Same in our town.')
+  await page.getByRole('button', { name: 'Comment', exact: true }).click()
+  await pageShows('Same in our town.')
+  let list = await accounts()
+  const frRecord = list.find((a) => a.handle === frTeen.handle)
+  check('stored as a c/france account, not linked', frRecord?.community === 'france' && frRecord.linkedTo === null, JSON.stringify(frRecord))
+  expectAnswer('server: a comment in c/france without a c/france account', await call(await client(), 'POST', '/api/comments', { data: { postId: 'p22', body: 'hi' } }), 403, 'registration_required')
+
+  begin('K3', 'logged in to Readdit, joining c/france is a choice: link, or log out first')
+  await goto('/')
+  // The home page's Sign up: the header shows the c/france account instead of the buttons.
+  await open(page.getByRole('main').getByRole('button', { name: 'Sign up', exact: true }), TEEN)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  await closeFromPhone()
+  const teenMain = (await me()).account
+  check('logged in: no c/france membership until linked', !(await me()).communities.france)
+  check('the Readdit pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
+  await goto('/c/france')
+  await guideIs('community-join')
+  await guideSays('join and link the two, or log out and join separately')
+  await visible('page: logged in as …', page.getByText(`You are logged in as u/${teenMain.handle}.`))
+  check('no plain Join with wallet while logged in', !(await page.getByRole('button', { name: 'Join with wallet' }).count()))
+  await visible('Log out and join separately', page.getByRole('button', { name: 'Log out and join separately' }))
+  await shot('32-france-link-choice')
+  m = mark()
+  await open(page.getByRole('button', { name: `Join and link to u/${teenMain.handle}` }), TEEN)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows(`In c/france as u/${frTeen.handle}`, 30_000)
+  await dialogShows('Linked to your Readdit account.')
+  await guideIs('community-linked')
+  done = (await complete(page.request, lastSession())).body
+  check('server: logged in and linked', done.ok === true && done.kind === 'logged_in' && done.linked === true, JSON.stringify(done))
+  await closeFromPhone()
+  check('linked', (await me()).communities.france?.linked === true)
+  await guideIs('community-member')
+
+  begin('K4', 'one c/france account per Readdit account, one Readdit account per c/france account')
+  const ctx = await client()
+  {
+    // Log in with the teen's Readdit account, linked in K3.
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+    const request = await fetchRequest(ctx, s)
+    const p = await present(ctx, request, teen)
+    await respond(ctx, request, vpForm(request, p.presentation))
+    eq("the teen's Readdit account logs in", (await complete(ctx, s.id)).body.kind, 'logged_in')
+  }
+  expectAnswer('server: logged in, a join must choose to link', await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'france' } }), 400, 'link_required')
+  let r = await joinOverHttp(ctx, adult)
+  eq("the request's client_id", r.request.client_id, 'x509_san_dns:france.readdit.example')
+  eq("the adult's wallet for the teen's account", r.completion, { ok: false, kind: 'other_pseudonym', handle: frTeen.handle, community: 'france' })
+  const ctx2 = await client()
+  await signInOverHttp(ctx2, adult)
+  r = await joinOverHttp(ctx2, teen)
+  check("the teen's c/france account for the adult's Readdit account: refused", r.completion.ok === false && r.completion.kind === 'linked_elsewhere', JSON.stringify(r.completion))
+  r = await joinOverHttp(ctx2, adult)
+  check("the adult's own c/france account: created and linked", r.completion.ok === true && r.completion.kind === 'created' && r.completion.linked === true, JSON.stringify(r.completion))
+  expectAnswer('server: a community without its own pseudonym', await call(ctx2, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'photography' } }), 400, 'bad_request')
+  await ctx.dispose()
+  await ctx2.dispose()
+  list = await accounts()
+  eq('four accounts: two Readdit, two c/france', list.map((a) => (a.community ? 'c' : 'r')).sort().join(''), 'ccrr')
+  {
+    // /mod groups each c/france account under the Readdit account it is linked to.
+    const mod = await ctxBrowser.newPage()
+    await mod.goto('/mod')
+    const groups = mod.locator('section').filter({ has: mod.getByRole('heading', { name: 'Accounts' }) }).locator(':scope > ul > li')
+    await groups.filter({ hasText: `u/${frTeen.handle}` }).waitFor()
+    eq('/mod: two groups', await groups.count(), 2)
+    const teenGroup = groups.filter({ hasText: `u/${teenMain.handle}` })
+    check("/mod: the teen's c/france account under the teen's Readdit account", (await teenGroup.count()) === 1 && (await teenGroup.getByText(`u/${frTeen.handle}`).count()) === 1)
+    await mod.close()
+  }
+
+  begin('K5', 'a ban in c/france leaves the Readdit account')
+  const mod = await client()
+  await call(mod, 'POST', '/api/mod/ban', { data: { pseudonym: frRecord.pseudonym } })
+  await mod.dispose()
+  await goto('/c/france')
+  await pageShows('Your c/france account is banned')
+  await guideIs('community-banned')
+  eq('the Readdit account is still logged in', (await me()).account?.handle, teenMain.handle)
+  await goto('/c/france/p22')
+  check('the banned account’s comment is hidden', !(await page.getByText('Same in our town.').count()))
+  await page.getByRole('banner').getByText(`u/${teenMain.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await headerButton('Log in').waitFor()
+  await goto('/c/france')
+  await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Account banned', 30_000)
+  await guideIs('community-ban-refused')
+  await closeDialog('button')
+  const mod2 = await client()
+  await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: frRecord.pseudonym } })
+
+  begin('K6', 'a ban of the Readdit account bans its linked c/france account; unbanning lifts both')
+  list = await accounts()
+  const adultMain = list.find((a) => !a.community && a.handle !== teenMain.handle)
+  const adultFr = list.find((a) => a.community === 'france' && a.linkedTo === adultMain?.handle)
+  check('the c/france ban is lifted', !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
+  await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: teenMain.pseudonym } })
+  list = await accounts()
+  const frBanned = list.find((a) => a.pseudonym === frRecord.pseudonym).banned
+  check('the linked c/france account is banned with it', frBanned?.cascade === true && frBanned.reason === `Readdit account u/${teenMain.handle} banned`, JSON.stringify(frBanned))
+  check("the adult's accounts are untouched", !list.find((a) => a.handle === adultMain.handle).banned && !list.find((a) => a.handle === adultFr.handle).banned)
+  await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultFr.pseudonym } })
+  check("a c/france ban leaves the adult's Readdit account", !(await accounts()).find((a) => a.handle === adultMain.handle).banned)
+  await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: teenMain.pseudonym } })
+  list = await accounts()
+  check('unbanning the Readdit account lifts the cascaded ban', !list.find((a) => a.handle === teenMain.handle).banned && !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
+  check("but not a c/france account's own ban", !!list.find((a) => a.handle === adultFr.handle).banned)
+  // A banned c/france account stays banned when its Readdit account is banned and unbanned.
+  await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultMain.pseudonym } })
+  await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: adultMain.pseudonym } })
+  check("the c/france account's own ban survives", (await accounts()).find((a) => a.handle === adultFr.handle).banned?.reason === 'Community rules')
+  await mod2.dispose()
+
+  begin('K7', 'logged in, "Log out and join separately" joins without linking')
+  await resetDemo()
+  await openPage()
+  await goto('/')
+  await signIn('Sign up', /^Account created: u\//)
+  const teenMain2 = (await me()).account
+  await goto('/c/france')
+  await guideIs('community-join')
+  await open(page.getByRole('button', { name: 'Log out and join separately' }), TEEN)
+  check('logged out of Readdit', (await me()).account === null)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Joined c/france as u/…"', site().getByText(/^Joined c\/france as u\//), 30_000)
+  await guideIs('community-created')
+  done = (await complete(page.request, lastSession())).body
+  check('server: created, not linked', done.ok === true && done.kind === 'created' && !done.linked, JSON.stringify(done))
+  await closeFromPhone()
+  const sep = await me()
+  check('a c/france member, not linked, not logged in to Readdit', sep.account === null && sep.communities.france?.linked === false, JSON.stringify(sep))
+  check('stored unlinked', (await accounts()).find((a) => a.handle === done.handle)?.linkedTo === null)
+  check('the Readdit account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
+}
+
 // ---------------------------------------------------------------------------------------------
 
 let crashed = null
@@ -1550,6 +1751,7 @@ try {
   await groupH()
   await groupI()
   await groupJ()
+  await groupK()
   await groupG()
 } catch (e) {
   crashed = e

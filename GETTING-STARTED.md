@@ -69,8 +69,14 @@ archive (`native/vega`).
 ## 2. The site view
 
 **http://localhost:3000** is Readdit as the audience sees it, with the guide panel on the right.
-Log in, sign up and age checks open a dialog with a QR code on the left and the person's phone on
-the right.
+Log in, sign up and age checks open a dialog with a QR code on the left and a phone on the right.
+
+**Two phones.** The demo has two people, each with their own phone: **Teen's phone** (born 14 March
+2011) and **Adult's phone** (born 20 May 1990), one "Age and pseudonym" credential each. The dialog
+shows one phone, named above it with its owner's age, in its own frame colour (grey or red).
+**Swap phone** hands over to the other one while the QR code is on screen, for example to show
+someone borrowing another person's phone. The chosen phone stays until you swap again; reloading the
+page starts on the teen's phone.
 
 Logged out, the home page and the open communities show no posts, only a short note on how
 Readdit accounts work, with **Sign up** and **Log in**.
@@ -88,8 +94,7 @@ On the phone (SIROS ID), the screens and their wording follow the SIROS ID walle
   **Pseudonym**, specific to the site, with what that means: personal data is not shared, no
   tracking across sites, the site can recognize the account, the issuer may be able to reveal
   the identity.
-  **Share** accepts; **Decline** declines, and nothing is shared. **Switch credential**
-  chooses the wallet's other credential (see below).
+  **Share** accepts; **Decline** declines, and nothing is shared.
 - **Enter the Pin:** any 6 digits, then **Submit**. You can tap the digits or type them. Any PIN
   unlocks the wallet in this demo, and none leaves the phone.
 - While proving and sending, the phone shows "Creating presentation...", then "Sending
@@ -97,7 +102,7 @@ On the phone (SIROS ID), the screens and their wording follow the SIROS ID walle
 - **Cancel** at the PIN declines as **Decline** does: "Sharing Cancelled", and nothing is shared.
 - A QR code works once and for 10 minutes. Scanning it again, or after it expired, shows
   "Request Expired"; the dialog's **Try again** shows a new one.
-- **The "Age and pseudonym" cards** show each holder's birth date, and open the credential: birth
+- **The "Age and pseudonym" card** shows the holder's birth date, and opens the credential: birth
   date, issuance date, and **Presentations**, the list of presentations made with it. The
   credentials do not expire, so no expiry date is shown.
 
@@ -109,23 +114,28 @@ it, all on this machine), and what Readdit checks. All of it is derived from the
 The panel's button at the top right collapses it to a narrow strip; the browser remembers the
 choice. Its footer links to the technical and moderation views.
 
-The wallet holds two "Age and pseudonym" credentials, told apart by colour (grey and red) and by
-the birth date on each card:
-the demo person's, 15 years old (born 14 March 2011), and an adult's (born 20 May 1990). A request
-uses the credential shown on the wallet's home screen. Each has its own secret seed, so
-each gives Readdit a different pseudonym and so a different account. When both match a request,
-**Switch credential** on the request screen, or on "Requirement Not Met", chooses the other one.
+Each credential has its own secret seed, so each phone gives Readdit a different pseudonym and so a
+different account. The guide names the phone in use at every step.
 
 Communities:
 
 - **Open communities** (c/photography, c/cooking and others) need only a login.
-- **c/teenspace** is for ages 13–17. The demo person gets in; the adult credential meets
+- **c/teenspace** is for ages 13–17. The teen's phone gets in; the adult's phone meets
   "Requirement Not Met".
-- **c/afterdark** is for ages 18+. With the demo person's credential the wallet shows "Requirement
-  Not Met", and nothing is shared. With the adult credential (**Switch credential**, or shown on the
-  home screen before scanning) the wallet makes the proof, but Readdit rejects it when you are logged
-  in with the demo person's account ("Pseudonym does not match"). Logged out, or logged in with the
-  adult's account, you get in.
+- **c/afterdark** is for ages 18+. On the teen's phone the wallet shows "Requirement Not Met", and
+  nothing is shared. Swap to the adult's phone at the QR code: it makes the proof, but Readdit rejects
+  it when you are logged in with the teen's account ("Pseudonym does not match"). Logged out, or
+  logged in with the adult's account, you get in.
+- **c/france** (badge "Proof of human") is about French politics and society and wants real people,
+  no bots. It has its own pseudonym: **Join with wallet** asks for a pseudonym for
+  `france.readdit.example`, so each person gets one c/france account, not linked to their Readdit
+  account unless they choose to (only the issuer could link it otherwise). No age limit and no Readdit account needed. Posts and comments
+  there are visible only with a c/france account, and appear under the c/france pseudonym. Logged in
+  to Readdit, you choose: **Join and link to u/…**, or **Log out and join separately**. A Readdit
+  account can be linked to one c/france account only, and the other way round. A ban in c/france
+  does not touch the Readdit account; a ban of the Readdit account also bans the linked c/france
+  account, and unbanning lifts both.
+  With only a c/france account, the header shows it with a "c/france" mark.
 - **Logged out**, an age-restricted community shows its age requirement and **Verify age with
   wallet**. That one request asks for the pseudonym and the age range together: it creates the
   account or logs in to it, and records the age. If the requirement is not met, nothing is shared
@@ -139,7 +149,8 @@ Logged-in users can vote, join communities and comment.
 ## 3. The technical view
 
 **http://localhost:3000/tech** updates live while you use the site. It shows the newest wallet
-session; the chips under the service cards select earlier ones.
+session; the chips under the service cards select earlier ones, and name the phone that was on
+screen.
 
 - **Badge (top right).** "Vega addon, in process", or "Vega addon not loaded" (only the
   development server keeps running without the addon; see section 6).
@@ -173,7 +184,8 @@ session; the chips under the service cards select earlier ones.
 
 - **Recent comments.** Each comment has a **Ban user** button.
 - **Accounts.** Every account with its pseudonym (all Readdit knows about it), join date, age checks
-  passed and status, with **Ban** or **Unban**.
+  passed and status, with **Ban** or **Unban**. A c/france account linked to a Readdit account is
+  listed under it; an unlinked one stands on its own.
 - **Reset demo** (top right). Click it twice to clear all accounts, bans, comments and sessions.
   An open wallet dialog then says "This code is no longer valid. Try again."
 
@@ -183,17 +195,22 @@ gives Readdit the same pseudonym.
 
 ## 5. A full run through all three views
 
-1. **Site:** sign up (scan, **Share**, any 6-digit PIN, **Close** on the phone). You get a pseudonym
-   such as `u/golden-lynx-8604`.
+1. **Site:** sign up on the teen's phone (scan, **Share**, any 6-digit PIN, **Close** on the phone).
+   You get a pseudonym such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
 2. **Site:** open c/afterdark. The phone says the requirement is not met. **Technical:** the
    session ends with an error response, and no proof is created.
-3. **Site:** open c/teenspace and verify. You get in. **Technical:** the request now holds a
-   pseudonym and an age range, and the outputs are the same pseudonym and `true`.
-4. **Site:** open c/afterdark again. Readdit refuses on its own, without asking the wallet.
-5. **Site:** comment on a c/teenspace post. **Moderation:** click **Ban user** on that comment.
+3. **Site:** **Try again**, then **Swap phone** to the adult's phone, and share. Readdit says
+   "Pseudonym does not match": the proof is valid, but it is not the teen's account's.
+   **Technical:** the session shows the swap and a verified proof that was not applied.
+4. **Site:** open c/teenspace and verify on the teen's phone. You get in. **Technical:** the request
+   now holds a pseudonym and an age range, and the outputs are the same pseudonym and `true`.
+5. **Site:** open c/afterdark again. Readdit refuses on its own, without asking the wallet.
+6. **Site:** open c/france and **Join and link to u/…** on the teen's phone. The request's client_id is
+   `x509_san_dns:france.readdit.example`; you get a second pseudonym, linked to your account.
+7. **Site:** comment on a c/teenspace post. **Moderation:** click **Ban user** on that comment.
    **Site:** the ban notice appears.
-6. **Site:** sign up again with the same wallet. Readdit shows "Account banned". **Moderation:**
+8. **Site:** sign up again with the same wallet. Readdit shows "Account banned". **Moderation:**
    it is still the same single account.
 
 **Start over:** in the moderation view, click **Reset demo** twice, then reload the site window.

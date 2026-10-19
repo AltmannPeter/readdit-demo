@@ -2,11 +2,18 @@ import type { Account, AgeGate } from '#shared/types'
 import type { CircuitZkCredentialQuery, CircuitZkFormats, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
 
 /**
- * signin: `signup` creates the account or logs in to an existing one; `login` only logs in. With
- * `community` (a logged-out visitor at an age-restricted community) the same request also proves
- * the community's age range, and the completion records it.
+ * signin: `signup` creates the account; `login` only logs in. With `community` (a logged-out
+ * visitor at an age-restricted community) the same request also proves the community's age range,
+ * and the completion records it (and creates the account or logs in to it).
+ * community: the pseudonym of a community with its own pseudonym (Community.nymHost): creates the
+ * community account or logs in to it. With `link` (the person chose "Join and link" while logged
+ * in), it also links it to the logged-in Readdit account; logged in, `link` is required (the other
+ * choice logs out first).
  */
-export type VpPurpose = { kind: 'signin'; intent: 'signup' | 'login'; community?: string } | { kind: 'age'; community: string }
+export type VpPurpose =
+  | { kind: 'signin'; intent: 'signup' | 'login'; community?: string }
+  | { kind: 'age'; community: string }
+  | { kind: 'community'; community: string; link: boolean }
 
 export type VpStatus = 'waiting' | 'scanned' | 'responded' | 'verified' | 'failed' | 'completed'
 
@@ -14,7 +21,20 @@ export type VpStatus = 'waiting' | 'scanned' | 'responded' | 'verified' | 'faile
 export type FailReason = 'denied' | 'invalid_request' | 'invalid' | 'unavailable' | 'expired' | 'cancelled'
 
 /** How a verified session was applied, or why it was not. */
-export type CompletionKind = 'created' | 'logged_in' | 'age' | 'banned' | 'mismatch' | 'no_account' | 'account_exists' | 'logged_out' | FailReason
+export type CompletionKind =
+  | 'created'
+  | 'logged_in'
+  | 'age'
+  | 'banned'
+  | 'mismatch'
+  | 'no_account'
+  | 'account_exists'
+  | 'logged_out'
+  /** community: the logged-in account is linked to another pseudonym of this community. */
+  | 'other_pseudonym'
+  /** community: this community account is linked to another Readdit account. */
+  | 'linked_elsewhere'
+  | FailReason
 
 export interface TraceEvent {
   at: number
@@ -28,6 +48,10 @@ export interface VpSessionRecord {
   purpose: VpPurpose
   gate?: AgeGate
   ownerSid: string
+  /** The DNS name of the verifier identity: client_id x509_san_dns:<host>. */
+  host: string
+  /** The demo phone on screen (the site's dialog reports swaps), for the technical view. */
+  phone?: string
   createdAt: number
   expiresAt: number
   origin: string
@@ -45,12 +69,17 @@ export interface VpSessionRecord {
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
   outcome?: { ok: true; circuitId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
   /** `age`: the session's age proof was recorded for the account. */
-  completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true }
+  completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
 }
 
 export interface AccountRecord extends Account {
-  banned?: { at: string; reason: string }
+  /** `cascade`: set by the ban of the Readdit account this community account is linked to. */
+  banned?: { at: string; reason: string; cascade?: true }
+  /** A community account: the community with its own pseudonym. Absent: a Readdit account. */
+  community?: string
+  /** A community account linked to this Readdit account's pseudonym. */
+  linkedTo?: string
 }
 
 export interface UserComment {

@@ -6,9 +6,11 @@
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
 //        (needs: npm i --no-save playwright && npx playwright install chromium)
 //
-// Order: sign-up (QR, credential, scan, consent, PIN, proving, success), an open community,
-// c/afterdark (requirement not met), c/teenspace (age range granted), c/afterdark refused by the
-// site, a comment, the ban from /mod, the second sign-up ending in "Account banned", and /tech.
+// Order: sign-up on the teen's phone (QR, credential, scan, consent, PIN, proving, success), an
+// open community, c/afterdark (requirement not met; then the adult's phone swapped in at the QR
+// code, refused with "Pseudonym does not match"), c/teenspace (age range granted), c/afterdark
+// refused by the site, c/france joined with its own pseudonym (linked), a comment, the ban from
+// /mod, the second sign-up ending in "Account banned", and /tech.
 // At each step it checks that the guide panel shows the matching step.
 // Exits 1 on a console error or when a step does not reach its expected state.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
@@ -86,6 +88,15 @@ const scan = async () => {
   await phone.getByText('Scan the QR Code').waitFor()
 }
 const readRequest = async () => phone.getByText(/Request to Share Data|Requirement Not Met|Unsupported Request/).waitFor({ timeout: 20_000 })
+/** Swap to the named phone while the QR code is on screen ("Teen's phone", "Adult's phone"). */
+const usePhone = async (name) => {
+  const label = page.locator('[data-phone-label]')
+  if ((await label.innerText()).startsWith(name)) return
+  await page.getByRole('button', { name: 'Swap phone' }).click()
+  await label.filter({ hasText: name }).waitFor()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await page.waitForTimeout(400) // the swap animation
+}
 const enterPin = async (pin) => {
   for (const d of pin) await phone.getByRole('button', { name: d, exact: true }).click()
   await phone.getByRole('button', { name: 'Submit' }).click()
@@ -101,6 +112,7 @@ try {
   await guide('start')
   await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
   await phone.getByText('Age and pseudonym').first().waitFor()
   await guide('signin-qr')
   await shot('signup-qr')
@@ -166,6 +178,25 @@ try {
   await page.getByText('Not completed').waitFor()
   await guide('not-completed')
   await shot('afterdark-not-completed')
+
+  // 3b. Borrowing the adult's phone: swapped in at the QR code, it proves 18+, but its pseudonym
+  // is not the logged-in account's, so Readdit rejects the presentation.
+  step('3b. c/afterdark with the adult\'s phone')
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await guide('age-qr')
+  await usePhone("Adult's phone")
+  await guidePanel.getByText('The phones were swapped').waitFor()
+  await shot('afterdark-phone-swapped')
+  await scan()
+  await readRequest()
+  await phone.getByText('Age proof: 18+').waitFor()
+  await guide('age-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText('Pseudonym does not match').waitFor({ timeout: 30_000 })
+  await guide('mismatch')
+  await shot('afterdark-pseudonym-does-not-match')
   await page.keyboard.press('Escape')
   await page.getByRole('dialog').waitFor({ state: 'detached' })
 
@@ -173,9 +204,11 @@ try {
   step('4. c/teenspace')
   await page.click('a[href="/c/teenspace"]')
   await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
   await scan()
   await readRequest()
-  await phone.getByText('Between 13 and 17').waitFor()
+  await phone.getByText('Age proof: 13–17').waitFor()
   await guide('age-consent')
   await openDetails()
   await shot('teenspace-consent')
@@ -196,6 +229,33 @@ try {
   await guide('age-refused')
   await openDetails()
   await shot('afterdark-refused-by-readdit')
+
+  // 5b. c/france: its own pseudonym, one account per person, linked to the logged-in account.
+  step('5b. c/france')
+  await page.click('a[href="/c/france"]')
+  const joinAndLink = page.getByRole('button', { name: /^Join and link to u\// })
+  await joinAndLink.waitFor()
+  await guide('community-join')
+  await openDetails()
+  await shot('france-join')
+  await joinAndLink.click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
+  await guide('community-qr')
+  await scan()
+  await readRequest()
+  await guide('community-consent')
+  await shot('france-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await phone.getByText('Success!').waitFor({ timeout: 30_000 })
+  await page.getByText(/^Joined c\/france as u\//).waitFor({ timeout: 30_000 })
+  await guide('community-linked')
+  await shot('france-joined')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 30_000 })
+  await guide('community-member')
+  await shot('france-member')
 
   // 6. A comment, then the moderator bans the account.
   step('6. comment and ban')
@@ -229,6 +289,8 @@ try {
   // 7. The same wallet signs up again: the same pseudonym, so "Account banned".
   step('7. second sign-up')
   await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
   await guide('signin-qr')
   await guidePanel.getByText('Sign-up after the ban').waitFor()
   await scan()
@@ -258,10 +320,10 @@ console.log(`phone traffic:\n  ${net.join('\n  ')}`)
 // The use cases, as the phone's traffic shows them.
 const count = (line) => net.filter((l) => l === line).length
 const expect = [
-  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 3],
-  ['c/afterdark: the wallet answers access_denied, once', count('response_uri error=access_denied 200') === 1],
-  ['three presentations proved: sign-up, c/teenspace, the second sign-up', count('/api/wallet/prove 200') === 3],
-  ['three vp_token responses', count('response_uri vp_token 200') === 3],
+  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 5],
+  ["c/afterdark on the teen's phone: the wallet answers access_denied, once", count('response_uri error=access_denied 200') === 1],
+  ["five presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up", count('/api/wallet/prove 200') === 5],
+  ['five vp_token responses', count('response_uri vp_token 200') === 5],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)
