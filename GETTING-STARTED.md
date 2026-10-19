@@ -83,11 +83,11 @@ account" and offers **Sign up**.
 On the phone (SIROS ID), the screens and their wording follow the SIROS ID wallet:
 
 - **The round QR button** at the bottom reads the code on screen.
-- **Request to Share Data** shows the requester (name and domain) and the requested information
-  in the credential's box, in the credential's colour, one card per item: **Age proof**, when the
-  site asks (the range or threshold; the date of birth is not shared), and **Pseudonym** (specific
-  to the site, with what that means: no tracking across sites, Readdit recognizes the account,
-  Readdit does not learn the real identity, the issuer can reveal it).
+- **Request to Share Data** shows the requester's domain and one card per item requested:
+  **Age proof** with the range or threshold (`Age proof: 13–17`), when the site asks, and
+  **Pseudonym**, specific to the site, with what that means: personal data is not shared, no
+  tracking across sites, the site can recognize the account, the issuer may be able to reveal
+  the identity.
   **Share** accepts; **Decline** declines, and nothing is shared. **Switch credential**
   chooses the wallet's other credential (see below).
 - **Enter the Pin:** any 6 digits, then **Submit**. You can tap the digits or type them. Any PIN

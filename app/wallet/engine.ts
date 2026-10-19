@@ -121,6 +121,13 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
   return view
 }
 
+/** "13–17", "18+", "under 18": the age range in a request screen title. */
+export function ageShort(item: { minAge?: number; maxAge?: number }): string {
+  if (item.minAge != null && item.maxAge != null) return `${item.minAge}–${item.maxAge}`
+  if (item.minAge != null) return `${item.minAge}+`
+  return `under ${item.maxAge! + 1}`
+}
+
 /** "between 13 and 17", "18 or older", "under 18". */
 export function ageText(item: { minAge?: number; maxAge?: number }): string {
   if (item.minAge != null && item.maxAge != null) return `between ${item.minAge} and ${item.maxAge}`
@@ -128,7 +135,6 @@ export function ageText(item: { minAge?: number; maxAge?: number }): string {
   return `under ${item.maxAge! + 1}`
 }
 
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export function fmtDate(iso: string): string {
   return new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -151,7 +157,7 @@ export interface ConsentView {
   /** The credential the presentation is made from: its position in the wallet and its label. */
   credential: { index: number; label: string }
   /** The request screen's "Requested Information", in product wording. */
-  fields: Array<{ kind: 'pseudonym' | 'age'; name: string; value: string; notes?: string[] }>
+  fields: Array<{ kind: 'pseudonym' | 'age'; name: string; value?: string; notes?: string[] }>
   /** The pseudonym this request discloses, computed by the wallet as the circuit will, with the
    *  rulebook's properties of the requested configuration. */
   pseudonym?: { handle: string; config: PseudonymConfig; verifierId: string; value: string; properties: string[] }
@@ -193,17 +199,18 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
       )
       out.pseudonym = { handle: item.handle, config: item.config, verifierId, value, properties }
       // What the configuration means for the person (rulebook properties, CONFIG_PROPERTIES).
-      const notes: string[] = []
+      // Each fits on one line at the phone's width.
+      const notes = ['Your personal data will not be shared']
       if (p.distinctPerVerifier) notes.push('You cannot be tracked across sites')
       if (p.sameAcrossVerifiers) notes.push('Sites that receive it can link your visits')
-      notes.push(`${view.verifierName} recognizes your account at every visit`)
-      notes.push(`${view.verifierName} does not learn your real identity`)
-      notes.push(p.issuerCanLink ? 'The issuer can reveal your identity' : 'The issuer cannot reveal your identity')
+      notes.push('The site can recognize your account')
+      // The issuer can link only if it kept the seed or its mapping to the holder.
+      notes.push(p.issuerCanLink ? 'The issuer may be able to reveal your identity' : 'The issuer cannot reveal your identity')
       out.fields.push({ kind: 'pseudonym', name: 'Pseudonym', value: p.distinctPerVerifier ? `Specific to ${host}` : 'The same for every site', notes })
     } else {
       const text = ageText(item)
       out.age = { handle: item.handle, text, range: birthRangeText(item), ...(item.ge && { ge: item.ge }), ...(item.le && { le: item.le }) }
-      out.fields.push({ kind: 'age', name: 'Age proof', value: capitalize(text), notes: ['Your date of birth is not shared'] })
+      out.fields.push({ kind: 'age', name: `Age proof: ${ageShort(item)}` })
     }
   }
 
