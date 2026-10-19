@@ -169,8 +169,12 @@ screen.
   Vega. With BBS and an mdoc system on, the request offers both formats and the teen's phone offers
   **Switch credential** between its two cards; each card gives its own pseudonym, so its own
   account. Only the ticked ones count, also for a QR code already on screen.
+- **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
+  one thread. On, they run on one thread per core, and the line next to the switch says how many.
+  Longfellow always runs on one thread: Google's runtime has no parallel code.
 - **Prover and verifier cards** (Vega, Longfellow and BBS). Whether they are loaded, their
-  implementation and version, the time they took to load once at start, and the circuit they run. The verifier card
+  implementation and version, the time they took to load once at start, the threads they run on
+  now, and the circuit they run. The verifier card
   shows its trust anchor and the `proof_time` tolerance. **Request signing** shows the certificate
   that signs Readdit's requests.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
@@ -189,8 +193,12 @@ screen.
   the presentation or Readdit computes it itself. **Scheme** (BBS): what Readdit derives from the
   request, and what each plugin proves.
 - **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
-- **Estimates per step.** Setup, precompute, prove, send and verify, for Longfellow, VegaMC and
-  BBS, from published measurements; the tiles above show this machine's. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
+- **Measured on this server.** Every presentation proved through the phone and verified, saved to
+  `.data/measurements.jsonl` (it survives restarts and **Reset demo**): per proof system, what was
+  proven (pseudonym, or pseudonym and age) and thread count, the number of runs, prove and verify
+  times (median and range), proof and presentation size, and the server process's peak memory.
+  Prove is the phone's work, run here on the server's CPU, so a phone would be slower. The line
+  above the table names this machine. **Clear** (click twice) empties the file. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
 
@@ -276,6 +284,8 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
+| `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
+| `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PUBLIC_SITE_HOST` | `readdit.example` | DNS name in `client_id` and the request-signing certificate |
 | `NUXT_VP_SESSION_TTL_S` | `600` | How long a wallet request (its QR code) stays valid, in seconds |
 
@@ -354,14 +364,17 @@ started with two settings, which it checks first:
 
 ```sh
 npm run build
-NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 node .output/server/index.mjs > /tmp/server.log 2>&1 &
+NUXT_MEASUREMENTS_FILE=/tmp/readdit-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 \
+  node .output/server/index.mjs > /tmp/server.log 2>&1 &
 node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log --startup .output/server/index.mjs
 ```
 
 Requests then expire after 40 s, so the expiry paths take a minute. `READDIT_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
-`--only M` runs one self-contained group (L is Longfellow, M is BBS).
+`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch and the
+measurements). The scratch measurements file keeps the run's proofs out of the demo's own
+measurements, which group P clears.
 
 ## More
 

@@ -43,6 +43,14 @@ pub struct ProveInput {
   pub handover: Handover,
   pub credential: CredentialJson,
   pub device_key: DeviceKeyJwk,
+  /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
+}
+
+/// The /tech switch as the plugins take it.
+pub fn parallelism(parallel: bool) -> Parallelism {
+  if parallel { Parallelism::Max } else { Parallelism::Off }
 }
 
 pub struct Prover {
@@ -64,7 +72,7 @@ impl Prover {
       "version": env!("CARGO_PKG_VERSION"),
       "schemes": [scheme_json()],
       "load_ms": self.load_ms,
-      "threads": 1,
+      "max_threads": Parallelism::Max.threads(),
     })
   }
 
@@ -100,7 +108,8 @@ impl Prover {
     let committed = profile::committed(&s);
     let slot = prepare_credential(&cred, &committed, &mut OsRng).map_err(|e| Refusal::bad_credential(e.to_string()))?;
     let key_input = slot.committed_input(&cred, 0, DEVICE_KEY).map_err(|e| Refusal::bad_credential(e.to_string()))?;
-    let pop_slot = prepare(&key_input, &EcdsaParams::hashed(LIMB_BITS), 4, Parallelism::Off, &mut OsRng)
+    let par = parallelism(input.parallel);
+    let pop_slot = prepare(&key_input, &EcdsaParams::hashed(LIMB_BITS), 4, par, &mut OsRng)
       .map_err(|e| Refusal::bad_credential(e.to_string()))?;
     let offline_ms = ms(t);
 
@@ -108,6 +117,7 @@ impl Prover {
     let stats = RefCell::new(ProveStats::default());
     let mut pop = EcdsaPopProver::new(pop_slot, Signer::Hash(&device));
     pop.stats = Some(&stats);
+    pop.parallelism = par;
     let mut provers: Vec<Box<dyn PluginProver>> = vec![Box::new(pop), Box::new(PseudonymProver::new(&s.verifier_id))];
     if s.age.is_some() {
       provers.push(Box::new(DateRangeProver::new()));
@@ -148,7 +158,7 @@ impl Prover {
         "pseudonym": len(parsed.plugin_ranges[s.index_pseudonym]),
         "date_range": s.index_age.map(|i| len(parsed.plugin_ranges[i])),
       },
-      "threads": 1,
+      "threads": par.threads(),
     });
     Ok(json!({
       "scheme_id": SCHEME_ID,

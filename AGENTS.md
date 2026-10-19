@@ -28,14 +28,14 @@ over cross-device OpenID4VP (QR code).
   each person gets one `c/france` account, not linked to their Readdit account unless they choose to.
 - **Two phones.** The teen's phone (the teen's mdoc and the teen's BBS credential) and the adult's
   phone (the adult's mdoc). Swapping phones at the QR code shows someone trying another person's phone.
-- **Which proofs the site accepts.** `/tech` switches the proof systems Readdit accepts: Vega
-  (`circuit_zk`, the default) and BBS (`mms_zk`). With both, the request offers both formats as
-  alternatives and the wallet answers with one.
+- **Which proofs the site accepts.** `/tech` switches the proof systems Readdit accepts: Vega and
+  Longfellow (`circuit_zk`) and BBS (`mms_zk`); none at start. With BBS and a `circuit_zk` system,
+  the request offers both formats as alternatives and the wallet answers with one.
 - **Ban.** A moderator bans the account. The same wallet always yields the same pseudonym for
   Readdit, so signing up again lands on the banned account (known-offender matching within one site).
 - **Interfaces are mocked, transactions are real.** The site and phone UIs are mocked. The OpenID4VP
   request and response, proof generation and proof verification are real. The last two run in the
-  site's server, in Rust Node addons (`native/vega`, `native/bbs`).
+  site's server, in Rust Node addons (`native/vega`, `native/longfellow`, `native/bbs`).
 
 The phone on screen is part of the website UI. It plays a person's wallet, the SIROS ID wallet.
 In the real world the wallet would build the proof on the phone. Here the provers in the site's
@@ -94,7 +94,8 @@ current decisions; the replaced ones are quoted in them.
 | Offline backup | **Removed 2026-10-13 (Frédéric):** there is no fallback backend. The Vega addon is built into the site's server; when it cannot load, the built site refuses to start and says to run `npm run build:native`. A failing prove or verify call is the "backend unavailable" path (500 `backend_error` or 503 `unavailable`). Was: "A built-in simulation of the prover and verifier (`server/utils/offline-backend.ts`) for when the addon fails. Switch in `/mod` or start with `NUXT_BACKEND_MODE=offline`. …" |
 | Sign-up and log-in | **Changed 2026-10-13, while handling every flow (Frédéric's request):** both send the same wallet request. Sign-up creates the account; **changed 2026-10-13 (Peter):** when the pseudonym already has an account, sign-up logs nothing in, and the dialog says "Account already exists" and offers Log in (a sign-up for an age-restricted community still logs in to the existing account); log-in only logs in, and with no account answers "No account" and offers Sign up, creating nothing. Was: the same request created the account or logged in to it, whatever the button; the button only set the dialog's title. |
 | Refusals | A refusal names its code in the error body (`data.error`); docs/backend-api.md lists them per route. response_uri answers 200 once a response is processed, accepted or refused; the rule of a refused presentation goes to the server log and the session trace, not to the caller. Closing the site's dialog cancels the session, so a later answer is refused with 410. |
-| Estimates | `/tech` shows per-step estimates from `shared/benchmarks.ts`. Desktop figures are measurements on Apple M5 and AMD Ryzen 9 (`NYM-AUTH.md`, `vega-caching-analysis.md`). Phone = desktop × 1–5, not measured; only phone-side steps are scaled. Longfellow and VegaMC are shown side by side with no "in use" marker (Peter, 2026-10-13). |
+| Measurements | **Replaced 2026-10-19 (Peter: "the estimates add nothing now"):** `/tech` shows the real runs instead: every presentation proved through the mocked phone and verified is appended to `.data/measurements.jsonl` (`NUXT_MEASUREMENTS_FILE`; kept across restarts and demo resets, Peter: saved to disk; a Docker volume keeps it across rebuilds) and grouped by proof system, statement (pseudonym, or pseudonym and age), prover threads and machine: runs, prove and verify time (median and range), proof and presentation size, peak memory of the server process. Prove = the phone's work (device signature, witness, proof; BBS: the whole presentation) on the server's CPU. **Clear** (two clicks) empties the file. `server/utils/measurements.ts`. Was: per-step estimates from `shared/benchmarks.ts` (published desktop figures, phone = desktop × 1–5). |
+| Threads | **Added 2026-10-19 (Peter):** a switch in `/tech`, "Multithreading (Vega and BBS)". Off (the start state, and after a demo reset; `NUXT_MULTITHREADING`): Vega and BBS run on one thread. On: on one thread per core, and `/tech` says how many. Vega runs each step inside a rayon pool of 1 or all cores (`native/vega/nym-vega/src/threads.rs`); BBS is built with bbs-cd-plugins' `parallel` feature and takes `Parallelism::Off` or `Max` per call (output identical, by the library's design). Longfellow stays on one thread: Google's runtime `61a8a73` has no parallel code, and it stays vendored unchanged (Peter). The services pass the switch per call (`parallel` in the JSON); the metrics, the traces and the measurements record the threads used. |
 | Hosting | **Added 2026-10-13 (Peter):** people try the demo in GitHub Codespaces (`.devcontainer/`, `TRY-IT.md`, README button): each visitor gets their own copy, built from the Dockerfile. No shared public site, so no per-visitor wallets or `/mod` password are needed. Behind the Codespaces proxy the server cannot see its public address, so the page sends `location.origin` when it creates a session and request_uri and response_uri use it (`server/api/vp/session.post.ts`, `publicOrigin`). |
 
 ### Presentation order (not hardcoded)
@@ -113,6 +114,10 @@ current decisions; the replaced ones are quoted in them.
 8. BBS: reset the demo, and in `/tech` accept BBS (alone, or with Vega to show the choice). Sign up on
    the teen's phone with the BBS card, then `c/teenspace`: the age range comes from the date-range
    plugin, and `c/afterdark` is refused by the site.
+9. Longfellow: reset the demo, accept Longfellow in `/tech`. Sign up on the teen's phone, try
+   `c/afterdark` (Requirement Not Met), then `c/teenspace`.
+
+Before step 1, the operator ticks Vega in `/tech`: nothing is accepted at start.
 
 `/tech` shows each step live: the request, the negotiation, the circuit, sizes and times. The guide
 panel beside the site names the current step and summarises it.
@@ -160,6 +165,9 @@ server/
   utils/store.ts                 in-memory sessions, accounts, comments (reset with /api/demo/reset)
   utils/vp.ts                    verifier offer per accepted format (config ∩ registry ∩ verifier, checked against the registry entry)
   api/tech/accept.post.ts        /tech's switches: the proof systems the site accepts
+  api/tech/threads.post.ts       /tech's thread switch (Vega and BBS)
+  api/tech/measurements/clear.post.ts  /tech's Clear: empties the measurements file
+  utils/measurements.ts          the measurements: one JSON line per verified presentation, the /tech summary
   api/vp/session.post.ts         create session → { id, authorizationUrl }; URLs from the page's origin
   api/vp/request/[id].ts         request_uri, GET or POST (wallet_metadata, wallet_nonce), returns signed JWT
   api/vp/response/[id].post.ts   response_uri (direct_post), calls the verifier
@@ -170,7 +178,6 @@ server/
   api/wallet/*.ts                mocked phone → prover (capabilities, sign, prove)
   api/me, logout, notice, comments, mod/*, demo/reset, tech/overview
 shared/
-  benchmarks.ts                  timing/size model for /tech estimates
   registry/circuits.ts           approved circuit registry (Vega and Longfellow, as the addons load them), scheme
                                  registry (BBS), PROOF_SYSTEMS (/tech's switches)
   utils/mdoc.ts                  reads an IssuerSigned (wallet screens)
@@ -205,7 +212,7 @@ scripts/build-native.mjs         npm run build:native
 scripts/vega-check.mjs           npm run vega:check: real proofs, pseudonym, refusals
 scripts/demo-flow.mjs            headless run of the presentation order: guide steps, phone traffic, screenshots
 scripts/flows-check.mjs          every flow, happy and unhappy, in the browser and over HTTP (Longfellow: group L;
-                                 BBS: group M); screenshots 19-33
+                                 BBS: group M; threads and measurements: group P); screenshots 19-33
 ```
 
 All of the flow is real: the OpenID4VP request/response, signed Request Objects, capability
@@ -296,5 +303,5 @@ reset, and over HTTP the verifier's refusals (replay, another state or nonce, ta
 presentations, malformed bodies, another browser) and the backend failing through the test-only
 hook. It checks the product, the guide step (with the verifier's measured times after each
 verified presentation) and every server answer, and that nothing carries over into the next path.
-It needs the built server with `NUXT_VP_SESSION_TTL_S=40` and `READDIT_TEST_FAULTS=1`
-(GETTING-STARTED, "Checks").
+It needs the built server with `NUXT_VP_SESSION_TTL_S=40` and `READDIT_TEST_FAULTS=1`, and a
+scratch `NUXT_MEASUREMENTS_FILE`, since group P clears the measurements (GETTING-STARTED, "Checks").

@@ -31,7 +31,7 @@ use crate::handover::{self, Handover};
 use crate::measure::{Peak, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, Statement, statement};
-use crate::{dates, hex, keys, mdoc, unb64url, unhex, x509};
+use crate::{dates, hex, keys, mdoc, threads, unb64url, unhex, x509};
 
 /// The device key as the wallet holds it: a P-256 JWK with its private part.
 #[derive(Clone, Debug, Deserialize)]
@@ -79,6 +79,9 @@ pub struct WitnessInput {
   pub secret_seed: String,
   /// r ‖ s, hex, from [`Prover::sign`].
   pub device_signature: String,
+  /// One thread per core for the witness and the proof; one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -87,6 +90,7 @@ pub struct WitnessData {
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
+  parallel: bool,
   /// What the witness step reports: its time, sizes and the public values it claims.
   pub summary: Json,
 }
@@ -144,7 +148,7 @@ impl Prover {
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
       }],
       "load_ms": self.load_ms,
-      "threads": rayon::current_num_threads(),
+      "max_threads": threads::cores(),
     })
   }
 
@@ -258,7 +262,9 @@ impl Prover {
       presentation: Some(CorePresentation { public, device_signature }),
       nym: Some(NymPublic { verifier_input: s.verifier_input, pseudonym: nym }),
     };
-    let assignment = app::witness(&app::steps(&table), &core).map_err(|e| bad(format!("witness: {e:?}")))?;
+    let assignment = threads::pool(input.parallel)
+      .install(|| app::witness(&app::steps(&table), &core))
+      .map_err(|e| bad(format!("witness: {e:?}")))?;
     let witness_ms = ms(t);
 
     let mut results = Map::new();
@@ -274,7 +280,7 @@ impl Prover {
       "results": results,
       "public_inputs": public_inputs(&assignment.core.public_values.iter().map(|v| hex(&to_be(v))).collect::<Vec<_>>()),
       "counts": { "shared": shared, "precommitted": precommitted, "rest": rest, "public": public_count },
-      "metrics": { "witness_ms": witness_ms },
+      "metrics": { "witness_ms": witness_ms, "threads": threads::pool(input.parallel).current_num_threads() },
     });
     Ok(WitnessData {
       presentation: Presentation {
@@ -287,6 +293,7 @@ impl Prover {
       assignment,
       results,
       witness_ms,
+      parallel: input.parallel,
       summary,
     })
   }
@@ -296,8 +303,11 @@ impl Prover {
     let peak = Peak::start();
     let t = Instant::now();
     let (steps, core) = (w.assignment.steps(), w.assignment.core());
-    let prepared = app::prepare(&self.pk, &steps, &core).map_err(|e| format!("prepare: {e:?}"))?;
-    let (proof, _) = app::prove(&self.pk, &steps, &core, prepared).map_err(|e| format!("prove: {e:?}"))?;
+    let pool = threads::pool(w.parallel);
+    let (proof, _) = pool.install(|| {
+      let prepared = app::prepare(&self.pk, &steps, &core).map_err(|e| format!("prepare: {e:?}"))?;
+      app::prove(&self.pk, &steps, &core, prepared).map_err(|e| format!("prove: {e:?}"))
+    })?;
     let prove_ms = ms(t);
     let peak_mb = peak.read();
     let proof = bincode::serialize(&proof).map_err(|e| format!("serializing the proof: {e}"))?;
@@ -315,7 +325,7 @@ impl Prover {
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
         "presentation_bytes": presentation.len(),
-        "threads": rayon::current_num_threads(),
+        "threads": pool.current_num_threads(),
       },
     }))
   }

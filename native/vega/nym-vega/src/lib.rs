@@ -15,6 +15,7 @@
 //! | [`presentation`] | `CircuitZkPresentation` in CBOR (rulebook, "Presentation encoding") |
 //! | [`keys`] | The keys from `shapes.zst` |
 //! | [`measure`] | Timing and peak memory |
+//! | [`threads`] | One thread or one per core, per call (`/tech`'s switch) |
 //! | [`prover`] | The holder's native steps: unlock and sign, witness, prove |
 //! | [`verifier`] | Verification of a presentation against the verifier's own values |
 //!
@@ -31,6 +32,7 @@ pub mod measure;
 pub mod presentation;
 pub mod prover;
 pub mod request;
+pub mod threads;
 pub mod verifier;
 pub mod x509;
 

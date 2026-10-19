@@ -4,7 +4,14 @@
 #   docker compose down
 #
 # There are no separate prover and verifier containers or profiles: the site's server runs them in process.
+# The volume keeps /tech's measurements (.data/measurements.jsonl) across rebuilds; `docker compose
+# down -v` deletes it.
 services:
   web:
     build: .
     ports: ["3000:3000"]
+    volumes:
+      - readdit-data:/app/.data
+
+volumes:
+  readdit-data:

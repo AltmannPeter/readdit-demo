@@ -36,7 +36,10 @@ export interface ServiceInfo {
   version: string
   circuits: ServiceCircuit[]
   load_ms?: number
+  /** Longfellow: always 1. */
   threads?: number
+  /** Vega: the threads the switch gives it when on (the machine's cores). */
+  max_threads?: number
   trust_anchors?: Array<{ subject: string; not_after: number }>
   proof_time_tolerance_s?: number
 }
@@ -128,6 +131,8 @@ export interface VerifyMetrics {
   verify_ms?: number
   total_ms?: number
   proof_bytes?: number
+  /** The threads the check ran on (Vega, BBS: the /tech switch; Longfellow: 1). */
+  threads?: number
   peak_memory_mb?: number | null
 }
 
@@ -299,6 +304,12 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
   }, 'circuit_zk')
 }
 
+/** /tech's thread switch, for the addons that have one (Vega, BBS): `parallel` in the call's JSON.
+ *  Longfellow runs on one thread whatever the switch says. */
+function threading(backend: CircuitBackend | 'bbs'): { parallel?: boolean } {
+  return backend === 'longfellow' ? {} : { parallel: store().multithreading }
+}
+
 /** The circuit a presentation names (CBOR CircuitZkPresentation, `circuit_id`), if it decodes. */
 function presentedCircuit(presentation: string): string | undefined {
   try {
@@ -328,7 +339,7 @@ export const prover = {
   async prove(body: ProveBody): Promise<ProveResult & { backend: CircuitBackend }> {
     const b = await backendFor('prover', body.circuit_id)
     const done = await call('prover', 'prover.prove', async () => {
-      const w = await b.n.prover.witness(JSON.stringify(body))
+      const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading(b.name) }))
       if (typeof w === 'string') return { refusal: JSON.parse(w) }
       const witness = JSON.parse(w.summary) as WitnessSummary
       return { result: JSON.parse(await b.n.prover.prove(w)), witness }
@@ -347,7 +358,7 @@ export const verifier = {
   /** By the addon of the circuit the presentation names. */
   async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string }): Promise<VerifyResult> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
-    return call('verifier', 'verifier.verify', async () => JSON.parse(await b.n.verifier.verify(JSON.stringify(body))) as VerifyResult, b.name)
+    return call('verifier', 'verifier.verify', async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult, b.name)
   },
 }
 
@@ -373,7 +384,7 @@ export interface BbsInfo {
   schemes: BbsScheme[]
   issuers?: Array<{ issuer_pk: string; schema_id: string; schema_digest: string }>
   load_ms?: number
-  threads?: number
+  max_threads?: number
 }
 
 export interface BbsCredential {
@@ -482,7 +493,7 @@ export const bbsProver = {
   /** One presentation: commitments, the device signature inside ecdsa-pop, the plugin proofs. */
   async prove(body: BbsProveBody): Promise<BbsProveResult> {
     const n = await bbsNative('prover')
-    return outcome<BbsProveResult>(await call('prover', 'prover.prove', async () => JSON.parse(await n.prover.prove(JSON.stringify(body))), 'bbs'))
+    return outcome<BbsProveResult>(await call('prover', 'prover.prove', async () => JSON.parse(await n.prover.prove(JSON.stringify({ ...body, ...threading('bbs') }))), 'bbs'))
   },
 }
 
@@ -494,7 +505,7 @@ export const bbsVerifier = {
 
   async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover }): Promise<BbsVerifyResult> {
     const n = await bbsNative('verifier')
-    return call('verifier', 'verifier.verify', async () => JSON.parse(await n.verifier.verify(JSON.stringify(body))) as BbsVerifyResult, 'bbs')
+    return call('verifier', 'verifier.verify', async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading('bbs') }))) as BbsVerifyResult, 'bbs')
   },
 }
 

@@ -14,9 +14,11 @@ exclude = ["vendor"]
 
 [workspace.dependencies]
 bbs-cd = { path = "vendor/bbs-cd-plugins/crates/bbs-cd" }
-bbs-cd-plugin = { path = "vendor/bbs-cd-plugins/crates/bbs-cd-plugin" }
-cd-tom256 = { path = "vendor/bbs-cd-plugins/crates/cd-tom256" }
-cd-ecdsa-pop = { path = "vendor/bbs-cd-plugins/crates/cd-ecdsa-pop" }
+# `parallel` compiles in rayon, so that Parallelism::Max takes effect (the /tech switch);
+# Parallelism::Off stays sequential, and the output is the same for both.
+bbs-cd-plugin = { path = "vendor/bbs-cd-plugins/crates/bbs-cd-plugin", features = ["parallel"] }
+cd-tom256 = { path = "vendor/bbs-cd-plugins/crates/cd-tom256", features = ["parallel"] }
+cd-ecdsa-pop = { path = "vendor/bbs-cd-plugins/crates/cd-ecdsa-pop", features = ["parallel"] }
 cd-date-range = { path = "vendor/bbs-cd-plugins/crates/cd-date-range" }
 cd-pseudonym = { path = "vendor/bbs-cd-plugins/crates/cd-pseudonym" }
 

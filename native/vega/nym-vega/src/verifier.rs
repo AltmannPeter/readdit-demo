@@ -26,7 +26,7 @@ use crate::measure::{Peak, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, statement};
 use crate::x509::TrustAnchors;
-use crate::{dates, hex, keys};
+use crate::{dates, hex, keys, threads};
 
 /// The largest proof the verifier decodes. A proof of this circuit is 96,079 bytes.
 const MAX_PROOF_BYTES: u64 = 1 << 20;
@@ -40,6 +40,9 @@ pub struct VerifyInput {
   pub handover: Handover,
   /// The verifier's clock, RFC 3339.
   pub now: String,
+  /// One thread per core for the proof check; one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// Why a presentation is refused.
@@ -92,7 +95,7 @@ impl Verifier {
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
-      "threads": rayon::current_num_threads(),
+      "max_threads": threads::cores(),
     })
   }
 
@@ -190,7 +193,9 @@ impl Verifier {
     if expected.len() + 2 != PUBLIC_VALUES {
       return Err(refuse("request", format!("{} public values computed, the registry lists {}", expected.len() + 2, PUBLIC_VALUES)));
     }
-    let accepted = app::accept_pseudonym(&LAYOUT, &self.vk, &proof, &expected);
+    let pool = threads::pool(input.parallel);
+    let accepted = pool.install(|| app::accept_pseudonym(&LAYOUT, &self.vk, &proof, &expected));
+    metrics.insert("threads".into(), json!(pool.current_num_threads()));
     metrics.insert("verify_ms".into(), json!(ms(t)));
     let revealed = match accepted {
       Ok(revealed) => revealed,

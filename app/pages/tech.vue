@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { PROOF_SYSTEMS, type CircuitEntry, type SchemeEntry } from '#shared/registry/circuits'
-import { DESKTOP_MACHINES, PHONE_FACTOR, SYSTEMS, UPLINK_MBPS, phaseRange, presentationRange } from '#shared/benchmarks'
 
 definePageMeta({ layout: false })
 useHead({ title: 'Technical view · Readdit' })
@@ -16,6 +15,7 @@ interface Service {
   issuers?: Array<{ issuer_pk: string; schema_id: string }>
   load_ms?: number
   threads?: number
+  max_threads?: number
   trust_anchors?: Array<{ subject: string }>
   proof_time_tolerance_s?: number
   error?: string
@@ -49,9 +49,36 @@ interface Formats {
   circuit_zk?: { circuit_id_values?: string[]; circuit_proof_system_values?: string[] }
   mms_zk?: { scheme_id_values?: string[]; proof_system_values?: string[] }
 }
+interface Spread {
+  median: number
+  min: number
+  max: number
+}
+interface Machine {
+  cpu: string
+  cores: number
+  platform: string
+  memory_gb: number
+}
+interface MeasurementRow {
+  proof_system: string
+  label: string
+  statement: string
+  threads: number | null
+  machine: Machine
+  runs: number
+  prove: Spread | null
+  verify: Spread | null
+  proof_bytes: Spread | null
+  presentation_bytes: Spread | null
+  peak_memory_mb: number | null
+  last: string
+}
 interface Overview {
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
+  multithreading: boolean
+  measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -144,15 +171,38 @@ async function setAccepted(id: string, accept: boolean) {
 const ids = (f: Formats | undefined, format: 'circuit_zk' | 'mms_zk') => (format === 'circuit_zk' ? f?.circuit_zk?.circuit_id_values : f?.mms_zk?.scheme_id_values)?.join(', ') || '–'
 const formats = computed(() => (session.value ? (['circuit_zk', 'mms_zk'] as const).filter((f) => session.value!.offer[f]) : []))
 
-/** "217–588 ms", "0.22–2.9 s" */
-function span(r: readonly [number, number] | null): string {
-  if (!r) return '–'
-  const [a, b] = r
-  if (b < 1000) return `${Math.round(a)}–${Math.round(b)} ms`
-  const sec = (n: number) => (n >= 10_000 ? (n / 1000).toFixed(0) : (n / 1000).toFixed(n < 1000 ? 2 : 1))
-  return `${sec(a)}–${sec(b)} s`
+const threadError = ref('')
+async function setThreads(parallel: boolean) {
+  threadError.value = ''
+  try {
+    await $fetch('/api/tech/threads', { method: 'POST', body: { parallel } })
+  } catch {
+    threadError.value = 'Not changed.'
+  }
+  await load()
 }
-const whereText = (w: string) => (w === 'circuit provider' ? 'Circuit provider' : w === 'phone' ? 'Phone' : w === 'network' ? 'Network' : 'Readdit')
+/** The threads a backend runs on now: Vega and BBS follow the switch, Longfellow has one. */
+const threadText = (svc: Service) => {
+  const n = svc.max_threads != null ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
+  return `${n} thread${n === 1 ? '' : 's'}`
+}
+
+/** A measured spread: the median, and the range when the runs differ. */
+const msSpread = (s: Spread | null) => (!s ? '–' : s.min === s.max ? ms(s.median) : `${ms(s.median)} (${ms(s.min)}–${ms(s.max)})`)
+const kbSpread = (s: Spread | null) => (!s ? '–' : kb(s.median))
+const machineText = (m: Machine) => `${m.cpu}, ${m.cores} core${m.cores === 1 ? '' : 's'}, ${m.memory_gb} GB, ${m.platform}`
+const machines = computed(() => [...new Set((data.value?.measurements.rows ?? []).map((r) => machineText(r.machine)))])
+const clearing = ref(false)
+async function clearMeasurements() {
+  if (!clearing.value) {
+    clearing.value = true
+    setTimeout(() => (clearing.value = false), 4000)
+    return
+  }
+  clearing.value = false
+  await $fetch('/api/tech/measurements/clear', { method: 'POST' }).catch(() => {})
+  await load()
+}
 
 const statusTone = (s: string) =>
   s === 'completed' || s === 'verified' ? 'bg-emerald-100 text-emerald-800' : s === 'failed' ? 'bg-adult/10 text-adult' : 'bg-canvas text-muted'
@@ -199,6 +249,17 @@ const statusTone = (s: string) =>
           Readdit accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
         </p>
         <p v-if="acceptError" class="mt-1 text-xs text-adult">{{ acceptError }}</p>
+        <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line pt-3">
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" data-threads :checked="data.multithreading" @change="setThreads(($event.target as HTMLInputElement).checked)" />
+            Multithreading (Vega and BBS)
+          </label>
+          <span class="text-xs text-muted" data-threads-text>
+            {{ data.multithreading ? `On: Vega and BBS run on ${data.measurements.machine.cores} threads, one per core of this machine.` : `Off: Vega and BBS run on 1 thread. On, they use all ${data.measurements.machine.cores} cores of this machine.` }}
+            Longfellow always runs on 1 thread: Google's runtime has no parallel code.
+          </span>
+        </div>
+        <p v-if="threadError" class="mt-1 text-xs text-adult">{{ threadError }}</p>
       </section>
 
       <!-- services -->
@@ -212,7 +273,7 @@ const statusTone = (s: string) =>
             <p class="mt-2 text-sm">{{ svc.implementation }}</p>
             <p class="text-xs text-muted">Version {{ svc.version }}</p>
             <p v-if="svc.load_ms != null" class="text-xs text-muted">
-              {{ svc.schemes ? 'Tables built once at start' : svc.implementation?.startsWith('Longfellow') ? 'Circuits read once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ svc.threads }} thread{{ svc.threads === 1 ? '' : 's' }}
+              {{ svc.schemes ? 'Tables built once at start' : svc.implementation?.startsWith('Longfellow') ? 'Circuits read once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ threadText(svc) }}
             </p>
             <p v-if="svc.trust_anchors?.length" class="text-xs text-muted">
               Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
@@ -315,7 +376,7 @@ const statusTone = (s: string) =>
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.threads"> on {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>
@@ -415,76 +476,55 @@ const statusTone = (s: string) =>
         </div>
       </template>
 
-      <!-- estimates -->
-      <section class="card">
-        <div class="border-b border-line px-5 py-3">
-          <h2 class="text-sm font-semibold">Estimates per step</h2>
-          <p class="mt-0.5 text-xs text-muted">
-            Desktop: measured on {{ DESKTOP_MACHINES }}. Phone: desktop ×{{ PHONE_FACTOR.min }}–{{ PHONE_FACTOR.max }}, not measured yet.
-            Sending the proof assumes a {{ UPLINK_MBPS.min }}–{{ UPLINK_MBPS.max }} Mbit/s mobile uplink.
-          </p>
+      <!-- measured -->
+      <section class="card" data-measured>
+        <div class="flex flex-wrap items-start gap-3 border-b border-line px-5 py-3">
+          <div class="min-w-0 flex-1">
+            <h2 class="text-sm font-semibold">Measured on this server</h2>
+            <p class="mt-0.5 text-xs text-muted">
+              Every presentation proved through the phone and verified, {{ data.measurements.runs }} so far, kept in
+              <span class="font-mono">{{ data.measurements.file }}</span> across restarts and demo resets. Prove: the phone's work (device signature, witness and proof; BBS: the whole presentation), run here on the server's CPU. Times: median, then the range.
+            </p>
+            <p class="mt-0.5 text-xs text-muted">This server: {{ machineText(data.measurements.machine) }}.</p>
+          </div>
+          <button v-if="data.measurements.runs" class="btn-ghost text-xs" data-clear-measurements @click="clearMeasurements">{{ clearing ? 'Click again to clear' : 'Clear' }}</button>
         </div>
-        <div class="overflow-x-auto">
+        <p v-if="!data.measurements.rows.length" class="px-5 py-6 text-center text-sm text-muted">No measurements yet. Each verified presentation adds one.</p>
+        <div v-else class="overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead>
               <tr class="border-b border-line text-muted">
-                <th class="px-5 py-2 font-medium">Step</th>
-                <th class="px-3 py-2 font-medium">Runs on</th>
-                <th class="px-3 py-2 font-medium">How often</th>
-                <th
-                  v-for="sys in SYSTEMS"
-                  :key="sys.key"
-                  colspan="2"
-                  class="px-3 py-2 font-semibold text-ink"
-                >
-                  {{ sys.label }}
-                </th>
-              </tr>
-              <tr class="border-b border-line text-muted">
-                <th colspan="3" />
-                <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <th class="px-3 py-1 font-medium">Desktop</th>
-                  <th class="px-3 py-1 font-medium">Phone (est.)</th>
-                </template>
+                <th class="px-5 py-2 font-medium">Proof system</th>
+                <th class="px-3 py-2 font-medium">Proves</th>
+                <th class="px-3 py-2 font-medium">Threads</th>
+                <th class="px-3 py-2 font-medium">Runs</th>
+                <th class="px-3 py-2 font-medium">Prove</th>
+                <th class="px-3 py-2 font-medium">Verify</th>
+                <th class="px-3 py-2 font-medium">Proof</th>
+                <th class="px-3 py-2 font-medium">Presentation</th>
+                <th class="px-3 py-2 font-medium">Peak memory</th>
+                <th v-if="machines.length > 1" class="px-3 py-2 font-medium">Machine</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-line">
-              <tr v-for="(phase, i) in SYSTEMS[0]!.phases" :key="phase.id" class="align-top">
-                <td class="px-5 py-2.5 font-medium">{{ phase.label }}</td>
-                <td class="px-3 py-2.5">{{ whereText(phase.where) }}</td>
-                <td class="px-3 py-2.5 text-muted">{{ phase.id === 'precompute' ? 'Once per attestation' : phase.frequency }}</td>
-                <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <td class="px-3 py-2.5 tabular-nums">
-                    <template v-if="sys.phases[i]!.id === 'transfer'">–</template>
-                    <template v-else>{{ sys.phases[i]!.desktopMs ? span(sys.phases[i]!.desktopMs) : 'none' }}</template>
-                    <p v-if="sys.phases[i]!.detail" class="mt-0.5 max-w-48 text-[11px] leading-snug text-muted">{{ sys.phases[i]!.detail }}</p>
-                  </td>
-                  <td class="px-3 py-2.5 font-semibold tabular-nums">
-                    {{ phase.where === 'circuit provider' ? 'not on phone' : sys.phases[i]!.desktopMs || sys.phases[i]!.id === 'transfer' ? span(phaseRange(sys, sys.phases[i]!)) : 'none' }}
-                  </td>
-                </template>
-              </tr>
-              <tr class="bg-canvas/60 align-top">
-                <td class="px-5 py-2.5 font-semibold" colspan="3">Per presentation (prove, send, verify)</td>
-                <template v-for="sys in SYSTEMS" :key="sys.key">
-                  <td class="px-3 py-2.5" />
-                  <td class="px-3 py-2.5 text-sm font-bold tabular-nums">
-                    {{ span(presentationRange(sys)) }}
-                  </td>
-                </template>
+              <tr v-for="r in data.measurements.rows" :key="`${r.proof_system}|${r.statement}|${r.threads}|${machineText(r.machine)}`" class="align-top" :data-measured-row="r.proof_system">
+                <td class="px-5 py-2.5 font-medium">{{ r.label }}</td>
+                <td class="px-3 py-2.5">{{ r.statement }}</td>
+                <td class="px-3 py-2.5 tabular-nums" data-measured-threads>{{ r.threads ?? '–' }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ r.runs }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.prove) }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.verify) }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.proof_bytes) }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.presentation_bytes) }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ r.peak_memory_mb ? mb(r.peak_memory_mb) : '–' }}</td>
+                <td v-if="machines.length > 1" class="px-3 py-2.5">{{ machineText(r.machine) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <ul class="space-y-1 border-t border-line px-5 py-3 text-[11px] leading-snug text-muted">
-          <li v-for="sys in SYSTEMS" :key="sys.key">
-            <span class="font-semibold text-ink">{{ sys.label }}:</span> {{ sys.notes.join(' ') }}
-          </li>
-          <li>
-            Sources: NYM-AUTH.md (full nym_auth statement on mdoc, Google Rust and Vega provers), vega-caching-analysis.md
-            (per-phase figures, 1920-byte MSO) and bbs-cd-plugins' full-flow-bench (BBS). Setup keys are published, so a phone only downloads them.
-          </li>
-        </ul>
+        <p class="border-t border-line px-5 py-2 text-[11px] leading-snug text-muted">
+          Peak memory is the server process's peak resident set during the step (Linux only), so it includes Node and the loaded backends.
+        </p>
       </section>
     </main>
   </div>

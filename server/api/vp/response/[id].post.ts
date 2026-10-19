@@ -114,6 +114,7 @@ export default defineEventHandler(async (event) => {
 
   s.status = 'verified'
   s.outcome = { ok: true, format: query.format, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const }) }
+  await recordMeasurement(s, query.format, result.proofId, result.metrics as Record<string, unknown> | undefined, hasAge)
   addTrace(s, 'verify', 'Proof verified', {
     format: query.format,
     [query.format === 'circuit_zk' ? 'circuit_id' : 'scheme_id']: result.proofId,

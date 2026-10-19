@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use bbs_cd_plugin::envelope::{Verifier as BbsVerifier, VerifyStats};
 use bbs_cd_plugin::issuer::IssuerParams;
+use bbs_cd_plugin::par::Parallelism;
 use cd_date_range::DateRangeVerifier;
 use cd_ecdsa_pop::EcdsaPopVerifier;
 use cd_pseudonym::PseudonymVerifier;
@@ -36,11 +37,16 @@ pub struct VerifyInput {
   /// base64url of the envelope.
   pub presentation: String,
   pub handover: Handover,
+  /// ecdsa-pop's check on one thread per core; one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 pub struct Verifier {
   issuer: IssuerParams,
+  /// The plugin verifiers with ecdsa-pop sequential, and with ecdsa-pop on every core.
   bbs: BbsVerifier,
+  bbs_parallel: BbsVerifier,
   pub load_ms: f64,
 }
 
@@ -62,11 +68,12 @@ impl Verifier {
       return Err("the trusted issuer's schema is not the profile's".into());
     }
     cd_date_range::precompute();
-    let bbs = BbsVerifier::new()
-      .register(Box::new(EcdsaPopVerifier::new()))
-      .register(Box::new(PseudonymVerifier::any()))
-      .register(Box::new(DateRangeVerifier));
-    Ok(Verifier { issuer, bbs, load_ms: ms(t) })
+    let with = |par: Parallelism| {
+      let mut pop = EcdsaPopVerifier::new();
+      pop.parallelism = par;
+      BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
+    };
+    Ok(Verifier { issuer, bbs: with(Parallelism::Off), bbs_parallel: with(Parallelism::Max), load_ms: ms(t) })
   }
 
   pub fn info(&self) -> Json {
@@ -77,7 +84,7 @@ impl Verifier {
       "schemes": [scheme_json()],
       "issuers": [{ "issuer_pk": hex(&self.issuer.pk), "schema_id": self.issuer.schema.id(), "schema_digest": hex(&self.issuer.schema.digest()) }],
       "load_ms": self.load_ms,
-      "threads": 1,
+      "max_threads": Parallelism::Max.threads(),
     })
   }
 
@@ -111,8 +118,10 @@ impl Verifier {
 
     let t = Instant::now();
     let mut vs = VerifyStats::default();
-    let verified = self
-      .bbs
+    let par = crate::prover::parallelism(input.parallel);
+    metrics.insert("threads".into(), json!(par.threads()));
+    let bbs = if input.parallel { &self.bbs_parallel } else { &self.bbs };
+    let verified = bbs
       .verify(std::slice::from_ref(&self.issuer), &s.request, &bytes, None, Some(&mut vs))
       .map_err(|e| match e {
         bbs_cd_plugin::error::Error::Decode(m) => refuse("presentation", m),

@@ -111,6 +111,8 @@ interface Store {
   /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
    *  configured ones, runtime config acceptedProofSystems). */
   acceptedProofSystems: string[]
+  /** Vega and BBS on every core (/tech's switch; a demo reset restores runtime config multithreading). */
+  multithreading: boolean
 }
 
 const g = globalThis as unknown as { __readditStore?: Store }
@@ -123,8 +125,22 @@ export function configuredProofSystems(): string[] {
     .filter(Boolean)
 }
 
+/** Whether Vega and BBS run on every core at start (runtime config multithreading). */
+export function configuredMultithreading(): boolean {
+  const v = useRuntimeConfig().multithreading as unknown
+  return v === true || v === 'true' || v === '1'
+}
+
 function fresh(): Store {
-  return { sessions: new Map(), byState: new Map(), accounts: new Map(), comments: [], bannedNotices: new Map(), acceptedProofSystems: configuredProofSystems() }
+  return {
+    sessions: new Map(),
+    byState: new Map(),
+    accounts: new Map(),
+    comments: [],
+    bannedNotices: new Map(),
+    acceptedProofSystems: configuredProofSystems(),
+    multithreading: configuredMultithreading(),
+  }
 }
 
 /** In-memory demo state. Survives hot reload, not restarts. */

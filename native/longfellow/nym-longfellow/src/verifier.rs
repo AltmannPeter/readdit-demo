@@ -178,6 +178,7 @@ impl Verifier {
     };
     let outcome = self.pair.verify(&p.proof, &public, nym, &s.session_transcript);
     metrics.insert("verify_ms".into(), json!(ms(t)));
+    metrics.insert("threads".into(), json!(1));
     match outcome {
       Ok(()) => {}
       Err(Rejection::Encoding(e)) => return Err(refuse("proof_encoding", format!("the proof does not decode: {e}"))),

@@ -30,6 +30,12 @@ export default defineNuxtConfig({
     // them. Comma-separated: vega-v1, longfellow-libzk-v1, bbs-cd-plugins-v0.1. Empty: none, so
     // the site asks for nothing until one is switched on.
     acceptedProofSystems: '',
+    // Whether Vega and BBS run on every core (true) or on one thread (false) at start and after a
+    // demo reset; /tech switches it. Longfellow always runs on one thread.
+    multithreading: false,
+    // Where each verified presentation's measurements are appended (JSON lines); /tech shows them
+    // and can clear the file. Relative to the working directory.
+    measurementsFile: '.data/measurements.jsonl',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',

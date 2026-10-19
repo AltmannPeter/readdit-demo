@@ -18,8 +18,11 @@
 // The server is started for this run with two settings; the run checks them first:
 //   NUXT_VP_SESSION_TTL_S=40        requests expire after 40 s, so the expiry paths take a minute
 //   READDIT_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
+// and a scratch measurements file, since every verified presentation of the run is measured and
+// group P clears it (NUXT_MEASUREMENTS_FILE; the default is the demo's own .data/measurements.jsonl).
 // For example:
-//   NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 node .output/server/index.mjs > /tmp/server.log 2>&1 &
+//   NUXT_MEASUREMENTS_FILE=/tmp/readdit-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 \
+//     node .output/server/index.mjs > /tmp/server.log 2>&1 &
 //   node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log \
 //     [--startup .output/server/index.mjs] [--shots demo-shots]
 //
@@ -44,7 +47,7 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
-// --only K,M: run only these groups that need no earlier state (E F H I J K L M G), after the preconditions.
+// --only K,M: run only these groups that need no earlier state (E F H I J K L M P G), after the preconditions.
 const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
@@ -161,6 +164,12 @@ async function resetDemo(accepted = ['vega-v1']) {
   await call(ctx, 'POST', '/api/demo/reset')
   for (const id of accepted) await call(ctx, 'POST', '/api/tech/accept', { data: { proof_system: id, accept: true } })
   await ctx.dispose()
+}
+const overview = async () => {
+  const ctx = await client()
+  const o = (await call(ctx, 'GET', '/api/tech/overview')).body
+  await ctx.dispose()
+  return o
 }
 const acceptedNow = async () => (await call(page.request, 'GET', '/api/tech/overview')).body.acceptedProofSystems
 async function armFault(step) {
@@ -2210,6 +2219,81 @@ async function groupL() {
   eq('accepted', await acceptedNow(), [])
 }
 
+// ---- P. The thread switch and the measurements of /tech ----
+
+async function groupP() {
+  await resetDemo(['vega-v1', BBS_SYSTEM])
+  await openPage()
+  const ctx = await client()
+  /** One sign-up over HTTP, verified: the session's prove and verify traces. */
+  const signUp = async (circuit) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] } } }) : WALLET_METADATA)
+    if (circuit === 'bbs') {
+      const p = await presentBbs(ctx, r)
+      await respond(ctx, r, bbsForm(r, p.presentation))
+    } else {
+      const p = await present(ctx, r, teen, circuit)
+      await respond(ctx, r, vpForm(r, p.presentation))
+    }
+    const v = await sessionView(s.id)
+    const trace = (step) => v.trace.filter((t) => t.step === step).at(-1)?.data
+    return { status: v.status, prove: trace('prove')?.metrics?.threads, verify: trace('verify')?.metrics?.threads }
+  }
+
+  begin('P1', 'off by default: Vega and BBS on one thread; every verified presentation is measured')
+  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  let o = await overview()
+  eq('multithreading off after a reset', o.multithreading, false)
+  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
+  const cores = o.measurements.machine.cores
+  check('the machine is described', cores >= 1 && !!o.measurements.machine.cpu, JSON.stringify(o.measurements.machine))
+  eq('Vega: verified on 1 thread, proved on 1', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  eq('BBS: verified on 1 thread, proved on 1', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
+  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
+
+  begin('P2', `switched on in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-threads]').waitFor()
+  check('/tech: the switch says what off means', (await tech.locator('[data-threads-text]').textContent()).includes(`Off: Vega and BBS run on 1 thread. On, they use all ${cores} cores`))
+  await tech.locator('[data-threads]').check()
+  for (let k = 0; k < 30 && !(await overview()).multithreading; k++) await page.waitForTimeout(100)
+  eq('server: on', (await overview()).multithreading, true)
+  await tech.locator('[data-threads-text]', { hasText: `On: Vega and BBS run on ${cores} threads` }).waitFor()
+  check('/tech: the switch says how many', true)
+  eq(`Vega: ${cores} threads`, await signUp(VEGA), { status: 'verified', prove: cores, verify: cores })
+  eq(`BBS: ${cores} threads`, await signUp('bbs'), { status: 'verified', prove: cores, verify: cores })
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('Longfellow: 1 thread, whatever the switch', await signUp(LONGFELLOW), { status: 'verified', prove: 1, verify: 1 })
+
+  begin('P3', '/tech: the measured table, by proof system, statement and threads')
+  o = await overview()
+  eq('five runs', o.measurements.runs, 5)
+  const rows = o.measurements.rows.map((r) => `${r.proof_system}:${r.statement}:${r.threads}:${r.runs}`)
+  eq('rows', rows, [`vega-v1:pseudonym:1:1`, `vega-v1:pseudonym:${cores}:1`, `${LONGFELLOW_SYSTEM}:pseudonym:1:1`, `${BBS_SYSTEM}:pseudonym:1:1`, `${BBS_SYSTEM}:pseudonym:${cores}:1`].filter((x, i, a) => cores > 1 || a.indexOf(x) === i).map((x) => (cores > 1 ? x : x.replace(/:1:1$/, ':1:2'))))
+  const lf = o.measurements.rows.find((r) => r.proof_system === LONGFELLOW_SYSTEM)
+  check('Longfellow row: times and about 344 kB', lf?.prove?.median > 0 && lf.verify?.median > 0 && lf.proof_bytes?.median > 300_000, JSON.stringify(lf))
+  await tech.reload()
+  await tech.locator('[data-measured-row]').first().waitFor()
+  eq('/tech: one table row per group', await tech.locator('[data-measured-row]').count(), o.measurements.rows.length)
+  check('/tech: no estimates', !(await tech.getByText('Estimates per step').count()))
+  if (o.measurements.file.startsWith('/')) eq('the file has a line per run', readFileSync(o.measurements.file, 'utf8').trim().split('\n').length, 5)
+
+  begin('P4', 'a demo reset switches multithreading off and keeps the measurements; Clear empties them')
+  await resetDemo([])
+  o = await overview()
+  eq('after a reset: off, measurements kept', [o.multithreading, o.measurements.runs], [false, 5])
+  await tech.reload()
+  await tech.locator('[data-clear-measurements]').click()
+  await tech.locator('[data-clear-measurements]', { hasText: 'Click again to clear' }).click()
+  for (let k = 0; k < 30 && (await overview()).measurements.runs; k++) await page.waitForTimeout(100)
+  eq('cleared from /tech (two clicks)', (await overview()).measurements.runs, 0)
+  if (o.measurements.file.startsWith('/')) eq('the file is empty', readFileSync(o.measurements.file, 'utf8'), '')
+  await tech.close()
+  await ctx.dispose()
+}
+
 // ---------------------------------------------------------------------------------------------
 
 let crashed = null
@@ -2217,7 +2301,7 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, P: groupP, G: groupG }
     for (const g of ONLY) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2232,6 +2316,7 @@ try {
   await groupJ()
   await groupM()
   await groupL()
+  await groupP()
   await groupK()
   await groupG()
 } catch (e) {

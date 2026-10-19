@@ -118,3 +118,31 @@ fn prove_verify_and_refusals() {
   bad["dcql_query"]["credentials"][0]["req"][0]["id"] = json!("pseudonym-v1-sha256");
   assert_eq!(prove(&prover, &bad).unwrap_err().error, "unsupported_function");
 }
+
+/// The /tech thread switch: a presentation made on every core verifies on one thread, and the
+/// other way round; the metrics report the thread count.
+#[test]
+fn parallel_and_sequential_agree() {
+  let prover = Prover::load();
+  let verifier = Verifier::load(&std::fs::read(root("native/bbs/demo/issuer-params.bin")).unwrap()).unwrap();
+  let req = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(json!({ "ge": "2008-10-20", "le": "2013-10-19" })));
+  let w = wallet();
+  let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+  for (prove_parallel, verify_parallel) in [(true, false), (false, true)] {
+    let input: ProveInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation_mms", "handover": handover(&req),
+      "credential": w["holders"][0]["credential"], "device_key": w["holders"][0]["device_key"], "parallel": prove_parallel,
+    }))
+    .unwrap();
+    let out = prover.prove(&input).expect("prove");
+    assert_eq!(out["metrics"]["threads"], if prove_parallel { cores } else { 1 });
+    let v: VerifyInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation_mms", "presentation": out["presentation"], "handover": handover(&req),
+      "parallel": verify_parallel,
+    }))
+    .unwrap();
+    let r = verifier.verify(&v);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["metrics"]["threads"], if verify_parallel { cores } else { 1 });
+  }
+}

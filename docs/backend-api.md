@@ -23,6 +23,11 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   randomized and no witness is kept between requests.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and peak memory are its own.
+- **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false), which
+  `services.ts` sets from `/tech`'s switch. False runs the step in a one-thread rayon pool, true in a
+  pool of one thread per core (`nym-vega/src/threads.rs`); the proof does not depend on it. The
+  witness carries the choice to the prove step. `metrics.threads` reports the threads used (the
+  witness summary's, the proof's and the verification's); `info.max_threads` the cores.
 
 When no addon loads, the built server stops at start with the reasons (exit code 1,
 `server/plugins/backends.ts`); the development server keeps running and answers 503
@@ -137,7 +142,7 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
     "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "birth_date.identifier", "pseudonym.verifier_input", "results.nym"]
   }],
   "load_ms": 276.1,
-  "threads": 32
+  "max_threads": 32
 }
 ```
 
@@ -278,7 +283,7 @@ these differences.
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
 | `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
 | Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
-| Threads | 1 |
+| Threads | 1: Google's runtime at `61a8a73` has no parallel code. `parallel` is ignored; `info.threads` and `metrics.threads` are 1 |
 
 `loadProver(circuits)` and `loadVerifier(circuits, trustAnchorsPem, toleranceS)` take the directory
 of `circuits.zst`, `params.tsv` and `hash-semantic.tsv`, read both circuits once and check them
@@ -335,9 +340,14 @@ checks that their schema is the profile's. Calls take and return JSON text; one 
 a time.
 
 **`info`** (both): `implementation`, `version`, `schemes` (`scheme_id`, `proof_system`,
-`schema_id`, `schema_digest`, `plugins` in request order), `load_ms`, `threads`; the verifier also
+`schema_id`, `schema_digest`, `plugins` in request order), `load_ms`, `max_threads`; the verifier also
 `issuers` (`issuer_pk`, `schema_id`, `schema_digest`). The site offers a scheme only when the
 verifier reports the registry's proof system, schema and plugins (`server/utils/vp.ts`).
+
+**Threads.** The crates are built with bbs-cd-plugins' `parallel` feature. `prove` and `verify`
+take `"parallel": true | false` (absent: false): ecdsa-pop runs with `Parallelism::Max` (one thread
+per core) or `Off`. The library makes the output the same for both. `metrics.threads` reports it,
+`info.max_threads` the cores.
 
 **Prover: `prove`.** One call per presentation; there is no separate sign step, because the device
 key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
@@ -395,6 +405,8 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
 | `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
+| `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
+| `POST /api/tech/measurements/clear` | | Empties the measurements file |
 
 `{ purpose: 'signin', intent, community }` is the request of a logged-out visitor at an
 age-restricted community: one presentation of the pseudonym and the community's age range, which
