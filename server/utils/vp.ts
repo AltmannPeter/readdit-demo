@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
-import type { CircuitZkFormats, MmsZkFormats, VpFormats } from '#shared/types/oid4vp'
-import { PROOF_SYSTEMS, findCircuit, findScheme } from '#shared/registry/circuits'
+import type { VpFormats } from '#shared/types/oid4vp'
+import { PROOF_SYSTEMS, findCircuit, findScheme, findSystem } from '#shared/registry/circuits'
 import type { VpSessionRecord } from './store'
 
 const list = (v: unknown) =>
@@ -10,19 +10,19 @@ const list = (v: unknown) =>
     .filter(Boolean)
 
 /**
- * circuit_zk: the accepted circuits (config order) whose proof system the site accepts now, that
+ * mso_mdoc: the accepted circuits (config order) whose proof system the site accepts now, that
  * are in the approved registry, and that a loaded verifier (Vega, Longfellow) can verify. A circuit
  * a verifier lists must be the registry's: the same proof system, the same public inputs in the
  * same order and, where the registry pins one, the same hash of the circuits as data. A mismatch
  * is a configuration error and fails the offer.
  */
-async function circuitZkOffer(systems: string[]): Promise<CircuitZkFormats | undefined> {
+async function circuitOffer(systems: string[]): Promise<string[]> {
   const accepted = list(useRuntimeConfig().acceptedCircuits).filter((id) => systems.includes(findCircuit(id)?.proof_system ?? ''))
-  if (!accepted.length) return undefined
+  if (!accepted.length) return []
   const info = await verifier.info()
   const ids = accepted.filter((id) => {
     const entry = findCircuit(id)
-    const listed = info.circuits.find((c) => c.circuit_id === id)
+    const listed = info.circuits.find((c) => c.system_id === id)
     if (!entry || !listed) return false
     const names = entry.public_inputs.map((p) => p.name).join()
     if (listed.proof_system !== entry.proof_system) throw new Error(`verifier circuit ${id}: proof system ${listed.proof_system}, registry ${entry.proof_system}`)
@@ -35,18 +35,17 @@ async function circuitZkOffer(systems: string[]): Promise<CircuitZkFormats | und
     }
     return true
   })
-  if (!ids.length) return undefined
-  return { circuit_proof_system_values: [...new Set(ids.map((id) => findCircuit(id)!.proof_system))], circuit_id_values: ids }
+  return ids
 }
 
-/** mms_zk, likewise: the accepted schemes that are in the registry and that the BBS verifier
+/** bbs_cd, likewise: the accepted schemes that are in the registry and that the BBS verifier
  *  reports with the same proof system, schema and plugins. */
-async function mmsZkOffer(): Promise<MmsZkFormats | undefined> {
+async function schemeOffer(): Promise<string[]> {
   const accepted = list(useRuntimeConfig().acceptedSchemes)
   const info = await bbsVerifier.info()
   const ids = accepted.filter((id) => {
     const entry = findScheme(id)
-    const listed = info.schemes.find((s) => s.scheme_id === id)
+    const listed = info.schemes.find((s) => s.system_id === id)
     if (!entry || !listed) return false
     if (listed.proof_system !== entry.proof_system) throw new Error(`verifier scheme ${id}: proof system ${listed.proof_system}, registry ${entry.proof_system}`)
     if (listed.schema_id !== entry.schema.id || listed.schema_digest !== entry.schema.digest) {
@@ -55,8 +54,7 @@ async function mmsZkOffer(): Promise<MmsZkFormats | undefined> {
     if (listed.plugins.join() !== entry.plugins.map((p) => p.id).join()) throw new Error(`verifier scheme ${id}: plugins ${listed.plugins.join()} are not the registry's`)
     return true
   })
-  if (!ids.length) return undefined
-  return { proof_system_values: [...new Set(ids.map((id) => findScheme(id)!.proof_system))], scheme_id_values: ids }
+  return ids
 }
 
 /** No proof system is accepted (the demo's start): there is nothing to ask the wallet for. */
@@ -67,37 +65,37 @@ export class NothingAccepted extends Error {
 }
 
 /**
- * The site's offer: for each proof system the site accepts now (store().acceptedProofSystems,
- * switched in /tech), its format, when its backend is loaded. circuit_zk first (Vega, then
- * Longfellow), then mms_zk: the order of preference. A backend that is not loaded leaves its
- * circuit or format out; an offer with no format fails, and so does a configuration mismatch.
- * With nothing accepted, NothingAccepted.
+ * The site's offer, `vp_formats_supported.zkp_req`: the systems of the proof systems the site
+ * accepts now (store().acceptedProofSystems, switched in /tech), when their backend is loaded.
+ * Circuits first (Vega, then Longfellow), then the BBS scheme: the order of preference. A backend
+ * that is not loaded leaves its systems out; an offer with no system fails, and so does a
+ * configuration mismatch. With nothing accepted, NothingAccepted.
  */
 export async function verifierOffer(): Promise<VpFormats> {
   const accepted = store().acceptedProofSystems
   if (!accepted.length) throw new NothingAccepted()
-  const offer: VpFormats = {}
   const missing: string[] = []
-  const take = async <T>(systems: string[], make: () => Promise<T | undefined>): Promise<T | undefined> => {
-    if (!systems.some((x) => accepted.includes(x))) return undefined
+  const take = async (systems: string[], make: () => Promise<string[]>): Promise<string[]> => {
+    if (!systems.some((x) => accepted.includes(x))) return []
     try {
       return await make()
     } catch (e) {
       if (e instanceof ServiceError) {
         missing.push(`${systems.join(', ')}: ${e.code}`)
-        return undefined
+        return []
       }
       throw e
     }
   }
-  const circuitSystems = PROOF_SYSTEMS.filter((p) => p.format === 'circuit_zk').map((p) => p.id as string)
-  const zk = await take(circuitSystems, () => circuitZkOffer(circuitSystems.filter((x) => accepted.includes(x))))
-  if (zk) offer.circuit_zk = zk
-  const mms = await take(['bbs-cd-plugins-v0.1'], mmsZkOffer)
-  if (mms) offer.mms_zk = mms
-  if (!offer.circuit_zk && !offer.mms_zk) {
-    throw new Error(`no format to offer: the site accepts ${accepted.join(', ') || 'no proof system'}${missing.length ? `; ${missing.join('; ')}` : ''}`)
+  const circuitSystems = PROOF_SYSTEMS.filter((p) => p.source_format === 'mso_mdoc').map((p) => p.id as string)
+  const ids = [
+    ...(await take(circuitSystems, () => circuitOffer(circuitSystems.filter((x) => accepted.includes(x))))),
+    ...(await take(['bbs-cd-plugins-v0.1'], schemeOffer)),
+  ]
+  if (!ids.length) {
+    throw new Error(`no system to offer: the site accepts ${accepted.join(', ') || 'no proof system'}${missing.length ? `; ${missing.join('; ')}` : ''}`)
   }
+  const offer: VpFormats = { zkp_req: { proof_system_values: [...new Set(ids.map((id) => findSystem(id)!.proof_system))], system_id_values: ids } }
   return offer
 }
 

@@ -12,7 +12,7 @@
 // code, refused with "Pseudonym does not match"), c/teenspace (age range granted), c/afterdark
 // refused by the site, c/france joined with its own pseudonym (linked), a comment, the ban from
 // /mod, the second sign-up ending in "Account banned", /tech, then BBS only (switched in /tech
-// after a reset): sign-up with the teen's BBS card and c/teenspace with the date-range plugin, and
+// after a reset): sign-up on the teen's BBS phone and c/teenspace with the date-range plugin, and
 // then Longfellow only, over the same mdoc as Vega: sign-up, c/afterdark tried first and refused
 // by the wallet, c/teenspace granted.
 // At each step it checks that the guide panel shows the matching step.
@@ -92,14 +92,18 @@ const scan = async () => {
   await phone.getByText('Scan the QR Code').waitFor()
 }
 const readRequest = async () => phone.getByText(/Request to Share Data|Requirement Not Met|Unsupported Request/).waitFor({ timeout: 20_000 })
-/** Swap to the named phone while the QR code is on screen ("Teen's phone", "Adult's phone"). */
+/** Swap to the named phone while the QR code is on screen ("Teen's phone", "Adult's phone",
+ *  "Teen's BBS phone"); Swap phone hands over to the next of the three. */
 const usePhone = async (name) => {
   const label = page.locator('[data-phone-label]')
-  if ((await label.innerText()).startsWith(name)) return
-  await page.getByRole('button', { name: 'Swap phone' }).click()
-  await label.filter({ hasText: name }).waitFor()
-  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
-  await page.waitForTimeout(400) // the swap animation
+  for (let k = 0; k < 3 && !(await label.innerText()).startsWith(name); k++) {
+    const was = await label.innerText()
+    await page.getByRole('button', { name: 'Swap phone' }).click()
+    await page.waitForFunction((w) => document.querySelector('[data-phone-label]')?.innerText !== w, was)
+    await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+    await page.waitForTimeout(400) // the swap animation
+  }
+  if (!(await label.innerText()).startsWith(name)) throw new Error(`no phone named ${name}`)
 }
 const enterPin = async (pin) => {
   for (const d of pin) await phone.getByRole('button', { name: d, exact: true }).click()
@@ -322,9 +326,9 @@ try {
   await tech.getByRole('button', { name: /Age check, c\/teenspace/ }).click()
   await tech.getByText('Proof verified').first().waitFor()
 
-  // 9. BBS: the operator resets the demo and has Readdit accept only BBS (mms_zk) in /tech. The
-  // teen's phone answers with its BBS card: a new pseudonym and account, an age range with the
-  // date-range plugin, and c/afterdark refused by the site.
+  // 9. BBS: the operator resets the demo and has Readdit accept only BBS (bbs_cd) in /tech. The
+  // teen's BBS phone answers: a new pseudonym and account (the same seed as the teen's mdoc, another
+  // PRF), an age range with the date-range plugin, and c/afterdark refused by the site.
   step('9. BBS only')
   await tech.request.post(`${BASE}/api/demo/reset`)
   await tech.reload()
@@ -336,12 +340,12 @@ try {
   await ready(page)
   await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
-  await usePhone("Teen's phone")
+  await usePhone("Teen's BBS phone")
   await scan()
   await readRequest()
   await guide('consent')
   await openDetails()
-  await guidePanel.getByText('pseudonym-bbs-v1').first().waitFor()
+  await guidePanel.getByText('hashdh-bls12381g1').first().waitFor()
   await shot('bbs-consent')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
@@ -363,7 +367,7 @@ try {
   await shot('bbs-age-granted')
   await phone.getByRole('button', { name: 'Close', exact: true }).click()
 
-  // 10. Longfellow: reset, and Readdit accepts only Longfellow, the other circuit_zk backend. The
+  // 10. Longfellow: reset, and Readdit accepts only Longfellow, the other circuit over the mdoc. The
   // teen's phone answers with its mdoc, as for Vega: the same pseudonym function, so a new account
   // only because the demo was reset. c/afterdark first (refused by the wallet), then c/teenspace.
   step('10. Longfellow only')

@@ -82,7 +82,7 @@ function usedCredentialSection(i: GuideInput, site: string): GuideSection | null
     items:
       i.wallet.matching > 1
         ? [
-            `Each credential has its own seed. Under known-offender-matching-ssc the pseudonym is derived from the seed, so another credential gives another pseudonym for ${i.siteHost}, and so another ${site} account. The BBS credential also uses another pseudonym function (pseudonym-bbs-v1).`,
+            `Under known-offender-matching-ssc the pseudonym is derived from the credential's seed, so another credential gives another pseudonym for ${i.siteHost}, and so another ${site} account: another person's has its own seed, and a BBS credential uses another PRF (hashdh-bls12381g1), even over the same seed.`,
           ]
         : undefined,
     stacked: true,
@@ -111,11 +111,9 @@ function pseudonymSection(c: ConsentView): GuideSection | null {
   return {
     heading: `Pseudonym · ${c.pseudonym.config}`,
     rows: [
-      ...(c.pseudonym.function === 'pseudonym-bbs-v1'
-        ? [
-            { label: 'Function', value: 'pseudonym-bbs-v1', mono: true, code: true },
-            { label: 'Value', value: 'SHA-256(seed·OP), OP = hash_to_curve(config ‖ verifier_id) in BLS12-381; computed in the proof' },
-          ]
+      { label: 'prf', value: c.pseudonym.prf, mono: true, code: true },
+      ...(c.pseudonym.prf === 'hashdh-bls12381g1'
+        ? [{ label: 'Value', value: 'secret_seed·OP, OP = hash_to_curve_G1(config ‖ verifier_id): a 48-byte BLS12-381 G1 point, computed in the proof' }]
         : [{ label: 'Value', value: shortHex(c.pseudonym.value ?? ''), mono: true }]),
       { label: 'verifier_id', value: c.pseudonym.verifierId, mono: true, code: true },
     ],
@@ -153,8 +151,8 @@ function consentSections(c: ConsentView, site: string, i: GuideInput): GuideSect
   ].filter((s): s is GuideSection => !!s)
 }
 
-/** The addon that runs a request's proofs: Vega or Longfellow for circuit_zk (by the circuit), BBS
- *  for mms_zk. */
+/** The addon that runs a request's proofs: Vega or Longfellow for mso_mdoc (by the circuit), BBS
+ *  for bbs_cd. */
 const addonOf = (v: RequestView | null | undefined) =>
   v?.scheme ? 'the BBS addon' : v?.circuit?.proof_system === 'longfellow-libzk-v1' ? 'the Longfellow addon' : v?.circuit ? 'the Vega addon' : 'its proof addons'
 
@@ -215,7 +213,7 @@ function checksSection(view: RequestView | null | undefined, site: string): Guid
   return { heading: `What ${site} checks`, rows, items: items.length ? items : undefined, stacked: true }
 }
 
-/** mms_zk: what the BBS verifier derives itself, and what each plugin proves (the registry entry). */
+/** bbs_cd: what the BBS verifier derives itself, and what each plugin proves (the registry entry). */
 function schemeChecksSection(scheme: SchemeEntry, site: string): GuideSection {
   return {
     heading: `What ${site} checks`,
@@ -446,7 +444,7 @@ function qrStep(i: GuideInput, context: string): GuideStep {
     summary = `${i.siteName} shows a QR code that points to a signed OpenID4VP request. The person scans it with the SIROS ID wallet on their phone.`
   }
   if (i.dialog.swapped) {
-    summary = `The phones were swapped: the ${i.wallet.phone.toLowerCase() || 'other phone'} now faces the QR code. The request names no wallet, so any phone can answer it; only what its presentation proves counts. ${summary}`
+    summary = `The phones were swapped: the ${i.wallet.phone.replace(/^\w/, (ch) => ch.toLowerCase()) || 'other phone'} now faces the QR code. The request names no wallet, so any phone can answer it; only what its presentation proves counts. ${summary}`
   }
   const id = p?.kind === 'community' ? 'community-qr' : p?.kind === 'age' ? 'age-qr' : p?.community ? 'signin-age-qr' : 'signin-qr'
   return { id, context, stage: 0, title: 'QR code', summary, details }
@@ -456,12 +454,12 @@ function credentialStep(i: GuideInput, context: string): GuideStep {
   const c = focusOf(i)
   const phone = PHONES.find((p) => p.label === i.wallet.phone)
   const n = phone ? phone.credentials.length : i.credentials.length
-  const bbsToo = i.credentials.some((k) => k.format === 'mms_zk' && (!phone || phone.credentials.includes(k.index)))
+  const bbsToo = i.credentials.some((k) => k.format === 'bbs_cd' && (!phone || phone.credentials.includes(k.index)))
   return {
     id: 'credential',
     context,
     title: 'The credential',
-    summary: c?.format === 'mms_zk'
+    summary: c?.format === 'bbs_cd'
       ? `This is the BBS form of the Age and pseudonym credential, from ${c.issuer.name}: a birth date, a pseudonym seed and the device key, signed with BBS. A presentation commits to them without revealing them, and plugins prove the age range and the pseudonym.`
       : `The wallet holds ${n === 1 ? 'one Age and pseudonym credential' : bbsToo ? 'an mdoc and a BBS credential, both Age and pseudonym,' : `${n} Age and pseudonym credentials`}${c ? ` from ${c.issuer.name}` : ''}${
           n > 1 && c && !bbsToo ? `; this one was issued for a birth date of ${fmtDate(c.attributes.birth_date)}` : ''
@@ -477,7 +475,7 @@ function switchStep(i: GuideInput, context: string): GuideStep {
     context,
     stage: 2,
     title: 'Switch credential',
-    summary: `${i.wallet.matching} credentials in the wallet match the request. Each has its own seed, and the BBS credential its own pseudonym function, so each gives a different pseudonym for ${i.siteHost}, and so a different ${i.siteName} account.`,
+    summary: `${i.wallet.matching} credentials in the wallet match the request. Another person's has its own seed, and a BBS credential another PRF, so each gives a different pseudonym for ${i.siteHost}, and so a different ${i.siteName} account.`,
     details: [
       {
         heading: 'Credentials',
@@ -974,7 +972,7 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
           rows: [
             { label: 'Requirement', value: gateText(c.gate) },
             { label: 'Birth dates that qualify today', value: birthRangeText(gateRange(c.gate, i.today)) },
-            { label: 'req', value: 'pseudonym-v1-sha256 and age_check, in one credential query', mono: true },
+            { label: '_req', value: 'pseudonym and age_check, in one zkp_req credential query', mono: true },
           ],
           items: [
             'One presentation carries the pseudonym and the age result: both are outputs of the same proof over the same credential, so the age is bound to the pseudonym.',
@@ -1058,7 +1056,7 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
     rows: [
       { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
       { label: "Readdit's", value: `x509_san_dns:${i.siteHost}`, mono: true },
-      { label: 'Pseudonym', value: 'pseudonym-v1-sha256, known-offender-matching-ssc', mono: true },
+      { label: 'Pseudonym', value: 'pseudonym, known-offender-matching-ssc', mono: true },
     ],
     items: [
       `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Readdit account, if any, a ${name} account belongs to, unless the person chooses to link them.`,

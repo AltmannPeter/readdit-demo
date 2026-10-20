@@ -1,5 +1,5 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
-import type { CredentialQuery, DcqlQuery, RequestObject, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
 
 /**
  * signin: `signup` creates the account; `login` only logs in. With `community` (a logged-out
@@ -59,7 +59,8 @@ export interface VpSessionRecord {
   state: string
   /** The age range the request asks for, if any (from the community's gate, when the session starts). */
   age?: BirthDateRange
-  /** The DCQL query: one credential query per accepted format, alternatives in credential_sets.
+  /** The DCQL query: one zkp_req credential query per source format the accepted systems cover,
+   *  alternatives in credential_sets.
    *  Made again, with the offer, when the wallet fetches the request, so it follows /tech's switches. */
   dcql: DcqlQuery
   offer: VpFormats
@@ -73,8 +74,9 @@ export interface VpSessionRecord {
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
   /** The query the wallet answered, once a response arrived. */
   answered?: string
-  /** `proofId`: the circuit (circuit_zk) or scheme (mms_zk) of the verified presentation. */
-  outcome?: { ok: true; format: CredentialQuery['format']; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
+  /** `format`: the source format of the answered query; `proofId`: the system (circuit or scheme)
+   *  of the verified presentation. */
+  outcome?: { ok: true; format: SourceFormat; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
   /** `age`: the session's age proof was recorded for the account. */
   completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
@@ -87,8 +89,8 @@ export interface AccountRecord extends Account {
   community?: string
   /** A community account linked to this Readdit account's pseudonym. */
   linkedTo?: string
-  /** The format of the presentation that created the account: circuit_zk (mdoc) or mms_zk (BBS). */
-  format?: 'circuit_zk' | 'mms_zk'
+  /** The source format of the presentation that created the account: mso_mdoc or bbs_cd (BBS). */
+  format?: SourceFormat
 }
 
 export interface UserComment {

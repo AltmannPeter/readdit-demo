@@ -2,7 +2,7 @@
 name = "readdit-bbs-node"
 version = "0.1.0"
 edition = "2021"
-description = "Node addon: the mms_zk (BBS committed disclosures) prover and verifier for Readdit's server"
+description = "Node addon: the bbs_cd (BBS committed disclosures) prover and verifier for Readdit's server"
 publish = false
 
 [lib]

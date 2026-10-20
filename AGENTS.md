@@ -14,8 +14,8 @@ has to show two things:
 - A real zero-knowledge implementation runs behind the demo: Vega (Microsoft vega-prover) and
   Longfellow (Google longfellow-zk, Rust) with the nym_auth circuits of the nym-auth-circuits
   archive, over the same mdoc (see section 2), and, next to them, BBS with committed disclosures
-  (sirosfoundation/bbs-cd-plugins) for a BBS form of the same credential (the `mms_zk` format,
-  `docs/mms_zk.md`).
+  (sirosfoundation/bbs-cd-plugins) for a BBS form of the same credential (the rulebook's `bbs_cd`
+  encoding, `docs/bbs_cd.md`). Every request is the rulebook's `zkp_req` format (v0.4).
 
 The person uses Readdit on a computer and an identity wallet on their phone for every identity step,
 over cross-device OpenID4VP (QR code).
@@ -26,10 +26,11 @@ over cross-device OpenID4VP (QR code).
 - **Communities with their own pseudonym.** `c/france` wants proof of a real person, against bot
   accounts: it asks for a pseudonym under its own verifier identity (`france.readdit.example`), so
   each person gets one `c/france` account, not linked to their Readdit account unless they choose to.
-- **Two phones.** The teen's phone (the teen's mdoc and the teen's BBS credential) and the adult's
-  phone (the adult's mdoc). Swapping phones at the QR code shows someone trying another person's phone.
+- **Three phones, one credential each.** The teen's phone (the teen's mdoc), the adult's phone (the
+  adult's mdoc) and the teen's BBS phone (the teen's BBS credential). Swapping phones at the QR
+  code shows someone trying another person's phone, and picks which encoding answers.
 - **Which proofs the site accepts.** `/tech` switches the proof systems Readdit accepts: Vega and
-  Longfellow (`circuit_zk`) and BBS (`mms_zk`); none at start. With BBS and a `circuit_zk` system,
+  Longfellow (circuits over `mso_mdoc`) and BBS (a scheme over `bbs_cd`); none at start. With BBS and a circuit,
   the request offers both formats as alternatives and the wallet answers with one.
 - **Ban.** A moderator bans the account. The same wallet always yields the same pseudonym for
   Readdit, so signing up again lands on the banned account (known-offender matching within one site).
@@ -45,9 +46,12 @@ needs from the credential the person chose; the prover keeps none of it.
 
 ### Source documents
 
-- `nym_auth_rulebook.md` – Nym-authentication Attestation Specification and Rulebook v0.2. This is
-  normative for the attestation, the `circuit_zk` DCQL profile, capability negotiation,
-  `pseudonym-v1-sha256`, `age_check`, presentation encoding, verification and binding. In the shared
+- `nym_auth_rulebook.md` – Nym-authentication Attestation Specification and Rulebook v0.4 (Peter's
+  draft of 2026-10-20, with the `bbs_cd` schema digest `ab4183a9…b7e1` and the `secret_seed`
+  derivation decided that day). This is normative for the attestation in both encodings
+  (`mso_mdoc`, `bbs_cd`), the `zkp_req` DCQL format, capability negotiation, the `pseudonym`
+  function (`prf` `sha-256` and `hashdh-bls12381g1`), `age_check`, `ZkpPresentation`,
+  verification and binding. In the shared
   package it is `docs/nym_auth_rulebook.md`. In Peter's workspace it is in the parent folder
   (`pseudonym_demo/`).
 - `NYM-AUTH.md` (Peter's workspace only) – benchmarks for the full nym_auth statement. On mdoc,
@@ -67,9 +71,9 @@ current decisions; the replaced ones are quoted in them.
 | --- | --- |
 | Stack | Nuxt 4, TypeScript, Tailwind v4, Nitro server routes. Node `^22.22.3` or `>=24.15`. Rust (stable) for the proof addons. |
 | Backend | **Replaced 2026-10-13 (Frédéric):** the prover and verifier are a Rust Node addon (napi-rs, `native/vega`) that the site's server loads; `server/utils/services.ts` is the only caller. Two separate objects, each building its keys once at start. The contract is in `docs/backend-api.md`. Was: "Prover and verifier run as local containers. The demo uses Longfellow." **Added 2026-10-19 (Peter):** a second addon, `native/bbs`, for BBS (row BBS), and a third, `native/longfellow` (row Longfellow). The site starts when at least one addon loads (`server/plugins/backends.ts`). |
-| BBS | **Added 2026-10-19 (Peter):** the real BBS cryptography, not a mock: sirosfoundation/bbs-cd-plugins 0.1 (ETSI BBS committed disclosures v0.7, BLS12-381-SHA-256) vendored unchanged in `native/bbs/vendor` (`native/bbs/VENDOR-SHA256SUMS`), with the plugins `ecdsa-pop` (hashed mode: device binding, decided), `pseudonym` and `date-range`. The demo profile is `docs/mms_zk.md` (`native/bbs/nym-bbs`). A new DCQL format `mms_zk` (Peter's name), its own function `pseudonym-bbs-v1` with the configuration as a parameter (`known-offender-matching-ssc`, `x509_san_dns`), and `age_check` as in the rulebook. The pseudonym is SHA-256 of the plugin's G1 point (Peter), so it is 32 bytes like the Vega one, but never equal to it: one person has one account per format. The BBS credential (`app/wallet/demo-wallet-bbs.json`, `native/bbs/issuer`) is the teen's only, with the teen's mdoc device key. |
-| Accepted proof systems | **Added 2026-10-19 (Peter):** the site decides which formats it accepts and says so in the request (`vp_formats_supported`, and the DCQL query). Switches in `/tech` (`POST /api/tech/accept`), default Vega only; a demo reset restores the default (`NUXT_ACCEPTED_PROOF_SYSTEMS`). **Fixed 2026-10-19 (Peter's report: with BBS only, an mdoc presentation still went through):** the offer and the DCQL query are made again when the wallet fetches the request (request_uri), so a QR code already on screen follows the switches, and response_uri refuses a presentation whose format is no longer accepted (code `format`). With both, the query holds the `circuit_zk` and the `mms_zk` credential query, `circuit_zk` first, as alternatives in one `credential_sets` entry; the wallet answers with the selected card if it fits, else the first that does, and offers "Switch credential". A person banned under one format can come back under the other when the site accepts both: that is the site's choice. **Changed 2026-10-19 (Peter):** nothing is accepted at start or after a demo reset (`NUXT_ACCEPTED_PROOF_SYSTEMS` empty); the operator switches proof systems on in `/tech`. Until then the site starts no wallet request (503 `none_accepted`): the dialog says "No proof accepted", the guide says what to tick, `/tech` says so above the switches. Switching the last one off is allowed. Vega and Longfellow are switched separately, though both are `circuit_zk`: the request lists the accepted circuits, and response_uri also refuses a presentation whose circuit's proof system was switched off meanwhile (code `format`). |
-| Proof system | **Replaced 2026-10-13 (Frédéric):** Vega (`vega-v1`, microsoft/vega-prover `c0ee259`) with the nym-auth-circuits `vega-age` circuits, vendored unchanged, circuit `urn:circuits:vega:nym_auth:v1`. The full `circuit_zk` DCQL extension is implemented, including capability negotiation. Was: "Longfellow for the demo." Longfellow is the second `circuit_zk` backend (row Longfellow). |
+| BBS | **Added 2026-10-19 (Peter):** the real BBS cryptography, not a mock: sirosfoundation/bbs-cd-plugins 0.1 (ETSI BBS committed disclosures v0.7, BLS12-381-SHA-256) vendored unchanged in `native/bbs/vendor` (`native/bbs/VENDOR-SHA256SUMS`), with the plugins `ecdsa-pop` (hashed mode: device binding, decided), `pseudonym` and `date-range`. **Replaced 2026-10-20 (Peter, rulebook v0.4):** the BBS form is the rulebook's `bbs_cd` encoding, asked for with `zkp_req` (`meta.source_format` `bbs_cd`, `schema_id_value`), the `pseudonym` function with `prf` `hashdh-bls12381g1`, and answered with a `ZkpPresentation` (the envelope as `proof`, the 96-byte issuer key as `issuer_key_set`, no `proof_time`). The pseudonym is the 48-byte G1 point itself, which the verifier checks against the plugin's output; Readdit stores it as 96 hex digits. The schema attribute is `secret_seed` (digest `ab4183a9…b7e1`), and its scalar is hash_to_scalar(the teen's 16-byte `secret_seed`, "nym_auth/v1/bbs-seed") (Peter: "use the hash_to_scalar instead of random and use secret_seed for both"); the issuer refuses a zero scalar. The pseudonym still differs from the mdoc one (another PRF): one person has one account per encoding. `docs/bbs_cd.md`, `native/bbs/nym-bbs`. Was: the demo's own `mms_zk` format, function `pseudonym-bbs-v1` with `verifier_id_type`, the pseudonym as SHA-256 of the point, a random seed. |
+| Accepted proof systems | **Added 2026-10-19 (Peter):** the site decides which formats it accepts and says so in the request (`vp_formats_supported`, and the DCQL query). Switches in `/tech` (`POST /api/tech/accept`), default Vega only; a demo reset restores the default (`NUXT_ACCEPTED_PROOF_SYSTEMS`). **Fixed 2026-10-19 (Peter's report: with BBS only, an mdoc presentation still went through):** the offer and the DCQL query are made again when the wallet fetches the request (request_uri), so a QR code already on screen follows the switches, and response_uri refuses a presentation whose format is no longer accepted (code `format`). With both, the query holds the `mso_mdoc` and the `bbs_cd` zkp_req credential query, `mso_mdoc` first, as alternatives in one `credential_sets` entry, and one `zkp_req` metadata entry lists every accepted system (circuits and the scheme); each phone answers with its one credential if it fits. A person banned under one format can come back under the other when the site accepts both: that is the site's choice. **Changed 2026-10-19 (Peter):** nothing is accepted at start or after a demo reset (`NUXT_ACCEPTED_PROOF_SYSTEMS` empty); the operator switches proof systems on in `/tech`. Until then the site starts no wallet request (503 `none_accepted`): the dialog says "No proof accepted", the guide says what to tick, `/tech` says so above the switches. Switching the last one off is allowed. Vega and Longfellow are switched separately, though both are circuits over `mso_mdoc`: the request lists the accepted circuits, and response_uri also refuses a presentation whose circuit's proof system was switched off meanwhile (code `format`). |
+| Proof system | **Replaced 2026-10-13 (Frédéric):** Vega (`vega-v1`, microsoft/vega-prover `c0ee259`) with the nym-auth-circuits `vega-age` circuits, vendored unchanged, circuit `urn:circuits:vega:nym_auth:v1`. The DCQL extension is implemented, including capability negotiation: `circuit_zk` until 2026-10-20, then rulebook v0.4's `zkp_req` (row Rulebook v0.4). Was: "Longfellow for the demo." Longfellow is the second circuit backend (row Longfellow). |
 | Longfellow | **Decided 2026-10-13 (Peter):** Longfellow is added next to Vega, not instead of it. Implementation: Google's Rust Longfellow (the "Google Rust" runtime of `NYM-AUTH.md`). The nym_auth circuit is generated by Peter's team (the reference macro, `macros/longfellow/nym-auth.macro` in his workspace). The site starts when at least one backend loads, and offers only the circuits of the backends that loaded. **Built 2026-10-19 (Peter):** from the nym-auth-circuits archive's Longfellow part instead of a macro build: `longfellow/mdoc`, the LFC2 pair (hash circuit over GF(2^128), signature circuit over P-256, SPEC.md L1–L9), on Google's longfellow-zk Rust runtime `61a8a73`, its 11 runtime crates vendored unchanged in `native/longfellow/vendor/longfellow-zk` (Peter: vendored, not fetched; the trimmed workspace manifest there is ours; `native/longfellow/VENDOR-SHA256SUMS`). mdoc only (Peter): the archive's SD-JWT circuits are not used. Circuit `urn:circuits:longfellow:nym_auth:v1`, proof system `longfellow-libzk-v1`, the same credential, DeviceAuthentication and pseudonym function as Vega, so a person has one account under either. Preference Vega, then Longfellow (Peter). The archive's fixtures use the DC API handover; Readdit uses B.2.6.1. The circuits take e2 as a public input and the SessionTranscript only seeds Fiat–Shamir, so nothing in them changes (`native/longfellow/nym-longfellow/src/lib.rs`). The seed question is settled: the circuits prove `ssc = SHA-256(secret_seed)` with the seed held by the wallet. |
 | Brand | Site name "Readdit", lowercase wordmark "readdit", original logo. Communities are prefixed `c/`. Do not use Reddit's logo, mascot or `r/`. |
 | Wallet look | **Replaced 2026-10-13 (Frédéric):** the SIROS ID wallet (sirosfoundation/wallet-frontend, BSD-2-Clause): its screens, colours (`--color-sid-*`), Inter, lucide icons and logo, attributed in `app/components/wallet/THIRD-PARTY-NOTICES.txt`. The phone frame stays generic. The site's dialog names no wallet brand: its steps say "Open an EUDI Wallet App on your phone"; sign-up and log-in have no subtitle (Peter, 2026-10-13). Was: "Generic phone with no brand marks. App name 'EUDI Wallet App', grey-blue palette, no logo." |
@@ -78,9 +82,10 @@ current decisions; the replaced ones are quoted in them.
 | Copy | Tight and plain. It must not sound like marketing or AI-written text. The wallet uses the SIROS ID wallet's English strings (`src/locales/en.json`) wherever one exists; screens the real wallet lacks ("Requirement Not Met") are written in the same style. |
 | Guide | **Added 2026-10-13 (Frédéric):** a guide panel docked at the right edge, styled apart from the product, collapsible. It follows the flow state by itself (`app/guide/steps.ts`): for the current step a title and a neutral summary of 1 to 3 sentences, and optional Details with the technical facts, each derived from the request, the credential, the circuit's registry entry, the rulebook properties (`app/wallet/rulebook.ts`) and the measured metrics (the prover's and, apart, the verifier's). It claims nothing the rulebook or the code does not. **Added 2026-10-13 (Peter):** the presenter can step back and forward through the steps shown so far (‹ › in the guide header, up to 50); any new step jumps back to the present. |
 | Flow | Nothing is scripted. Each community has a gate `{ minAge?, maxAge? }` and the site reacts to any click order. |
-| Phones | **Added 2026-10-19 (Peter):** two phones, one person each (`PHONES` in `app/wallet/holder.ts`): "Teen's phone" holds the teen's mdoc and the teen's BBS credential (card "Age and pseudonym (BBS)", teal `#2E5E6E`), "Adult's phone" the adult's mdoc. The card chosen with Switch credential becomes the phone's selected card, so the next request starts with it (a page reload starts again with the first card). The dialog shows one at a time, named above it with the owner's age from the credential ("Teen's phone · 15"), in a frame colour per phone (grey, red), with **Swap phone**, which works until the phone on screen has scanned. The choice stays across dialogs until swapped (a page reload starts on the teen's phone). Each phone keeps its own history and selected card. The site records a swap in the session (`POST /api/vp/session/:id/phone`) for `/tech`; the guide names the phone in every step's context and says when the phones were swapped. The cheating attempt: logged in as the teen, swap to the adult's phone at c/afterdark's QR code; it proves 18+, and Readdit answers "Pseudonym does not match". |
-| Credential | **Changed 2026-10-13 (Frédéric), split over two phones 2026-10-19 (Peter):** two `nym_auth` credentials from one Document Signer: the teen's (born 2011-03-14) and an adult's (born 1990-05-20), one per phone; a request starts with the credential shown on the phone's home screen (or opened last). Each covers both pseudonym and age, with its own seed, so each gives its own pseudonym and account. Each card has its own colour (teen grey `#5B6573`, adult red `#8C2F39`, `CARD_COLOURS` in `app/wallet/holder.ts`) and shows the holder's birth date ("Birth Date"), which tell them apart. The birth date stays on the phone; the request screen does not show it. The wallet holds no other card (the Personal ID placeholder was removed on 2026-10-13, Peter). They do not expire: validUntil `9999-12-31T23:59:59Z` and the Document Signer's notAfter `99991231235959Z`; the product shows no expiry. When more than one credential on a phone matches a request, the request screen offers "Switch credential", as the SIROS ID app does; with one credential per phone it does not appear. Was: "One `nym_auth` attestation covers both pseudonym and age." |
-| Pseudonym config | `known-offender-matching-ssc` with `verifier_id_type: x509_san_dns`. `client_id = x509_san_dns:<siteHost>` is also the `verifier_id`; a community with its own pseudonym uses `x509_san_dns:<nymHost>` instead. |
+| Phones | **Added 2026-10-19 (Peter); three since 2026-10-20 (Peter: "Phone one have teen mso_mdoc only. Phone 2 is adult mso_mdoc only. Phone 3 is BBS teen only. This makes it easier to handle priorities"):** one credential per phone (`PHONES` in `app/wallet/holder.ts`): "Teen's phone" the teen's mdoc, "Adult's phone" the adult's mdoc, "Teen's BBS phone" the teen's BBS credential (card "Age and pseudonym (BBS)", teal `#2E5E6E`). So the phone, not a choice between cards, decides which encoding answers, and Switch credential does not appear. The dialog shows one at a time, named above it with the owner's age from the credential ("Teen's phone · 15"), in a frame colour per phone (grey, red, teal), with **Swap phone**, which hands over to the next phone in that order and works until the phone on screen has scanned. The choice stays across dialogs until swapped (a page reload starts on the teen's phone). Each phone keeps its own history. Each phone's `wallet_metadata` lists the systems for its credential. The site records a swap in the session (`POST /api/vp/session/:id/phone`) for `/tech`; the guide names the phone in every step's context and says when the phones were swapped. The cheating attempt: logged in as the teen, swap to the adult's phone at c/afterdark's QR code; it proves 18+, and Readdit answers "Pseudonym does not match". Was: two phones, the teen's holding both the mdoc and the BBS credential, with Switch credential between them. |
+| Credential | **Changed 2026-10-13 (Frédéric), split over the phones 2026-10-19 (Peter):** two `nym_auth` mdocs from one Document Signer: the teen's (born 2011-03-14) and an adult's (born 1990-05-20), one per phone, and the teen's BBS credential on a third phone (row BBS); a request starts with the credential shown on the phone's home screen (or opened last). Each covers both pseudonym and age. Each mdoc has its own seed, so each gives its own pseudonym and account; the teen's BBS credential has the teen's seed, but another PRF, so another account. Each card has its own colour (teen grey `#5B6573`, adult red `#8C2F39`, BBS teal `#2E5E6E`, `CARD_COLOURS` in `app/wallet/holder.ts`) and shows the holder's birth date ("Birth Date"), which tell them apart. The birth date stays on the phone; the request screen does not show it. The wallet holds no other card (the Personal ID placeholder was removed on 2026-10-13, Peter). They do not expire: validUntil `9999-12-31T23:59:59Z` and the Document Signer's notAfter `99991231235959Z`; the product shows no expiry. When more than one credential on a phone matches a request, the request screen offers "Switch credential", as the SIROS ID app does; with one credential per phone it does not appear. Was: "One `nym_auth` attestation covers both pseudonym and age." |
+| Pseudonym config | `known-offender-matching-ssc`, `ver` 1, `prf` `sha-256` (mdoc) or `hashdh-bls12381g1` (BBS). Rulebook v0.4 has no `verifier_id_type`: the trust framework fixes one form of `verifier_id`, and the demo's fixes `x509_san_dns`, so `client_id = x509_san_dns:<siteHost>` is the `verifier_id`; a community with its own pseudonym uses `x509_san_dns:<nymHost>` instead. |
+| Rulebook v0.4 | **Added 2026-10-20 (Peter):** the requests and presentations follow rulebook v0.4 (`docs/nym_auth_rulebook.md`): format `zkp_req` with `meta.source_format` (`mso_mdoc` + `doctype_value`, `bbs_cd` + `schema_id_value`), `_req` items `{ fn_id, return, params }`, `vp_formats_supported.zkp_req` `{ proof_system_values, system_id_values }` (circuits and schemes together), and `ZkpPresentation` with `system_id`. **The transport is unchanged (Peter: "do not change the transport at all"):** cross-device `request_uri` (POST, `wallet_metadata`), `direct_post`, the B.2.6.1 handover, no encryption; the rulebook's example shows the DC API. Was: the `circuit_zk` format of rulebook v0.2 and the demo's `mms_zk`. |
 | Own-pseudonym communities | **Added 2026-10-19 (Peter):** a community can set `nymHost` (`shared/data/communities.ts`); c/france uses `france.readdit.example`. Its requests carry `client_id = x509_san_dns:<nymHost>`, and the request-signing certificate lists that name too (`verifierHosts`). The Vega circuit takes `verifier_input` = SHA-256(client_id) as a public input, so the same credential gives a different, unlinkable pseudonym there, with no circuit change (the circuit fixes the DST, `prover_input` = zeros and `ssc`; it cannot do a user-chosen input or `psc`). One account per person, known-offender matching within c/france, bans stick. The issuer can still link (ssc); the ideal is `private_seed` (psc), which needs a new circuit. Rules: c/france posts and comments are visible only with a c/france account, and appear under its pseudonym only. Logged out, joining creates or opens a standalone c/france account. Logged in to Readdit, only the c/france account linked to that account counts. Without one, the person chooses (Peter, 2026-10-19; no extra confirm step): **Join and link to u/…** (creates the c/france account or links a standalone one), or **Log out and join separately** (no link). The server refuses a logged-in join that does not say `link: true` (`400 link_required`). Linking refused as `other_pseudonym` when the Readdit account is already linked to another c/france pseudonym (another person's wallet), and as `linked_elsewhere` when the c/france account is linked to another Readdit account. A Readdit account cannot be added from a c/france-only login. A ban in c/france applies to the c/france pseudonym only. A ban of a Readdit account also bans the community accounts linked to it (`banned.cascade`); unbanning the Readdit account lifts those, not a community account's own ban (Peter, 2026-10-19). Age ranges live on the Readdit account only, so a linked c/france account from another phone opens no age-gated community. Accounts of both kinds share one store, keyed by pseudonym; `community` and `linkedTo` mark community accounts. Badge and notice: "Proof of human"; copy says the c/france pseudonym is not linked to other accounts "unless you choose to" (Peter, 2026-10-19). With only a c/france account, the header shows it like a Readdit account, marked with the community, and its menu offers Log in to Readdit and Log out. |
 | Age binding | Every age request also asks for the pseudonym in the same `req`. The site accepts the age result only if the pseudonym equals the logged-in account's pseudonym; otherwise the dialog says "Pseudonym does not match" and nothing is applied (for example an adult credential's proof while logged in with the teen's account). |
 | Logged-out gated community | **Changed 2026-10-13 (Frédéric's report "the after dark is locked without having verified the age"):** a logged-out visitor at an age-restricted community sees its age requirement and one button, which starts one request for the pseudonym and the age range: it creates the account or logs in to it, and records the age. Plain log-in and sign-up still ask for the pseudonym only. Was: "Log in to view" with a lock, then a second request for the age. |
@@ -111,9 +116,9 @@ current decisions; the replaced ones are quoted in them.
 5. Open `c/france`, **Join and link** with the teen's phone: a c/france pseudonym, linked to the account.
 6. Comment in `c/teenspace`. In the `/mod` window, ban the user. The user window shows the ban.
 7. Sign up again with the same wallet. The site shows "Account banned".
-8. BBS: reset the demo, and in `/tech` accept BBS (alone, or with Vega to show the choice). Sign up on
-   the teen's phone with the BBS card, then `c/teenspace`: the age range comes from the date-range
-   plugin, and `c/afterdark` is refused by the site.
+8. BBS: reset the demo, and in `/tech` accept BBS (alone, or with Vega to show the choice). **Swap
+   phone** to the teen's BBS phone (twice from the teen's phone), sign up, then `c/teenspace`: the
+   age range comes from the date-range plugin, and `c/afterdark` is refused by the site.
 9. Longfellow: reset the demo, accept Longfellow in `/tech`. Sign up on the teen's phone, try
    `c/afterdark` (Requirement Not Met), then `c/teenspace`.
 
@@ -157,7 +162,7 @@ app/
                                  account, components/ModAccount.vue), ban/unban, reset demo (separate window)
 server/
   utils/services.ts              THE ONLY CODE THAT CALLS THE PROOF BACKENDS (the Vega, Longfellow and BBS addons;
-                                 circuit_zk calls go to the addon of the circuit)
+                                 mso_mdoc calls go to the addon of the circuit)
   plugins/backends.ts            loads the three addons when the server starts; stops the built server when none loads
   utils/test-faults.ts           test only (READDIT_TEST_FAULTS=1): fails the next call of one addon step
   utils/errors.ts                refusals with a code in data.error; body parsing
@@ -182,8 +187,8 @@ shared/
                                  registry (BBS), PROOF_SYSTEMS (/tech's switches)
   utils/mdoc.ts                  reads an IssuerSigned (wallet screens)
   utils/negotiation.ts           tailorFormats (verifier side), selectCircuit (wallet side)
-  utils/dcql.ts                  credential queries (circuit_zk, mms_zk, credential_sets), Request Object, authorization URL
-  utils/pseudonym.ts             pseudonym-v1-sha256, all four configs
+  utils/dcql.ts                  zkp_req credential queries (mso_mdoc, bbs_cd, credential_sets), Request Object, authorization URL
+  utils/pseudonym.ts             the pseudonym with prf sha-256, all four configs
   types/oid4vp.ts                protocol types
 native/vega/                     Rust workspace: the proof backend
   vega-age/, circuits/           nym-auth-circuits circuits and shapes, vendored unchanged (VENDOR-SHA256SUMS)
@@ -191,20 +196,20 @@ native/vega/                     Rust workspace: the proof backend
   node/                          the napi-rs addon (Prover, Verifier)
   issuer/                        nym-issuer: the demo credentials (one per --holder), keys and trust anchor
   demo/document-signer.pem       the verifier's trust anchor
-native/longfellow/               Rust workspace: the Longfellow backend (circuit_zk, the same mdoc as Vega)
+native/longfellow/               Rust workspace: the Longfellow backend (mso_mdoc, the same mdoc as Vega)
   vendor/longfellow-zk/          google/longfellow-zk 61a8a73, the 11 runtime crates, unchanged (VENDOR-SHA256SUMS)
   circuits/mdoc/, fixtures/      the archive's circuits.zst, params.tsv, hash-semantic.tsv, test vectors, unchanged
   nym-longfellow/                witness (SPEC.md L3-L5), prove and verify (L6) around the runtime, OpenID4VP
                                  handover, presentation, checks (tests/flow.rs: the archive's vectors, the demo flow)
   node/                          the napi-rs addon (Prover, Verifier: the same interface as native/vega/node)
   .cargo/config.toml             carry-less multiply for GF(2^128): +pclmulqdq (x86-64), +aes (arm64, required)
-native/bbs/                      Rust workspace: the BBS backend (mms_zk, docs/mms_zk.md)
+native/bbs/                      Rust workspace: the BBS backend (bbs_cd, docs/bbs_cd.md)
   vendor/bbs-cd-plugins/         sirosfoundation/bbs-cd-plugins 0.1, vendored unchanged (VENDOR-SHA256SUMS)
   nym-bbs/                       the profile: schema, Request Object → BBS request, prover, verifier (tests/flow.rs)
   node/                          the napi-rs addon (BbsProver, BbsVerifier)
   issuer/                        bbs-issuer: the demo BBS credential (app/wallet/demo-wallet-bbs.json) and demo/issuer-params.bin
   demo/issuer-params.bin         the BBS verifier's trusted issuer key and schema
-docs/mms_zk.md                   the mms_zk profile, for review
+docs/bbs_cd.md                   how the demo implements the rulebook's bbs_cd encoding
 Dockerfile                       the site with the three addons (three Rust build stages); docker-compose.yml runs it
 .devcontainer/devcontainer.json  GitHub Codespaces: builds the Dockerfile, runs the site on port 3000, adds CA certificates
 TRY-IT.md                        how to try the demo in a codespace, for non-coders
@@ -216,7 +221,7 @@ scripts/flows-check.mjs          every flow, happy and unhappy, in the browser a
 ```
 
 All of the flow is real: the OpenID4VP request/response, signed Request Objects, capability
-negotiation, DCQL `circuit_zk` and `mms_zk` checks on both sides, the presentation encodings, the
+negotiation, DCQL `zkp_req` checks on both sides, the presentation encodings, the
 pseudonym derivations, the Vega, Longfellow and BBS proofs and their verification, accounts, bans and gate logic. What
 is not: the holder binding (the device key and the seed sit in the page), the PIN (any PIN unlocks)
 and the phone's speed (proofs run on the server's CPU).
@@ -241,12 +246,12 @@ and the phone's speed (proofs run on the server's CPU).
    `test/*.bin` slot for slot and verifies its `test/proof.bin`, then proves and verifies the demo
    credentials. Not done: `scripts/vega-check.mjs` runs Vega only.
 
-6. **BBS: built 2026-10-19** (row BBS, `docs/mms_zk.md`). For Peter to review: the profile's
-   choices (§8 of `docs/mms_zk.md`: the names `mms_zk` and `pseudonym-bbs-v1`, the audience as the
-   OpenID4VPHandoverInfo hash, the plugin order), and whether the presentation order should show
-   both formats accepted at once (a banned mdoc account can then return with the BBS card). The
-   adult's phone has no BBS credential; issuing one is `bbs-issuer --device-of 1 --birth-date
-   1990-05-20` into a second file and a holder entry in `PHONES`.
+6. **BBS: built 2026-10-19, moved to rulebook v0.4 on 2026-10-20** (rows BBS and Rulebook v0.4,
+   `docs/bbs_cd.md`). For Peter to review: the audience as the OpenID4VPHandoverInfo hash and the
+   plugin order (`docs/bbs_cd.md` §3), and whether the presentation order should show both formats
+   accepted at once (a banned mdoc account can then return on the BBS phone). The adult has no BBS
+   credential; issuing one is `bbs-issuer --device-of 1 --birth-date 1990-05-20` into a second
+   file and a fourth entry in `PHONES`.
 
 ## 5. Rules for changing the code
 
@@ -296,7 +301,7 @@ set was removed on 2026-10-13 because it showed the old UI).
 
 `scripts/flows-check.mjs` drives every flow of the inventory (the PR lists them): sign-up, log-in
 and log-out, the communities and age gates, the one request at a gated community when logged out,
-comments, bans, both credentials and Switch credential, the wallet's refusals (decline, cancel at
+comments, bans, the three phones, the wallet's refusals (decline, cancel at
 the PIN, requirement not met, unsupported and untrusted requests), closing the dialog, expired and
 used QR codes, an age proof from the other credential, a ban or a log-out during a request, a demo
 reset, and over HTTP the verifier's refusals (replay, another state or nonce, tampered

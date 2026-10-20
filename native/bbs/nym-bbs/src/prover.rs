@@ -23,8 +23,9 @@ use serde_json::{json, Map, Value as Json};
 use crate::credential::CredentialJson;
 use crate::error::Refusal;
 use crate::measure::{ms, Peak};
-use crate::profile::{self, Handover, RequestObject, BIRTH_DATE, DEVICE_KEY, LIMB_BITS, PROOF_SYSTEM, SCHEME_ID};
-use crate::{b64url, hex, public_pseudonym, unb64url};
+use crate::presentation::{Presentation, ResultValue};
+use crate::profile::{self, Handover, RequestObject, BIRTH_DATE, DEVICE_KEY, LIMB_BITS, PROOF_SYSTEM, SYSTEM_ID};
+use crate::{b64url, hex, unb64url};
 
 /// The device key as the wallet holds it (P-256 JWK with its private part).
 #[derive(Clone, Debug, Deserialize)]
@@ -128,12 +129,25 @@ impl Prover {
 
     // The pseudonym, from the plugin proof: "PSN\x01" ‖ nym (48 bytes) ‖ c ‖ z_m ‖ z_s.
     let parsed = parse(&presentation, std::slice::from_ref(&cred.issuer), &s.request).map_err(|e| Refusal::bad_request(e.to_string()))?;
-    let nym = parsed.plugin_proofs[s.index_pseudonym].get(4..52).ok_or_else(|| Refusal::bad_request("pseudonym proof"))?;
+    let nym: [u8; 48] = parsed.plugin_proofs[s.index_pseudonym]
+      .get(4..52)
+      .and_then(|b| b.try_into().ok())
+      .ok_or_else(|| Refusal::bad_request("pseudonym proof"))?;
     let mut results = Map::new();
-    results.insert(s.nym_handle.clone(), Json::String(hex(&public_pseudonym(nym))));
-    if let Some(h) = &s.age_handle {
-      results.insert(h.clone(), Json::Bool(true));
+    let mut values = Vec::new();
+    for h in &s.handles {
+      if *h == s.nym_handle {
+        results.insert(h.clone(), Json::String(hex(&nym)));
+        values.push((h.clone(), ResultValue::Pseudonym(nym)));
+      } else {
+        results.insert(h.clone(), Json::Bool(true));
+        values.push((h.clone(), ResultValue::True));
+      }
     }
+    // ZkpPresentation: the envelope as the proof, the issuer key as a set of one.
+    let zkp = Presentation { system_id: SYSTEM_ID.into(), proof: presentation.clone(), issuer_key_set: vec![cred.issuer.pk.clone()], results: values }
+      .encode()
+      .map_err(Refusal::bad_request)?;
 
     let len = |r: (usize, usize)| r.1 - r.0;
     let plugin_ms = |i: Option<usize>| i.and_then(|i| ps.plugins.get(i)).map(|d| d.as_secs_f64() * 1e3);
@@ -151,7 +165,7 @@ impl Prover {
       "total_ms": ms(t_all),
       "peak_memory_mb": peak.read(),
       "proof_bytes": presentation.len(),
-      "presentation_bytes": presentation.len(),
+      "presentation_bytes": zkp.len(),
       "parts": {
         "bbs_proof": len(parsed.credentials[0].bbs_range),
         "ecdsa_pop": len(parsed.plugin_ranges[0]),
@@ -161,8 +175,8 @@ impl Prover {
       "threads": par.threads(),
     });
     Ok(json!({
-      "scheme_id": SCHEME_ID,
-      "presentation": b64url(&presentation),
+      "system_id": SYSTEM_ID,
+      "presentation": b64url(&zkp),
       "results": results,
       "metrics": metrics,
       "statement": {
@@ -180,7 +194,7 @@ impl Prover {
 pub fn scheme_json() -> Json {
   let schema = profile::schema().expect("the profile's schema");
   json!({
-    "scheme_id": SCHEME_ID,
+    "system_id": SYSTEM_ID,
     "proof_system": PROOF_SYSTEM,
     "schema_id": schema.id(),
     "schema_digest": hex(&schema.digest()),

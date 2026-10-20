@@ -13,7 +13,7 @@ export interface ProofMetrics {
   prove_ms?: number
   proof_bytes?: number
   presentation_bytes?: number
-  /** mms_zk: the BBS prover's parts (commitments, BBS proof, each plugin) and sizes. */
+  /** bbs_cd: the BBS prover's parts (commitments, BBS proof, each plugin) and sizes. */
   bbs?: {
     offline_ms?: number
     bbs_ms?: number
@@ -37,7 +37,7 @@ export interface WalletFlow {
   matching: number
   /** The "Switch credential" popup is open. */
   switching: boolean
-  /** Circuits (circuit_zk) and schemes (mms_zk) the wallet can run (its wallet_metadata). */
+  /** Circuits (mso_mdoc) and schemes (bbs_cd) the wallet lists in its wallet_metadata for this phone. */
   walletCircuits: string[]
   walletSchemes: string[]
   view: RequestView | null

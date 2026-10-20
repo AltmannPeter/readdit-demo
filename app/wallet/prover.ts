@@ -12,8 +12,8 @@ export interface SignOutput {
 }
 
 export interface ProveOutput {
-  circuit_id: string
-  /** base64url(CBOR(CircuitZkPresentation)) */
+  system_id: string
+  /** base64url(CBOR(ZkpPresentation)) */
   presentation: string
   results: Record<string, string | true>
   witness_ms?: number
@@ -43,11 +43,11 @@ function failure(route: string, e: unknown): ProverError {
 
 /** Step 1, once the PIN screen has unlocked the wallet (any PIN does): the device key signs
  *  DeviceAuthentication for this request. No PIN leaves the phone. */
-export async function unlockAndSign(o: { request: RequestObject; credential: number; circuitId: string }): Promise<SignOutput> {
+export async function unlockAndSign(o: { request: RequestObject; credential: number; systemId: string }): Promise<SignOutput> {
   try {
     return await $fetch<SignOutput>('/api/wallet/sign', {
       method: 'POST',
-      body: { request: o.request, circuit_id: o.circuitId, device_key: mdocMaterial(o.credential).device_key },
+      body: { request: o.request, system_id: o.systemId, device_key: mdocMaterial(o.credential).device_key },
     })
   } catch (e) {
     throw failure('/api/wallet/sign', e)
@@ -55,7 +55,7 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
 }
 
 /** Steps 2 and 3: the witness from the credential, then the proof. */
-export async function prove(o: { request: RequestObject; queryId: string; circuitId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
+export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
   const m = mdocMaterial(o.credential)
   try {
     return await $fetch<ProveOutput>('/api/wallet/prove', {
@@ -63,7 +63,7 @@ export async function prove(o: { request: RequestObject; queryId: string; circui
       body: {
         request: o.request,
         credential_query_id: o.queryId,
-        circuit_id: o.circuitId,
+        system_id: o.systemId,
         credential: m.credential,
         secret_seed: m.secret_seed,
         device_signature: o.deviceSignature,
@@ -75,8 +75,8 @@ export async function prove(o: { request: RequestObject; queryId: string; circui
 }
 
 export interface BbsProveOutput {
-  scheme_id: string
-  /** base64url of the BBS-CD envelope */
+  system_id: string
+  /** base64url(CBOR(ZkpPresentation)); its proof is the BBS-CD envelope */
   presentation: string
   results: Record<string, string | true>
   metrics: {
@@ -94,7 +94,7 @@ export interface BbsProveOutput {
   }
 }
 
-/** mms_zk, once the PIN screen has unlocked the wallet: one step. The device key signs inside the
+/** bbs_cd, once the PIN screen has unlocked the wallet: one step. The device key signs inside the
  *  ecdsa-pop plugin; the phone sends the BBS credential and the device key, as for the mdoc. */
 export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number }): Promise<BbsProveOutput> {
   const m = holders[o.credential]!

@@ -1,6 +1,6 @@
 /**
  * Mock phone: what the wallet can prove, from the prover backends that are loaded: the circuits
- * (circuit_zk, Vega and Longfellow) and the schemes (mms_zk, BBS). Used for wallet_metadata and the wallet's
+ * (mso_mdoc: Vega and Longfellow) and the schemes (bbs_cd: BBS), each with its system_id. Used for wallet_metadata and the wallet's
  * selection. 503 when neither prover is available.
  */
 export default defineEventHandler(async () => {

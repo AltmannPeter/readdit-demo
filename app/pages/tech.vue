@@ -10,8 +10,8 @@ interface Service {
   service?: string
   implementation?: string
   version?: string
-  circuits?: Array<{ circuit_id: string; proof_system: string; shapes_sha256?: string | null; artifact_sha256?: string | null }>
-  schemes?: Array<{ scheme_id: string; proof_system: string; schema_id: string; plugins: string[] }>
+  circuits?: Array<{ system_id: string; proof_system: string; shapes_sha256?: string | null; artifact_sha256?: string | null }>
+  schemes?: Array<{ system_id: string; proof_system: string; schema_id: string; plugins: string[] }>
   issuers?: Array<{ issuer_pk: string; schema_id: string }>
   load_ms?: number
   threads?: number
@@ -32,7 +32,7 @@ interface Session {
   phone?: string
   status: string
   createdAt: number
-  dcql: { credentials: Array<{ id: string; format: 'circuit_zk' | 'mms_zk'; meta: Record<string, string>; req: Array<{ id: string; return: string; params: Record<string, string> }> }>; credential_sets?: Array<{ options: string[][] }> }
+  dcql: { credentials: Array<{ id: string; format: 'zkp_req'; meta: Record<string, string>; _req: Array<{ fn_id: string; return: string; params: Record<string, string | number> }> }>; credential_sets?: Array<{ options: string[][] }> }
   answered: string | null
   offer: Formats
   walletMetadata: { vp_formats_supported: Formats } | null
@@ -46,8 +46,7 @@ interface Session {
   trace: Trace[]
 }
 interface Formats {
-  circuit_zk?: { circuit_id_values?: string[]; circuit_proof_system_values?: string[] }
-  mms_zk?: { scheme_id_values?: string[]; proof_system_values?: string[] }
+  zkp_req?: { system_id_values?: string[]; proof_system_values?: string[] }
 }
 interface Spread {
   median: number
@@ -127,10 +126,10 @@ const values = (c?: Counts | null) =>
 const ms = (n?: number | null) => (n == null ? '–' : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`)
 const time = (t: number) => new Date(t).toLocaleTimeString('en-GB')
 const since = (t: number) => (session.value ? `+${t - session.value.createdAt} ms` : '')
-const reqText = (r: Session['dcql']['credentials'][number]['req'][number]) =>
-  r.id === 'age_check'
+const reqText = (r: Session['dcql']['credentials'][number]['_req'][number]) =>
+  r.fn_id === 'age_check'
     ? `age_check  ${Object.entries(r.params).map(([k, v]) => `${k} ${v}`).join(', ')}`
-    : `${r.id}  ${r.params.config}${r.params.verifier_id_type ? `, ${r.params.verifier_id_type}` : ''}`
+    : `${r.fn_id}  ${r.params.config}, ver ${r.params.ver}, prf ${r.params.prf}`
 const services = computed((): Record<string, Service> => {
   const s = data.value?.services
   return s
@@ -167,9 +166,9 @@ async function setAccepted(id: string, accept: boolean) {
   }
   await load()
 }
-/** Ids each side lists for a format: circuits (circuit_zk) or schemes (mms_zk). */
-const ids = (f: Formats | undefined, format: 'circuit_zk' | 'mms_zk') => (format === 'circuit_zk' ? f?.circuit_zk?.circuit_id_values : f?.mms_zk?.scheme_id_values)?.join(', ') || '–'
-const formats = computed(() => (session.value ? (['circuit_zk', 'mms_zk'] as const).filter((f) => session.value!.offer[f]) : []))
+/** The system ids each side lists in zkp_req (circuits and schemes). */
+const ids = (f: Formats | undefined) => f?.zkp_req?.system_id_values?.join(', ') || '–'
+const formats = computed(() => (session.value?.offer.zkp_req ? (['zkp_req'] as const) : []))
 
 const threadError = ref('')
 async function setThreads(parallel: boolean) {
@@ -239,11 +238,11 @@ const statusTone = (s: string) =>
               :disabled="!loaded(p.id)"
               @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
             />
-            {{ p.label }} <span class="font-mono text-[11px] text-muted">{{ p.format }} · {{ p.id }}</span>
+            {{ p.label }} <span class="font-mono text-[11px] text-muted">{{ p.source_format }} · {{ p.id }}</span>
           </label>
         </div>
         <p class="mt-1 text-xs text-muted">
-          Only the ticked ones: a wallet request offers their circuits and formats when the phone fetches it, so a QR code already on screen follows too, and a presentation in a proof system unticked meanwhile is refused. Vega and Longfellow share circuit_zk and the mdoc: the request lists both circuits, Vega first. With BBS as well, the DCQL query carries one credential query per format as alternatives (credential_sets). Nothing is ticked when the demo starts or after a reset.
+          Only the ticked ones: a wallet request offers their systems in zkp_req when the phone fetches it, so a QR code already on screen follows too, and a presentation in a proof system unticked meanwhile is refused. Vega and Longfellow are circuits over the mdoc (mso_mdoc): the request lists both, Vega first. With BBS (bbs_cd) as well, the DCQL query carries one zkp_req credential query per source format, as alternatives (credential_sets). Nothing is ticked when the demo starts or after a reset.
         </p>
         <p v-if="!data.acceptedProofSystems.length" class="mt-2 text-xs font-semibold text-adult" data-none-accepted>
           Readdit accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
@@ -279,8 +278,8 @@ const statusTone = (s: string) =>
               Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
             </p>
             <ul class="mt-2 space-y-0.5 font-mono text-[11px] text-muted">
-              <li v-for="c in svc.circuits" :key="c.circuit_id">{{ c.circuit_id }} · {{ c.proof_system }}</li>
-              <li v-for="c in svc.schemes" :key="c.scheme_id">{{ c.scheme_id }} · {{ c.proof_system }} · {{ c.plugins.join(', ') }}</li>
+              <li v-for="c in svc.circuits" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }}</li>
+              <li v-for="c in svc.schemes" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }} · {{ c.plugins.join(', ') }}</li>
               <li v-for="c in svc.issuers" :key="c.issuer_pk">trusted issuer {{ c.issuer_pk.slice(0, 16) }}… · {{ c.schema_id }}</li>
             </ul>
           </template>
@@ -363,7 +362,7 @@ const statusTone = (s: string) =>
                   <p v-else-if="t.step === 'witness' && t.data?.metrics" class="text-xs text-muted">
                     {{ ms(t.data.metrics.witness_ms) }}<template v-if="t.data.counts"> · {{ values(t.data.counts) }}</template> · proof_time {{ t.data.proof_time }}
                   </p>
-                  <p v-else-if="t.step === 'prove' && t.data?.format === 'mms_zk' && t.data?.metrics" class="text-xs text-muted">
+                  <p v-else-if="t.step === 'prove' && t.data?.format === 'bbs_cd' && t.data?.metrics" class="text-xs text-muted">
                     commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
                   </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
@@ -391,16 +390,16 @@ const statusTone = (s: string) =>
             <!-- request -->
             <section class="card">
               <div class="flex items-center border-b border-line px-5 py-3">
-                <h2 class="text-sm font-semibold">Request (DCQL, {{ session.dcql.credentials.map((q) => q.format).join(' or ') }})</h2>
+                <h2 class="text-sm font-semibold">Request (DCQL, zkp_req over {{ session.dcql.credentials.map((q) => q.meta.source_format).join(' or ') }})</h2>
                 <button class="ml-auto text-xs font-semibold text-brand" @click="showRaw = !showRaw">{{ showRaw ? 'Summary' : 'Raw JSON' }}</button>
               </div>
               <pre v-if="showRaw" class="max-h-96 overflow-auto px-5 py-3 text-[11px] leading-relaxed">{{ JSON.stringify(session.request ?? session.dcql, null, 2) }}</pre>
               <div v-else class="divide-y divide-line">
                 <ul v-for="q in session.dcql.credentials" :key="q.id" class="space-y-1 px-5 py-3 font-mono text-xs">
                   <li class="text-muted">
-                    {{ q.id }} · {{ q.format }} · {{ q.format === 'circuit_zk' ? `doctype ${q.meta.doctype_value}` : `schema ${q.meta.schema_id_value}` }}<template v-if="session.answered === q.id"> · answered</template>
+                    {{ q.id }} · {{ q.format }} · {{ q.meta.source_format }} · {{ q.meta.source_format === 'mso_mdoc' ? `doctype ${q.meta.doctype_value}` : `schema ${q.meta.schema_id_value}` }}<template v-if="session.answered === q.id"> · answered</template>
                   </li>
-                  <li v-for="r in q.req" :key="r.return">
+                  <li v-for="r in q._req" :key="r.return">
                     <span class="text-muted">{{ r.return }} ←</span> {{ reqText(r) }}
                   </li>
                 </ul>
@@ -416,20 +415,20 @@ const statusTone = (s: string) =>
               <dl v-for="f in formats" :key="f" class="divide-y divide-line border-b border-line text-xs last:border-b-0">
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Readdit accepts</dt>
-                  <dd class="font-mono">{{ f }}: {{ ids(session.offer, f) }}</dd>
+                  <dd class="font-mono">{{ f }}: {{ ids(session.offer) }}</dd>
                 </div>
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Wallet supports</dt>
-                  <dd class="font-mono">{{ ids(session.walletMetadata?.vp_formats_supported, f) }}</dd>
+                  <dd class="font-mono">{{ ids(session.walletMetadata?.vp_formats_supported) }}</dd>
                 </div>
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
                   <dt class="text-muted">Sent in request</dt>
-                  <dd class="font-mono">{{ ids(session.request?.client_metadata?.vp_formats_supported, f) }}</dd>
+                  <dd class="font-mono">{{ ids(session.request?.client_metadata?.vp_formats_supported) }}</dd>
                 </div>
               </dl>
               <div class="grid grid-cols-[9rem_1fr] gap-2 border-t border-line px-5 py-2.5 text-xs">
                 <dt class="text-muted">Used</dt>
-                <dd class="font-mono">{{ session.circuit?.circuit_id ?? session.scheme?.scheme_id ?? prove?.circuit_id ?? prove?.scheme_id ?? '–' }}</dd>
+                <dd class="font-mono">{{ session.circuit?.system_id ?? session.scheme?.system_id ?? prove?.system_id ?? '–' }}</dd>
               </div>
             </section>
 

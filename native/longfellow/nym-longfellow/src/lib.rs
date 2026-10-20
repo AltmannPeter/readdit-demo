@@ -1,4 +1,4 @@
-//! Prover and verifier of the nym_auth statement (age range and `pseudonym-v1-sha256`,
+//! Prover and verifier of the nym_auth statement (age range and the `pseudonym` function with `prf` `sha-256`,
 //! configuration `known-offender-matching-ssc`) with Longfellow, as the Readdit demo runs them.
 //!
 //! The circuits are the nym-auth-circuits archive's LFC2 pair for mdoc (`circuits/mdoc`), run on
@@ -15,7 +15,7 @@
 //! | [`cbor`] | A CBOR reader that keeps each item's encoding, and the few items both sides write |
 //! | [`mdoc`] | The holder's IssuerSigned taken apart |
 //! | [`x509`] | The Document Signer certificate of `issuer_key_set` |
-//! | [`presentation`] | `CircuitZkPresentation` in CBOR (rulebook, "Presentation encoding") |
+//! | [`presentation`] | `ZkpPresentation` in CBOR (rulebook, "Presentation encoding") |
 //! | [`sha`] | SHA-256 with the block faces the hash circuit checks (L4.1) |
 //! | [`witness`] | The two input vectors (L3 to L5) and the MAC (L6) |
 //! | [`zk`] | The circuits loaded into Google's runtime; prove and verify (L6.2, L6.3) |

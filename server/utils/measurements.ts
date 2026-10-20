@@ -6,7 +6,8 @@ import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { availableParallelism, cpus, arch, platform, totalmem } from 'node:os'
 import { dirname, resolve } from 'node:path'
-import { PROOF_SYSTEMS, findCircuit, findScheme } from '#shared/registry/circuits'
+import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
+import type { SourceFormat } from '#shared/types/oid4vp'
 import type { VpSessionRecord } from './store'
 
 export interface Machine {
@@ -19,13 +20,14 @@ export interface Machine {
 export interface Measurement {
   at: string
   proof_system: string
-  format: 'circuit_zk' | 'mms_zk'
+  /** The source format (records made before rulebook v0.4 say circuit_zk or mms_zk). */
+  format: SourceFormat | 'circuit_zk' | 'mms_zk'
   proof_id: string
   /** What was proven: the pseudonym, or the pseudonym and an age range. */
   statement: 'pseudonym' | 'pseudonym and age'
   prove: {
     threads: number | null
-    /** The phone's work for one presentation: device signature, witness and proof (circuit_zk), or the whole BBS presentation (mms_zk). */
+    /** The phone's work for one presentation: device signature, witness and proof (mso_mdoc), or the whole BBS presentation (bbs_cd). */
     total_ms: number | null
     sign_ms: number | null
     witness_ms: number | null
@@ -80,17 +82,17 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 /**
  * Records a verified presentation from its session trace: the prover's metrics (the last prove
- * step, and the device signature for circuit_zk) and the verifier's. Nothing is recorded without a
+ * step, and the device signature for mso_mdoc) and the verifier's. Nothing is recorded without a
  * prove step (a presentation made outside the mocked phone).
  */
-export async function recordMeasurement(s: VpSessionRecord, format: 'circuit_zk' | 'mms_zk', proofId: string, verify: Record<string, unknown> | undefined, hasAge: boolean) {
+export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat, proofId: string, verify: Record<string, unknown> | undefined, hasAge: boolean) {
   const at = (step: string) => s.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data as Record<string, any> | undefined
   const prove = at('prove')
   if (!prove) return
-  const proofSystem = format === 'circuit_zk' ? findCircuit(proofId)?.proof_system : findScheme(proofId)?.proof_system
+  const proofSystem = findSystem(proofId)?.proof_system
   if (!proofSystem) return
   const pm = prove.metrics as Record<string, unknown>
-  const sign = format === 'circuit_zk' ? num((at('sign')?.metrics as Record<string, unknown> | undefined)?.sign_ms) : null
+  const sign = format === 'mso_mdoc' ? num((at('sign')?.metrics as Record<string, unknown> | undefined)?.sign_ms) : null
   const proveTotal = num(pm.total_ms)
   const m: Measurement = {
     at: new Date().toISOString(),

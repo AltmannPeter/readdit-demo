@@ -1,5 +1,5 @@
 # Readdit site (Nuxt) with its three proof backends compiled in as Node addons (Rust): Vega and
-# Longfellow (circuit_zk, native/vega and native/longfellow) and BBS (mms_zk, native/bbs).
+# Longfellow (circuits over mso_mdoc, native/vega and native/longfellow) and BBS (bbs_cd, native/bbs).
 #   docker compose up -d --build        then http://localhost:3000
 
 # 1. The Vega addon: native/vega/node, built against the vendored vega-age and its locked dependencies.

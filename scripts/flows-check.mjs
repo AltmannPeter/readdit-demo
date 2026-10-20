@@ -6,9 +6,10 @@
 // error that is not one of the deliberate ones (ALLOWED, by status and route).
 // scripts/demo-flow.mjs stays the presentation order and its screenshots.
 //
-// Two phones, one person each (app/wallet/holder.ts, PHONES): the teen's phone holds the teen's
-// mdoc (born 2011) and the teen's BBS credential (mms_zk, used only when the site accepts BBS:
-// group M), the adult's phone the adult's mdoc (born 1990).
+// Three phones, one credential each (app/wallet/holder.ts, PHONES): the teen's phone holds the
+// teen's mdoc (born 2011), the adult's phone the adult's mdoc (born 1990), and the teen's BBS
+// phone the teen's BBS credential (bbs_cd, with the teen's device key and seed; group M). Every
+// request is the rulebook's zkp_req (v0.4): one query per source format, mso_mdoc and bbs_cd.
 //
 // The site accepts no proof system after a demo reset (the demo's start). resetDemo() switches
 // Vega on again, which every group but L and M assumes; group L runs Longfellow, group M BBS. The dialog shows one at a time;
@@ -54,14 +55,16 @@ const BASE = argv[0] ?? 'http://localhost:3000'
 const anyPin = () => String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
 const root = fileURLToPath(new URL('../', import.meta.url))
 const [teen, adult] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet.json'), 'utf8')).holders
-// The teen's BBS credential (mms_zk, docs/mms_zk.md), with the teen's device key.
+// The teen's BBS credential (bbs_cd, docs/bbs_cd.md), with the teen's device key and seed.
 const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs.json'), 'utf8')).holders
 const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
 const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:vega:nym_auth:v1'
 const LONGFELLOW = 'urn:circuits:longfellow:nym_auth:v1'
 const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
-const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: ['vega-v1'], circuit_id_values: [VEGA] } } })
+const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } } })
+/** The zkp_req query over `source` (mso_mdoc or bbs_cd) in a request. */
+const queryOf = (request, source) => request.dcql_query.credentials.find((q) => q.meta.source_format === source)
 if (SHOTS) mkdirSync(SHOTS, { recursive: true })
 
 // ---------------------------------------------------------------------------------------------
@@ -117,22 +120,22 @@ async function fetchRequest(ctx, session, walletMetadata = WALLET_METADATA) {
 }
 /** The phone's native steps for `wallet`, through the site's /api/wallet routes. */
 async function present(ctx, request, wallet, circuit = VEGA) {
-  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, circuit_id: circuit, device_key: wallet.device_key } })
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
   if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
-    data: { request, circuit_id: circuit, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
+    data: { request, system_id: circuit, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
   })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
-/** mms_zk: one prove call with the BBS credential and its device key. */
+/** bbs_cd: one prove call with the BBS credential and its device key. */
 async function presentBbs(ctx, request, wallet = teenBbs) {
-  const q = request.dcql_query.credentials.find((x) => x.format === 'mms_zk')
+  const q = queryOf(request, 'bbs_cd')
   const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key } })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
-const bbsForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [request.dcql_query.credentials.find((q) => q.format === 'mms_zk').id]: [presentation] }) })
+const bbsForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [queryOf(request, 'bbs_cd').id]: [presentation] }) })
 /** The site's accepted proof systems (/tech's switches). */
 const accept = async (proofSystem, yes) => {
   const ctx = await client()
@@ -207,7 +210,7 @@ const TAMPER = {
     out[at] = out[at] === 0x30 ? 0x31 : out[at] - 1
     return out
   },
-  'another circuit_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
+  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -346,13 +349,18 @@ async function expectVerification() {
 
 const TEEN = "Teen's phone"
 const ADULT = "Adult's phone"
+const TEEN_BBS = "Teen's BBS phone"
 const phoneLabel = async () => ((await page.locator('[data-phone-label]').innerText()) ?? '').split('\n')[0].trim()
-/** Swap to the named phone if another is on screen, while the QR code is shown. */
+/** Swap to the named phone if another is on screen, while the QR code is shown: Swap phone hands
+ *  over to the next of the three phones. */
 async function usePhone(name) {
-  if ((await phoneLabel()) === name) return
-  await page.getByRole('button', { name: 'Swap phone' }).click()
-  await page.locator('[data-phone-label]', { hasText: name }).waitFor()
-  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  for (let k = 0; k < 3 && (await phoneLabel()) !== name; k++) {
+    const was = await phoneLabel()
+    await page.getByRole('button', { name: 'Swap phone' }).click()
+    await page.waitForFunction((w) => document.querySelector('[data-phone-label]')?.innerText.split('\n')[0].trim() !== w, was)
+    await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  }
+  if ((await phoneLabel()) !== name) throw new Error(`no phone named ${name}`)
 }
 /** Opens a wallet dialog with `button`, on the named phone. */
 async function open(button, phoneName = TEEN) {
@@ -1026,7 +1034,7 @@ async function groupE() {
   begin('W6', 'a request the wallet cannot satisfy: no circuit in common')
   // The wallet's capabilities, as a wallet without the Vega circuit would report them.
   await page.route('**/api/wallet/capabilities', (route) =>
-    route.fulfill({ json: { circuits: [{ circuit_id: LONGFELLOW, proof_system: 'longfellow-libzk-v1' }], schemes: [] } }),
+    route.fulfill({ json: { circuits: [{ system_id: LONGFELLOW, proof_system: 'longfellow-libzk-v1' }], schemes: [] } }),
   )
   let m = mark()
   await open(headerButton('Sign up'))
@@ -1053,8 +1061,10 @@ async function groupE() {
   // the real request, changed and signed again by a certificate for readdit.example.
   const signer = await testSigner('readdit.example')
   const variants = [
-    ['verifier_id_type semantic', (r) => ({ ...r, params: { ...r.params, verifier_id_type: 'semantic' } }), 'verifier_id_type semantic'],
-    ['account-recovery-ssc without verifier_context', (r) => ({ ...r, params: { config: 'account-recovery-ssc', verifier_id_type: 'x509_san_dns' } }), 'verifier_context is required by account-recovery-ssc'],
+    ['pseudonym ver 2', (r) => ({ ...r, params: { ...r.params, ver: 2 } }), 'pseudonym ver 2: the rulebook defines 1'],
+    ['the BBS prf over the mdoc', (r) => ({ ...r, params: { ...r.params, prf: 'hashdh-bls12381g1' } }), 'prf hashdh-bls12381g1 is not defined for mso_mdoc'],
+    ['verifier_id_type, which v0.4 leaves to the trust framework', (r) => ({ ...r, params: { ...r.params, verifier_id_type: 'x509_san_dns' } }), 'pseudonym parameter verifier_id_type is not defined by the rulebook'],
+    ['account-recovery-ssc without verifier_context', (r) => ({ ...r, params: { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256' } }), 'verifier_context is required by account-recovery-ssc'],
   ]
   for (const [what, change, reason] of variants) {
     begin('W7', `an unsupported pseudonym request: ${what}`)
@@ -1062,7 +1072,7 @@ async function groupE() {
       const res = await route.fetch()
       const request = payloadOf((await res.text()).trim())
       const q = request.dcql_query.credentials[0]
-      q.req = q.req.map((r) => (r.id === 'pseudonym-v1-sha256' ? change(r) : r))
+      q._req = q._req.map((r) => (r.fn_id === 'pseudonym' ? change(r) : r))
       await route.fulfill({ status: 200, contentType: 'application/oauth-authz-req+jwt', body: await signer.sign(request) })
     })
     m = mark()
@@ -1107,9 +1117,9 @@ async function groupE() {
   const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   const request = await fetchRequest(ctx, s)
   const q = request.dcql_query.credentials[0]
-  q.req[0].params = { config: 'account-recovery-ssc', verifier_id_type: 'x509_san_dns', verifier_context: 'readdit' }
+  q._req[0].params = { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256', verifier_context: 'readdit' }
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
-    data: { request, circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) },
+    data: { request, system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) },
   })
   expectAnswer('server: /api/wallet/prove', p, 400, 'unsupported_config')
   await ctx.dispose()
@@ -1174,7 +1184,7 @@ async function groupF() {
   const uri = requestUriOf(s.authorizationUrl)
   expectAnswer('request_uri: PUT', await call(ctx, 'PUT', uri), 405, 'method_not_allowed')
   expectAnswer('request_uri: wallet_metadata not JSON', await call(ctx, 'POST', uri, { form: { wallet_metadata: '{oops' } }), 400, 'invalid_wallet_metadata')
-  expectAnswer('request_uri: circuit_id_values not a list', await call(ctx, 'POST', uri, { form: { wallet_metadata: JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_id_values: 5 } } }) } }), 400, 'invalid_wallet_metadata')
+  expectAnswer('request_uri: system_id_values not a list', await call(ctx, 'POST', uri, { form: { wallet_metadata: JSON.stringify({ vp_formats_supported: { zkp_req: { system_id_values: 5 } } }) } }), 400, 'invalid_wallet_metadata')
   expectAnswer('request_uri: vp_formats_supported null', await call(ctx, 'POST', uri, { form: { wallet_metadata: '{"vp_formats_supported":null}' } }), 400, 'invalid_wallet_metadata')
   eq('request_uri: the session is still unused after the refusals', (await poll(ctx, s.id)).body.status, 'waiting')
   const request = await fetchRequest(ctx, s)
@@ -1194,8 +1204,8 @@ async function groupF() {
     ['sign: no body', '/api/wallet/sign', undefined],
     ['sign: no device key', '/api/wallet/sign', { request }],
     ['prove: no body', '/api/wallet/prove', undefined],
-    ['prove: no request', '/api/wallet/prove', { circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
-    ['prove: a request without a credential query', '/api/wallet/prove', { request: { ...request, dcql_query: {} }, circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
+    ['prove: no request', '/api/wallet/prove', { system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
+    ['prove: a request without a credential query', '/api/wallet/prove', { request: { ...request, dcql_query: {} }, system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
   ]
   for (const [what, path, data] of wallet) expectAnswer(what, await call(ctx, 'POST', path, data === undefined ? {} : { data }), 400, 'bad_request')
   expectAnswer('sign: any PIN signs', await call(ctx, 'POST', '/api/wallet/sign', { data: { request, pin: '000000', device_key: teen.device_key } }), 200)
@@ -1228,7 +1238,7 @@ async function groupF() {
     'a changed results.nym': ['public_input:results.nym'],
     'a results key that is not the request handle': ['results'],
     'proof_time changed by one second': ['public_input:proof_time'],
-    'another circuit_id': ['circuit'],
+    'another system_id': ['circuit'],
   }
   for (const [what, tamper] of Object.entries(TAMPER)) {
     const t = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -1273,7 +1283,7 @@ async function groupH() {
   await guideIs('unavailable')
   await guideSays('could not start the request')
   check('session: 503', has(m, 'POST', '/api/vp/session', 503))
-  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[circuit_zk] verifier.info failed: test fault'))
+  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[circuits] verifier.info failed: test fault'))
   await shot('25-backend-unavailable')
   await scan()
   await phoneShows('Unsupported QR code')
@@ -1455,7 +1465,7 @@ async function groupJ() {
   await resetDemo()
   await openPage()
 
-  begin('C0', 'two phones, one credential each')
+  begin('C0', 'three phones, one credential each')
   await open(headerButton('Sign up'), TEEN)
   check('the dialog names the phone', (await phoneLabel()) === TEEN, await phoneLabel())
   await phone().getByRole('button', { name: 'Change view' }).click()
@@ -1463,12 +1473,12 @@ async function groupJ() {
   await cards.first().waitFor()
   let labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
   eq("the teen's phone holds the teen's mdoc", labels.join(' | '), 'Open Age and pseudonym details, birth date 14/03/2011')
-  eq("and the teen's BBS credential", await phone().getByRole('button', { name: /^Open Age and pseudonym \(BBS\) details/ }).getAttribute('aria-label'), 'Open Age and pseudonym (BBS) details, birth date 14/03/2011')
+  check("and no BBS credential", !(await phone().getByRole('button', { name: /^Open Age and pseudonym \(BBS\) details/ }).count()))
   check('no card shows an expiry date (the credentials do not expire)', !(await phone().getByText(/Expiry Date/).count()))
   await cards.first().click()
   await phoneShows('14/03/2011')
   await guideIs('credential')
-  await guideSays('an mdoc and a BBS credential')
+  await guideSays('The wallet holds one Age and pseudonym credential')
   await phone().getByRole('button', { name: 'Back' }).click()
   await phone().getByRole('button', { name: 'Change view' }).click()
   await usePhone(ADULT)
@@ -1478,6 +1488,18 @@ async function groupJ() {
   labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
   eq("the adult's phone holds the adult's credential only", labels.join(' | '), 'Open Age and pseudonym details, birth date 20/05/1990')
   await shot('27-adult-phone')
+  await phone().getByRole('button', { name: 'Change view' }).click()
+  await usePhone(TEEN_BBS)
+  check('the third phone is named, with the age from its credential', (await page.locator('[data-phone-label]').innerText()).replace(/\s+/g, ' ').includes(`${TEEN_BBS} · 15`), await page.locator('[data-phone-label]').innerText())
+  await phone().getByRole('button', { name: 'Change view' }).click()
+  cards = phone().getByRole('button', { name: /^Open Age and pseudonym/ })
+  await cards.first().waitFor()
+  labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  eq("the teen's BBS phone holds the teen's BBS credential only", labels.join(' | '), 'Open Age and pseudonym (BBS) details, birth date 14/03/2011')
+  await cards.first().click()
+  await guideIs('credential')
+  await guideSays('This is the BBS form of the Age and pseudonym credential')
+  await phone().getByRole('button', { name: 'Back' }).click()
   await phone().getByRole('button', { name: 'Change view' }).click()
   await closeDialog('escape')
   await signIn('Sign up', 'Account created: u/', TEEN)
@@ -1800,7 +1822,7 @@ async function groupK() {
   check('the Readdit account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
 }
 
-// ---- M. BBS: the mms_zk format next to circuit_zk (docs/mms_zk.md) ----
+// ---- M. BBS: zkp_req over bbs_cd next to mso_mdoc (rulebook v0.4; docs/bbs_cd.md) ----
 
 async function groupM() {
   await resetDemo()
@@ -1817,8 +1839,9 @@ async function groupM() {
     const ctx = await client()
     const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
     const req = await fetchRequest(ctx, s)
-    eq('Vega only: one credential query, circuit_zk', req.dcql_query.credentials.map((q) => q.format), ['circuit_zk'])
-    check('no mms_zk metadata', !req.client_metadata.vp_formats_supported.mms_zk && !req.dcql_query.credential_sets)
+    eq('Vega only: one zkp_req query, over mso_mdoc', req.dcql_query.credentials.map((q) => `${q.format}:${q.meta.source_format}`), ['zkp_req:mso_mdoc'])
+    eq('zkp_req metadata: Vega only', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } })
+    check('no credential_sets', !req.dcql_query.credential_sets)
     await ctx.dispose()
   }
   const tech = await ctxBrowser.newPage()
@@ -1829,27 +1852,27 @@ async function groupM() {
   eq('/tech: BBS switched on', o.acceptedProofSystems, ['vega-v1', BBS_SYSTEM])
   await tech.close()
 
-  begin('M2', 'both accepted: the request offers both formats as alternatives; the teen signs up with the BBS credential')
+  begin('M2', "both accepted: the request offers both source formats as alternatives; the teen signs up on the teen's BBS phone")
   let m = mark()
-  await open(headerButton('Sign up'), TEEN)
+  await open(headerButton('Sign up'), TEEN_BBS)
   await scan()
   await readRequest()
-  let req = (await sessionView(lastSession())).request
-  eq('two credential queries', req.dcql_query.credentials.map((q) => `${q.id}:${q.format}`), ['nym_attestation:circuit_zk', 'nym_attestation_bbs:mms_zk'])
-  eq('credential_sets: one of them', req.dcql_query.credential_sets, [{ options: [['nym_attestation'], ['nym_attestation_bbs']] }])
-  eq('mms_zk metadata', req.client_metadata.vp_formats_supported.mms_zk, { proof_system_values: [BBS_SYSTEM], scheme_id_values: [BBS_SCHEME] })
-  eq('the BBS req', req.dcql_query.credentials[1].req, [{ id: 'pseudonym-bbs-v1', return: 'nym', params: { config: 'known-offender-matching-ssc', verifier_id_type: 'x509_san_dns' } }])
   const view = await sessionView(lastSession())
-  eq("the teen's phone tells both formats in wallet_metadata", Object.keys(view.walletMetadata.vp_formats_supported).sort(), ['circuit_zk', 'mms_zk'])
-  await visible('Switch credential: the BBS credential is the other match', phone().getByRole('button', { name: /Switch credential/ }))
-  await phone().getByRole('button', { name: /Switch credential/ }).click()
-  await guideIs('switch-credential')
-  await phone().getByRole('button', { name: /^Select credential Age and pseudonym \(BBS\)/ }).click()
+  let req = view.request
+  eq('two zkp_req queries', req.dcql_query.credentials.map((q) => `${q.id}:${q.format}:${q.meta.source_format}`), ['nym_attestation:zkp_req:mso_mdoc', 'nym_attestation_bbs:zkp_req:bbs_cd'])
+  eq('their meta', req.dcql_query.credentials.map((q) => q.meta), [{ source_format: 'mso_mdoc', doctype_value: 'eu.europa.ec.eudi.nym_auth.1' }, { source_format: 'bbs_cd', schema_id_value: 'eu.europa.ec.eudi.nym_auth.bbs.1' }])
+  eq('credential_sets: one of them', req.dcql_query.credential_sets, [{ options: [['nym_attestation'], ['nym_attestation_bbs']] }])
+  eq('the mdoc _req: prf sha-256', req.dcql_query.credentials[0]._req, [{ fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } }])
+  eq('the BBS _req: prf hashdh-bls12381g1', req.dcql_query.credentials[1]._req, [{ fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'hashdh-bls12381g1' } }])
+  eq('the offer: Vega and BBS', view.offer, { zkp_req: { proof_system_values: ['vega-v1', BBS_SYSTEM], system_id_values: [VEGA, BBS_SCHEME] } })
+  eq("the BBS phone's wallet_metadata: the BBS scheme only", view.walletMetadata.vp_formats_supported, { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } })
+  eq('sent: tailored to the BBS scheme', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } })
+  check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
   await phoneShows('Request to Share Data')
   await phoneShows('Specific to readdit.example')
   await guideIs('consent')
   await openDetails()
-  await guideSays('pseudonym-bbs-v1')
+  await guideSays('hashdh-bls12381g1')
   await guideSays('BBS nym_auth v1 (bbs-cd-plugins-v0.1)')
   await shot('33-bbs-consent')
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1862,20 +1885,24 @@ async function groupM() {
   check('one prove call, no sign call', has(m, 'POST', '/api/wallet/prove', 200) && !has(m, 'POST', '/api/wallet/sign', 200))
   let sv = await sessionView(lastSession())
   eq('the answered query', sv.answered, 'nym_attestation_bbs')
-  eq('the scheme used', sv.scheme?.scheme_id, BBS_SCHEME)
+  eq('the scheme used', sv.scheme?.system_id, BBS_SCHEME)
   const proveTrace = sv.trace.find((t) => t.step === 'prove')?.data
-  check('the prove trace has each part', proveTrace?.format === 'mms_zk' && proveTrace.metrics.ecdsa_pop_ms > 0 && proveTrace.metrics.parts?.bbs_proof > 0, JSON.stringify(proveTrace?.metrics?.parts))
+  check('the prove trace has each part', proveTrace?.format === 'bbs_cd' && proveTrace.metrics.ecdsa_pop_ms > 0 && proveTrace.metrics.parts?.bbs_proof > 0, JSON.stringify(proveTrace?.metrics?.parts))
+  check('the ZkpPresentation wraps the envelope', proveTrace?.metrics?.presentation_bytes > proveTrace?.metrics?.proof_bytes, `${proveTrace?.metrics?.presentation_bytes} > ${proveTrace?.metrics?.proof_bytes}`)
   eq('plugins in the BBS request', proveTrace?.statement?.plugins, ['ecdsa-pop/0.1', 'pseudonym/0.1'])
   await closeFromPhone()
   const bbsAccount = (await me()).account
   let list = await accounts()
-  eq('stored as a BBS account', list.find((a) => a.handle === bbsAccount.handle)?.format, 'mms_zk')
+  eq('stored as a BBS account', list.find((a) => a.handle === bbsAccount.handle)?.format, 'bbs_cd')
+  check('keyed by the 48-byte G1 point', /^[0-9a-f]{96}$/.test(bbsAccount.pseudonym), bbsAccount.pseudonym)
 
-  begin('M3', 'the next request starts with the BBS credential: c/teenspace proves 13–17 with date-range')
-  // A link, not a reload: the phone keeps its chosen card until the page reloads.
+  begin('M3', "the teen's BBS phone stays on screen: c/teenspace proves 13–17 with date-range")
+  // A link, not a reload: the phone on screen stays until the page reloads.
   await page.click('a[href="/c/teenspace"]')
   m = mark()
-  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  eq('the same phone, without a swap', await phoneLabel(), TEEN_BBS)
   await scan()
   await readRequest()
   await phoneShows('Age proof: 13–17')
@@ -1890,24 +1917,21 @@ async function groupM() {
   await goto('/c/afterdark')
   await pageShows("You can't enter c/afterdark")
 
-  begin('M4', 'the mdoc gives another account: its pseudonym is another function')
+  begin('M4', "the teen's mdoc gives another account: the same seed, another PRF")
   await page.getByRole('banner').getByText(`u/${bbsAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
   await headerButton('Log in').waitFor()
-  // The page was reloaded (goto), so the phone starts again with its first card, the mdoc.
   await open(headerButton('Log in'), TEEN)
   await scan()
   await readRequest()
-  await phone().getByRole('button', { name: /Switch credential/ }).click()
-  await visible('Switch credential offers the BBS credential', phone().getByRole('button', { name: /^Select credential Age and pseudonym \(BBS\)/ }))
-  await phone().getByRole('button', { name: 'Close' }).click()
+  check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('No account', 30_000)
   eq('answered with the mdoc', (await sessionView(lastSession())).answered, 'nym_attestation')
   await closeDialog('escape')
 
-  begin('M5', 'BBS only: the adult has no BBS credential; the teen logs in to the same BBS account')
+  begin('M5', "BBS only: the mdoc phones cannot answer; the teen's BBS phone logs in to the same BBS account")
   eq('server: Vega off', (await accept('vega-v1', false)).body.acceptedProofSystems, [BBS_SYSTEM])
   m = mark()
   await open(headerButton('Log in'), ADULT)
@@ -1916,14 +1940,20 @@ async function groupM() {
   await phoneShows('Unsupported Request')
   await guideIs('unsupported')
   await openDetails()
-  await guideSays('the request asks for mms_zk')
+  await guideSays('the request asks for zkp_req bbs_cd')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
   await open(headerButton('Log in'), TEEN)
   await scan()
   await readRequest()
-  check('one matching credential: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
+  await phoneShows('Unsupported Request')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+  await open(headerButton('Log in'), TEEN_BBS)
+  await scan()
+  await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows(`Logged in as u/${bbsAccount.handle}`, 30_000)
@@ -1931,7 +1961,7 @@ async function groupM() {
 
   begin('M6', 'c/france with BBS: its own pseudonym, linked when chosen')
   await goto('/c/france')
-  await open(page.getByRole('button', { name: `Join and link to u/${bbsAccount.handle}` }), TEEN)
+  await open(page.getByRole('button', { name: `Join and link to u/${bbsAccount.handle}` }), TEEN_BBS)
   await scan()
   await readRequest()
   await phoneShows('Specific to france.readdit.example')
@@ -1948,7 +1978,7 @@ async function groupM() {
   await mod.dispose()
   await goto('/')
   await headerButton('Sign up').waitFor()
-  await open(headerButton('Sign up'), TEEN)
+  await open(headerButton('Sign up'), TEEN_BBS)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1960,25 +1990,37 @@ async function groupM() {
   const ctx = await client()
   let s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   req = await fetchRequest(ctx, s)
-  eq('BBS only: one mms_zk query', req.dcql_query.credentials.map((q) => q.format), ['mms_zk'])
+  eq('BBS only: one zkp_req query over bbs_cd', req.dcql_query.credentials.map((q) => q.meta.source_format), ['bbs_cd'])
   let p = await presentBbs(ctx, req)
-  check('prove: a 32-byte pseudonym', /^[0-9a-f]{64}$/.test(p.results.nym), p.results.nym)
+  check('prove: the pseudonym is a 48-byte G1 point', /^[0-9a-f]{96}$/.test(p.results.nym), p.results.nym)
+  eq('prove: the system', p.system_id, BBS_SCHEME)
   expectAnswer('prove: without a device key', await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, credential_query_id: 'nym_attestation_bbs', credential: teenBbs.credential } }), 400, 'bad_request')
   {
     const other = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, credential_query_id: 'nym_attestation_bbs', credential: teenBbs.credential, device_key: adult.device_key } })
     expectAnswer("prove: another phone's device key", other, 400, 'bad_credential')
   }
-  const bytes = Buffer.from(p.presentation, 'base64url')
-  for (const [what, at] of [['a flipped byte in the BBS proof', 40], ['a flipped byte in the ecdsa-pop proof', Math.floor(bytes.length / 2)], ['a flipped byte in the pseudonym proof', bytes.length - 60]]) {
+  // The ZkpPresentation: system_id, proof (the BCDP envelope), issuer_key_set (the 96-byte issuer
+  // key), results (the 48-byte pseudonym); each changed in place.
+  const envLen = p.metrics.proof_bytes
+  const issuerPk = Buffer.from(teenBbs.credential.issuer_params, 'base64url').subarray(1, 97)
+  const bbsTamper = [
+    ['a flipped byte in the BBS proof', (b) => b.indexOf(Buffer.from('BCDP')) + 40, ['proof_invalid', 'presentation']],
+    ['a flipped byte in the ecdsa-pop proof', (b) => b.indexOf(Buffer.from('BCDP')) + Math.floor(envLen / 2), ['proof_invalid', 'presentation']],
+    ['a flipped byte in the pseudonym proof', (b) => b.indexOf(Buffer.from('BCDP')) + envLen - 60, ['proof_invalid', 'presentation']],
+    ['another pseudonym in results', (b, q) => b.lastIndexOf(Buffer.from(q.results.nym, 'hex')) + 47, ['results']],
+    ['another key in issuer_key_set', (b) => b.lastIndexOf(issuerPk) + 50, ['issuer_key_set']],
+    ['another system_id', (b) => b.indexOf(Buffer.from(BBS_SCHEME)) + BBS_SCHEME.length - 1, ['scheme']],
+  ]
+  for (const [what, at, codes] of bbsTamper) {
     const s2 = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
     const r2 = await fetchRequest(ctx, s2)
     const p2 = await presentBbs(ctx, r2)
     const b2 = Buffer.from(p2.presentation, 'base64url')
-    b2[Math.min(at, b2.length - 1)] ^= 1
+    b2[at(b2, p2)] ^= 1
     await respond(ctx, r2, bbsForm(r2, b2.toString('base64url')))
     const v = await sessionView(s2.id)
     const refused = v.trace.find((t) => t.step === 'verify' && t.label === 'Proof rejected')?.data
-    check(`refused: ${what}`, v.status === 'failed' && (refused?.code === 'proof_invalid' || refused?.code === 'presentation'), refused ? `${refused.code}: ${refused.reason}` : v.status)
+    check(`refused: ${what} (${codes.join(' or ')})`, v.status === 'failed' && codes.includes(refused?.code), refused ? `${refused.code}: ${refused.reason}` : v.status)
   }
   // The genuine presentation, for another request: refused (nonce and handover differ).
   {
@@ -1992,15 +2034,18 @@ async function groupM() {
   check('the genuine one: processed (200)', r.status === 200, answer(r))
   check('verified', (await sessionView(s.id)).status === 'verified')
   expectAnswer('a replay', await respond(ctx, req, bbsForm(req, p.presentation)), 400, 'already_answered')
-  // A vp_token that answers both queries, or the circuit_zk one with a BBS presentation.
+  // A vp_token that answers both queries, or the mso_mdoc one with a BBS presentation.
+  // Without wallet_metadata: one zkp_req offer holds both systems (a wallet that lists only Vega
+  // would be sent Vega only).
   await accept('vega-v1', true)
   s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
-  req = await fetchRequest(ctx, s)
+  req = await fetchRequest(ctx, s, null)
+  eq('both: one offer with both systems', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: ['vega-v1', BBS_SYSTEM], system_id_values: [VEGA, BBS_SCHEME] } })
   p = await presentBbs(ctx, req)
   await respond(ctx, req, { state: req.state, vp_token: JSON.stringify({ nym_attestation: [p.presentation], nym_attestation_bbs: [p.presentation] }) })
   eq('refused: two answers', (await sessionView(s.id)).trace.find((t) => t.label === 'Proof rejected')?.data?.code, 'vp_token')
   s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
-  req = await fetchRequest(ctx, s)
+  req = await fetchRequest(ctx, s, null)
   p = await presentBbs(ctx, req)
   await respond(ctx, req, { state: req.state, vp_token: JSON.stringify({ nym_attestation: [p.presentation] }) })
   const wrong = (await sessionView(s.id)).trace.find((t) => t.label === 'Proof rejected')?.data
@@ -2011,14 +2056,14 @@ async function groupM() {
   await accept(BBS_SYSTEM, false)
   await goto('/')
   await open(headerButton('Log in'), ADULT)
-  check('Vega only when the QR code appears', (await sessionView(lastSession())).offer.mms_zk === undefined)
+  eq('Vega only when the QR code appears', (await sessionView(lastSession())).offer.zkp_req.system_id_values, [VEGA])
   await accept(BBS_SYSTEM, true)
   await accept('vega-v1', false)
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
   let sv10 = await sessionView(lastSession())
-  check('the request the wallet fetched offers BBS only', sv10.request.dcql_query.credentials.map((q) => q.format).join() === 'mms_zk', JSON.stringify(sv10.request.dcql_query.credentials.map((q) => q.format)))
+  check('the request the wallet fetched offers BBS only', sv10.request.dcql_query.credentials.map((q) => q.meta.source_format).join() === 'bbs_cd', JSON.stringify(sv10.request.dcql_query.credentials.map((q) => q.meta.source_format)))
   check('the trace says why', sv10.trace.some((t) => t.label === 'Offer updated: the accepted proof systems changed'))
   await phone().getByRole('button', { name: 'Close' }).click()
   await closeDialog('escape')
@@ -2034,7 +2079,7 @@ async function groupM() {
     await respond(c, r11, vpForm(r11, p11.presentation))
     const v = await sessionView(s11.id)
     const refused = v.trace.find((t) => t.label === 'Proof rejected')?.data
-    check('refused: circuit_zk is no longer accepted', v.status === 'failed' && refused?.code === 'format', refused ? `${refused.code}: ${refused.reason}` : v.status)
+    check('refused: mso_mdoc is no longer accepted', v.status === 'failed' && refused?.code === 'format', refused ? `${refused.code}: ${refused.reason}` : v.status)
     await c.dispose()
   }
 
@@ -2043,7 +2088,7 @@ async function groupM() {
   eq('accepted', await acceptedNow(), [])
 }
 
-// ---- L. Longfellow: the second circuit_zk backend, over the same mdoc (SPEC.md L) ----
+// ---- L. Longfellow: the second circuit over the same mdoc (mso_mdoc; SPEC.md L) ----
 
 async function groupL() {
   await resetDemo([])
@@ -2072,8 +2117,8 @@ async function groupL() {
   await scan()
   await readRequest()
   let sv = await sessionView(lastSession())
-  eq('circuit_zk with the Longfellow circuit only', sv.request.client_metadata.vp_formats_supported.circuit_zk, { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] })
-  eq('one credential query, circuit_zk', sv.request.dcql_query.credentials.map((q) => q.format), ['circuit_zk'])
+  eq('zkp_req with the Longfellow circuit only', sv.request.client_metadata.vp_formats_supported.zkp_req, { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] })
+  eq('one zkp_req query, over mso_mdoc', sv.request.dcql_query.credentials.map((q) => `${q.format}:${q.meta.source_format}`), ['zkp_req:mso_mdoc'])
   await phoneShows('Request to Share Data')
   await guideIs('consent')
   await openDetails()
@@ -2084,7 +2129,7 @@ async function groupL() {
   await expectVerification()
   await guideSays('the Longfellow addon')
   sv = await sessionView(lastSession())
-  eq('the circuit used', sv.circuit?.circuit_id, LONGFELLOW)
+  eq('the circuit used', sv.circuit?.system_id, LONGFELLOW)
   const proveTrace = sv.trace.find((t) => t.step === 'prove')?.data
   check('proved by the Longfellow addon, about 344 kB', proveTrace?.backend === 'longfellow' && proveTrace.metrics.proof_bytes > 300_000, `${proveTrace?.backend}, ${proveTrace?.metrics?.proof_bytes} bytes`)
   const witnessTrace = sv.trace.find((t) => t.step === 'witness')?.data
@@ -2112,7 +2157,7 @@ async function groupL() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Age verified', 30_000)
-  eq('with Longfellow', (await sessionView(lastSession())).circuit?.circuit_id, LONGFELLOW)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.system_id, LONGFELLOW)
   await closeFromPhone()
   check('the age range is recorded', !!(await me()).account?.birthDateRange)
   await goto('/c/afterdark')
@@ -2126,7 +2171,7 @@ async function groupL() {
   await page.getByRole('button', { name: 'Log out' }).click()
   await headerButton('Log in').waitFor()
   await signIn('Log in', `Logged in as u/${lf.handle}`)
-  eq('with Vega', (await sessionView(lastSession())).circuit?.circuit_id, VEGA)
+  eq('with Vega', (await sessionView(lastSession())).circuit?.system_id, VEGA)
 
   begin('L5', 'both accepted: Vega first; a wallet that runs only Longfellow is sent Longfellow')
   await accept(LONGFELLOW_SYSTEM, true)
@@ -2134,19 +2179,19 @@ async function groupL() {
   const ctx = await client()
   let s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
   let req = await fetchRequest(ctx, s, null)
-  eq('without wallet_metadata: both circuits, Vega first', req.client_metadata.vp_formats_supported.circuit_zk.circuit_id_values, [VEGA, LONGFELLOW])
+  eq('without wallet_metadata: both circuits, Vega first', req.client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA, LONGFELLOW])
   s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
-  const lfOnly = JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] } } })
+  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })
   req = await fetchRequest(ctx, s, lfOnly)
-  eq('tailored to the wallet', req.client_metadata.vp_formats_supported.circuit_zk, { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] })
+  eq('tailored to the wallet', req.client_metadata.vp_formats_supported.zkp_req, { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] })
   let p = await present(ctx, req, teen, LONGFELLOW)
-  eq('prove: the Longfellow circuit', p.circuit_id, LONGFELLOW)
+  eq('prove: the Longfellow circuit', p.system_id, LONGFELLOW)
   eq('the same pseudonym as the account', p.results.nym, lf.pseudonym)
   expectAnswer('the response', await respond(ctx, req, vpForm(req, p.presentation)), 200)
   let done = (await complete(ctx, s.id)).body
   check('logged in to the same account', done.ok === true && done.kind === 'logged_in' && done.handle === lf.handle, JSON.stringify(done))
   {
-    const r = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, circuit_id: LONGFELLOW, credential: adult.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) } })
+    const r = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, system_id: LONGFELLOW, credential: adult.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) } })
     expectAnswer("prove: another holder's seed", r, 400, 'bad_credential')
   }
 
@@ -2165,20 +2210,20 @@ async function groupL() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Age verified', 30_000)
-  eq('with Longfellow', (await sessionView(lastSession())).circuit?.circuit_id, LONGFELLOW)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.system_id, LONGFELLOW)
   await closeFromPhone()
 
   begin('L7', 'over HTTP: the Longfellow verifier refuses tampering and a presentation for another request')
   const tampers = {
     ...TAMPER,
-    'another circuit_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
+    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
   }
   const expected = {
     'a flipped proof byte': ['proof_invalid:hash', 'proof_invalid:signature', 'proof_encoding'],
     'a changed results.nym': ['proof_invalid:hash'],
     'a results key that is not the request handle': ['results'],
     'proof_time changed by one second': ['proof_invalid:hash'],
-    'another circuit_id': ['circuit'],
+    'another system_id': ['circuit'],
   }
   for (const [what, tamper] of Object.entries(tampers)) {
     const t = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -2228,7 +2273,8 @@ async function groupP() {
   /** One sign-up over HTTP, verified: the session's prove and verify traces. */
   const signUp = async (circuit) => {
     const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
-    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: [LONGFELLOW_SYSTEM], circuit_id_values: [LONGFELLOW] } } }) : WALLET_METADATA)
+    const only = (system, id) => JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [system], system_id_values: [id] } } })
+    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? only(LONGFELLOW_SYSTEM, LONGFELLOW) : circuit === 'bbs' ? only(BBS_SYSTEM, BBS_SCHEME) : WALLET_METADATA)
     if (circuit === 'bbs') {
       const p = await presentBbs(ctx, r)
       await respond(ctx, r, bbsForm(r, p.presentation))

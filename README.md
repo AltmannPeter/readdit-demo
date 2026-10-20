@@ -1,8 +1,9 @@
 # Readdit demo
 
 Reddit-style demo site for pseudonymous sign-up, age-gated communities and bans, using the
-`eu.europa.ec.eudi.nym_auth.1` attestation over cross-device OpenID4VP: `circuit_zk` presentations of
-the mdoc (Vega or Longfellow), and `mms_zk` presentations of a BBS form of it (`docs/mms_zk.md`).
+`eu.europa.ec.eudi.nym_auth.1` attestation over cross-device OpenID4VP and the rulebook's `zkp_req`
+format: circuit proofs over the mdoc (Vega or Longfellow), and BBS proofs over a BBS form of it
+(`bbs_cd`, `docs/bbs_cd.md`).
 
 **Try it in your browser, no installation:** [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AltmannPeter/readdit-demo?quickstart=1)
 See `TRY-IT.md`.
@@ -20,11 +21,11 @@ npm run dev            # http://localhost:3000
 
 Or with Docker: `docker compose up -d --build`.
 
-Any 6-digit PIN unlocks the wallet. Two phones play the SIROS ID wallet; proofs are real Vega,
+Any 6-digit PIN unlocks the wallet. Three phones play the SIROS ID wallet; proofs are real Vega,
 Longfellow and BBS proofs, made and verified in the site's server. The site accepts none until the
 technical view switches one on. A guide panel beside the site summarises each step of the flow, with
 the technical details of the step on request.
 
 - `AGENTS.md` – decisions, architecture, open work
 - `docs/backend-api.md` – prover and verifier contract
-- `docs/mms_zk.md` – the BBS request profile
+- `docs/bbs_cd.md` – the BBS encoding as the demo implements it

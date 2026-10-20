@@ -94,18 +94,18 @@ fn archive_witness_and_proof() {
 // ---- Readdit's flow ----
 
 fn request(host: &str, nonce: &str, age: Option<Value>) -> Value {
-  let mut req = vec![json!({ "id": "pseudonym-v1-sha256", "return": "nym", "params": { "config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns" } })];
+  let mut req = vec![json!({ "fn_id": "pseudonym", "return": "nym", "params": { "config": "known-offender-matching-ssc", "ver": 1, "prf": "sha-256" } })];
   if let Some(a) = age {
-    req.push(json!({ "id": "age_check", "return": "age", "params": a }));
+    req.push(json!({ "fn_id": "age_check", "return": "age", "params": a }));
   }
   json!({
     "client_id": format!("x509_san_dns:{host}"),
     "nonce": nonce,
     "response_uri": format!("https://{host}/api/vp/response/s1"),
-    "dcql_query": { "credentials": [{ "id": "nym_attestation", "format": "circuit_zk", "meta": { "doctype_value": DOC_TYPE }, "req": req }] },
-    "client_metadata": { "vp_formats_supported": { "circuit_zk": {
-      "circuit_id_values": ["urn:circuits:vega:nym_auth:v1", "urn:circuits:longfellow:nym_auth:v1"],
-      "circuit_proof_system_values": ["vega-v1", "longfellow-libzk-v1"] } } },
+    "dcql_query": { "credentials": [{ "id": "nym_attestation", "format": "zkp_req", "meta": { "source_format": "mso_mdoc", "doctype_value": DOC_TYPE }, "_req": req }] },
+    "client_metadata": { "vp_formats_supported": { "zkp_req": {
+      "system_id_values": ["urn:circuits:vega:nym_auth:v1", "urn:circuits:longfellow:nym_auth:v1"],
+      "proof_system_values": ["vega-v1", "longfellow-libzk-v1"] } } },
   })
 }
 
@@ -118,7 +118,7 @@ fn present(p: &Prover, holder: &Value, req: &Value) -> Result<Value, nym_longfel
     serde_json::from_value(json!({ "device_key": holder["device_key"], "doc_type": DOC_TYPE, "handover": handover(req) })).unwrap();
   let signed = p.sign(&sign)?;
   let input: WitnessInput = serde_json::from_value(json!({
-    "circuit_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
+    "system_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
     "request": req, "handover": handover(req), "credential": holder["credential"],
     "secret_seed": holder["secret_seed"], "device_signature": signed.device_signature,
   }))

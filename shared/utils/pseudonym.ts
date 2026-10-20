@@ -14,7 +14,7 @@ export interface PseudonymInputs {
   userValue?: string
 }
 
-/** verifier_input as defined per configuration (rulebook, pseudonym-v1-sha256). */
+/** verifier_input as defined per configuration (rulebook v0.4, "Configurations", prf sha-256). */
 export async function verifierInput(i: Omit<PseudonymInputs, 'seed'>): Promise<Uint8Array> {
   switch (i.config) {
     case 'known-offender-matching-ssc':

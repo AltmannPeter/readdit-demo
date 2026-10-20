@@ -1,7 +1,7 @@
-//! The BBS credential as the wallet stores it (`app/wallet/demo-wallet.json`):
+//! The BBS credential as the wallet stores it (`app/wallet/demo-wallet-bbs.json`):
 //!
 //! ```json
-//! { "format": "mms_zk", "schema_id": "...", "issuer_params": "<base64url>",
+//! { "format": "bbs_cd", "schema_id": "...", "issuer_params": "<base64url>",
 //!   "signature": "<base64url>", "messages": ["<64 hex digits>", ...] }
 //! ```
 //!
@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::profile::{self, SCHEMA_ID};
 use crate::{b64url, unb64url};
 
-pub const FORMAT: &str = "mms_zk";
+/// The attestation's encoding (the `source_format` of a `zkp_req` query).
+pub const FORMAT: &str = "bbs_cd";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CredentialJson {

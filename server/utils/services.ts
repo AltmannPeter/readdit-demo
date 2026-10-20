@@ -1,11 +1,12 @@
 // The ONLY place that calls the proof backends, three Node addons (Rust, built with
 // `npm run build:native`):
-//   Vega (native/vega) and Longfellow (native/longfellow): circuit_zk over the nym_auth mdoc;
-//   BBS (native/bbs): mms_zk over the nym_auth BBS credential (docs/mms_zk.md).
+//   Vega (native/vega) and Longfellow (native/longfellow): circuits over the nym_auth mdoc (mso_mdoc);
+//   BBS (native/bbs): a scheme over the nym_auth BBS credential (bbs_cd, docs/bbs_cd.md).
+// All three answer a zkp_req credential query with a ZkpPresentation (rulebook v0.4).
 // Each loads on its own. The site starts when at least one loads (server/plugins/backends.ts) and
 // offers only the circuits and formats of the backends that loaded (server/utils/vp.ts).
 //
-// circuit_zk (Vega, Longfellow):
+// mso_mdoc (Vega, Longfellow):
 // Prover: the phone's native steps. The mocked wallet sends the credential material each step
 // needs (credential, device key, secret_seed); the prover keeps none of it. The device key signs
 // DeviceAuthentication (the wallet's PIN screen unlocks it on the phone, with any PIN; the prover
@@ -22,7 +23,7 @@ import type { RequestObject } from '#shared/types/oid4vp'
 import { type FaultStep, takeFault } from './test-faults'
 
 export interface ServiceCircuit {
-  circuit_id: string
+  system_id: string
   proof_system: string
   /** The SHA-256 of the circuits as data: shapes.zst (Vega), circuits.zst (Longfellow). */
   shapes_sha256?: string | null
@@ -82,7 +83,7 @@ export interface SignResult {
 }
 
 export interface ProveBody {
-  circuit_id: string
+  system_id: string
   credential_query_id: string
   request: RequestObject
   handover: Handover
@@ -117,7 +118,7 @@ export interface ProveMetrics {
 }
 
 export interface ProveResult {
-  circuit_id: string
+  system_id: string
   presentation: string
   results: Record<string, string | true>
   metrics: ProveMetrics
@@ -137,7 +138,7 @@ export interface VerifyMetrics {
 }
 
 export type VerifyResult =
-  | { ok: true; circuit_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
+  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
   | { ok: false; reason: string; code?: string; input?: string | null; metrics?: VerifyMetrics }
 
 /** The HTTP status text for a prover refusal code (docs/backend-api.md, "Prover refusals"). The code
@@ -167,7 +168,7 @@ export class ServiceError extends Error {
   }
 }
 
-// ---- circuit_zk: the Vega and Longfellow addons ----
+// ---- mso_mdoc: the Vega and Longfellow circuit addons ----
 //
 // Both addons have the same interface and prove the same statement over the same mdoc; each lists
 // its circuit in `info`. A prover step goes to the addon of the circuit the wallet chose; a
@@ -196,7 +197,7 @@ interface Native {
   verifier: NativeVerifier
 }
 
-/** The circuit_zk backends, in the order of preference. */
+/** The circuit backends, in the order of preference. */
 export const CIRCUIT_BACKENDS = ['vega', 'longfellow'] as const
 export type CircuitBackend = (typeof CIRCUIT_BACKENDS)[number]
 const LABELS: Record<CircuitBackend, string> = { vega: 'Vega', longfellow: 'Longfellow' }
@@ -211,7 +212,7 @@ function backendPaths(name: CircuitBackend) {
 }
 
 /**
- * Loads one circuit_zk addon and both its sides, once. A failure is not kept: the next call tries
+ * Loads one circuit addon and both its sides, once. A failure is not kept: the next call tries
  * again. The caller reports it (server/plugins/backends.ts at start, `nativeFor` below on a request).
  */
 export function loadCircuitBackend(name: CircuitBackend): Promise<Native> {
@@ -242,7 +243,7 @@ export function loadCircuitBackend(name: CircuitBackend): Promise<Native> {
   return loading
 }
 
-/** The circuit_zk backends that load, in order; 503 unavailable when none does. */
+/** The circuit backends that load, in order; 503 unavailable when none does. */
 async function loadedCircuitBackends(service: 'prover' | 'verifier'): Promise<Array<{ name: CircuitBackend; n: Native }>> {
   const settled = await Promise.allSettled(CIRCUIT_BACKENDS.map((name) => loadCircuitBackend(name)))
   const up = CIRCUIT_BACKENDS.flatMap((name, i) => {
@@ -251,7 +252,7 @@ async function loadedCircuitBackends(service: 'prover' | 'verifier'): Promise<Ar
   })
   if (!up.length) {
     const why = settled.map((r, i) => (r.status === 'rejected' ? `${LABELS[CIRCUIT_BACKENDS[i]!]}: ${(r.reason as Error).message}` : '')).filter(Boolean).join(' ')
-    console.error(`[circuit_zk] ${service}: no addon is loaded: ${why} Run npm run build:native.`)
+    console.error(`[circuits] ${service}: no addon is loaded: ${why} Run npm run build:native.`)
     throw new ServiceError(service, 503, 'unavailable', why)
   }
   return up
@@ -260,7 +261,7 @@ async function loadedCircuitBackends(service: 'prover' | 'verifier'): Promise<Ar
 /** The circuit ids an addon side lists. */
 function circuitsOf(side: { info: string }): string[] {
   try {
-    return (JSON.parse(side.info) as ServiceInfo).circuits.map((c) => c.circuit_id)
+    return (JSON.parse(side.info) as ServiceInfo).circuits.map((c) => c.system_id)
   } catch {
     return []
   }
@@ -301,7 +302,7 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
   return call(service, `${service}.info`, async () => {
     const infos = up.map((b) => JSON.parse(b.n[service].info) as ServiceInfo)
     return { ...infos[0]!, implementation: infos.map((i) => i.implementation).join('; '), circuits: infos.flatMap((i) => i.circuits) }
-  }, 'circuit_zk')
+  }, 'circuits')
 }
 
 /** /tech's thread switch, for the addons that have one (Vega, BBS): `parallel` in the call's JSON.
@@ -310,11 +311,11 @@ function threading(backend: CircuitBackend | 'bbs'): { parallel?: boolean } {
   return backend === 'longfellow' ? {} : { parallel: store().multithreading }
 }
 
-/** The circuit a presentation names (CBOR CircuitZkPresentation, `circuit_id`), if it decodes. */
+/** The system a presentation names (CBOR ZkpPresentation, `system_id`), if it decodes. */
 function presentedCircuit(presentation: string): string | undefined {
   try {
     const m = new Decoder({ mapsAsObjects: false, useRecords: false }).decode(Buffer.from(presentation, 'base64url')) as unknown
-    const id = m instanceof Map ? m.get('circuit_id') : undefined
+    const id = m instanceof Map ? m.get('system_id') : undefined
     return typeof id === 'string' ? id : undefined
   } catch {
     return undefined
@@ -322,7 +323,7 @@ function presentedCircuit(presentation: string): string | undefined {
 }
 
 export const prover = {
-  /** Every loaded circuit_zk prover's circuits. */
+  /** Every loaded circuit prover's circuits. */
   async info(): Promise<ServiceInfo> {
     return mergedInfo('prover')
   },
@@ -334,10 +335,10 @@ export const prover = {
     return outcome<SignResult>(await call('prover', 'prover.sign', async () => JSON.parse(await b.n.prover.sign(JSON.stringify(body))), b.name))
   },
 
-  /** Steps 2 and 3 within this one call, by the addon of `body.circuit_id`: the witness, then the
+  /** Steps 2 and 3 within this one call, by the addon of `body.system_id`: the witness, then the
    *  proof. No witness outlives the call. */
   async prove(body: ProveBody): Promise<ProveResult & { backend: CircuitBackend }> {
-    const b = await backendFor('prover', body.circuit_id)
+    const b = await backendFor('prover', body.system_id)
     const done = await call('prover', 'prover.prove', async () => {
       const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading(b.name) }))
       if (typeof w === 'string') return { refusal: JSON.parse(w) }
@@ -350,7 +351,7 @@ export const prover = {
 }
 
 export const verifier = {
-  /** Every loaded circuit_zk verifier's circuits. */
+  /** Every loaded circuit verifier's circuits. */
   async info(): Promise<ServiceInfo> {
     return mergedInfo('verifier')
   },
@@ -362,7 +363,7 @@ export const verifier = {
   },
 }
 
-// ---- the BBS addon (mms_zk) ----
+// ---- the BBS addon (bbs_cd) ----
 //
 // Prover: one call per presentation. The mocked wallet sends the BBS credential and its device
 // key; the device key signs inside the ecdsa-pop plugin (hashed ECDSA over the plugin's device
@@ -370,7 +371,7 @@ export const verifier = {
 // own request and handover, against the issuer parameters it trusts (bbsIssuerParams).
 
 export interface BbsScheme {
-  scheme_id: string
+  system_id: string
   proof_system: string
   schema_id: string
   schema_digest: string
@@ -388,7 +389,7 @@ export interface BbsInfo {
 }
 
 export interface BbsCredential {
-  format: 'mms_zk'
+  format: 'bbs_cd'
   schema_id: string
   issuer_params: string
   signature: string
@@ -423,7 +424,7 @@ export interface BbsProveMetrics {
 }
 
 export interface BbsProveResult {
-  scheme_id: string
+  system_id: string
   presentation: string
   results: Record<string, string | true>
   metrics: BbsProveMetrics
@@ -431,7 +432,7 @@ export interface BbsProveResult {
 }
 
 export type BbsVerifyResult =
-  | { ok: true; scheme_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
+  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
   | { ok: false; reason: string; code?: string; metrics?: VerifyMetrics }
 
 interface NativeBbsProver {

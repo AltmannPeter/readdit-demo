@@ -1,4 +1,4 @@
-import type { CircuitZkFormats, MmsZkFormats, WalletMetadata } from '#shared/types/oid4vp'
+import type { WalletMetadata, ZkpReqFormats } from '#shared/types/oid4vp'
 import { buildDcqlQuery, buildRequestObject } from '#shared/utils/dcql'
 import { tailorFormats } from '#shared/utils/negotiation'
 
@@ -14,14 +14,12 @@ function parseWalletMetadata(text: unknown): WalletMetadata | undefined {
     throw refusal(400, 'invalid_wallet_metadata', 'wallet_metadata is not valid JSON.')
   }
   const formats = (m as { vp_formats_supported?: unknown } | null)?.vp_formats_supported
-  const zk = (formats as { circuit_zk?: unknown } | undefined)?.circuit_zk as CircuitZkFormats | undefined
-  const mms = (formats as { mms_zk?: unknown } | undefined)?.mms_zk as MmsZkFormats | undefined
+  const zk = (formats as { zkp_req?: unknown } | undefined)?.zkp_req as ZkpReqFormats | undefined
   if (
     !m ||
     typeof m !== 'object' ||
     (formats !== undefined && (typeof formats !== 'object' || formats === null)) ||
-    (zk !== undefined && (typeof zk !== 'object' || zk === null || !strings(zk.circuit_id_values) || !strings(zk.circuit_proof_system_values))) ||
-    (mms !== undefined && (typeof mms !== 'object' || mms === null || !strings(mms.scheme_id_values) || !strings(mms.proof_system_values)))
+    (zk !== undefined && (typeof zk !== 'object' || zk === null || !strings(zk.system_id_values) || !strings(zk.proof_system_values)))
   ) {
     throw refusal(400, 'invalid_wallet_metadata', 'wallet_metadata does not have the expected shape.')
   }

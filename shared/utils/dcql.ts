@@ -1,59 +1,48 @@
 import type { BirthDateRange } from '../types'
+import { findSystem } from '../registry/circuits'
 import {
   NYM_BBS_SCHEMA,
   NYM_DOCTYPE,
-  type CircuitZkCredentialQuery,
   type DcqlQuery,
-  type MmsReqItem,
-  type MmsZkCredentialQuery,
   type ReqItem,
   type RequestObject,
+  type SourceFormat,
   type VpFormats,
+  type ZkpReqCredentialQuery,
 } from '../types/oid4vp'
 
+/** The query over the mdoc (mso_mdoc). */
 export const CREDENTIAL_QUERY_ID = 'nym_attestation'
-/** The mms_zk query: the same attestation as a BBS credential. */
+/** The query over the same attestation as a BBS credential (bbs_cd). */
 export const BBS_QUERY_ID = 'nym_attestation_bbs'
 export const RETURN_PSEUDONYM = 'nym'
 export const RETURN_AGE = 'age'
 
-/** Pseudonym always; age_check when a birth-date range is required. */
-export function buildCredentialQuery(age?: BirthDateRange): CircuitZkCredentialQuery {
-  const req: ReqItem[] = [
-    {
-      id: 'pseudonym-v1-sha256',
-      return: RETURN_PSEUDONYM,
-      params: { config: 'known-offender-matching-ssc', verifier_id_type: 'x509_san_dns' },
-    },
-  ]
-  if (age) req.push({ id: 'age_check', return: RETURN_AGE, params: { ...age } })
-  return {
-    id: CREDENTIAL_QUERY_ID,
-    format: 'circuit_zk',
-    meta: { doctype_value: NYM_DOCTYPE },
-    req,
-  }
+/** The pseudonym's PRF per source format (rulebook v0.4, "Parameters"). */
+export const PRF_FOR: Record<SourceFormat, 'sha-256' | 'hashdh-bls12381g1'> = { mso_mdoc: 'sha-256', bbs_cd: 'hashdh-bls12381g1' }
+
+/** A zkp_req query over `source`: the pseudonym always; age_check when a birth-date range is required. */
+export function buildCredentialQuery(source: SourceFormat, age?: BirthDateRange): ZkpReqCredentialQuery {
+  const _req: ReqItem[] = [{ fn_id: 'pseudonym', return: RETURN_PSEUDONYM, params: { config: 'known-offender-matching-ssc', ver: 1, prf: PRF_FOR[source] } }]
+  if (age) _req.push({ fn_id: 'age_check', return: RETURN_AGE, params: { ...age } })
+  return source === 'mso_mdoc'
+    ? { id: CREDENTIAL_QUERY_ID, format: 'zkp_req', meta: { source_format: 'mso_mdoc', doctype_value: NYM_DOCTYPE }, _req }
+    : { id: BBS_QUERY_ID, format: 'zkp_req', meta: { source_format: 'bbs_cd', schema_id_value: NYM_BBS_SCHEMA }, _req }
 }
 
-/** mms_zk: the BBS pseudonym always; age_check when a birth-date range is required. */
-export function buildBbsCredentialQuery(age?: BirthDateRange): MmsZkCredentialQuery {
-  const req: MmsReqItem[] = [
-    { id: 'pseudonym-bbs-v1', return: RETURN_PSEUDONYM, params: { config: 'known-offender-matching-ssc', verifier_id_type: 'x509_san_dns' } },
-  ]
-  if (age) req.push({ id: 'age_check', return: RETURN_AGE, params: { ...age } })
-  return { id: BBS_QUERY_ID, format: 'mms_zk', meta: { schema_id_value: NYM_BBS_SCHEMA }, req }
+/** The source formats of the systems an offer lists, in the offer's order. */
+export function sourcesOf(offer: VpFormats): SourceFormat[] {
+  const ids = offer.zkp_req?.system_id_values ?? []
+  return [...new Set(ids.map((id) => findSystem(id)?.source_format).filter((f): f is SourceFormat => !!f))]
 }
 
 /**
- * The DCQL query for the formats the site accepts (`offer`), in the offer's order (circuit_zk,
- * then mms_zk): one credential query per format and, with more than one, a credential set whose
- * options are the alternatives, so the wallet answers exactly one of them.
+ * The DCQL query for the systems the site accepts (`offer`): one zkp_req credential query per
+ * source format, in the offer's order (mso_mdoc, then bbs_cd), and, with more than one, a
+ * credential set whose options are the alternatives, so the wallet answers exactly one of them.
  */
 export function buildDcqlQuery(offer: VpFormats, age?: BirthDateRange): DcqlQuery {
-  const credentials = [
-    ...(offer.circuit_zk ? [buildCredentialQuery(age)] : []),
-    ...(offer.mms_zk ? [buildBbsCredentialQuery(age)] : []),
-  ]
+  const credentials = sourcesOf(offer).map((f) => buildCredentialQuery(f, age))
   return credentials.length > 1 ? { credentials, credential_sets: [{ options: credentials.map((q) => [q.id]) }] } : { credentials }
 }
 

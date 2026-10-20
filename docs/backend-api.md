@@ -1,16 +1,17 @@
 # Proof backend contract
 
 There are three backends, each a Node addon (Rust, napi-rs) loaded in the site's server process:
-the Vega addon (`native/vega`, `circuit_zk` over the nym_auth mdoc), described first; the
-Longfellow addon (`native/longfellow`, `circuit_zk` over the same mdoc, with the same interface),
-in its own section; and the BBS addon (`native/bbs`, `mms_zk` over the nym_auth BBS credential,
-`docs/mms_zk.md`). Only `server/utils/services.ts` calls them. Each loads on its own; the site
-starts when at least one loads and offers only the circuits and formats of those that did. The
+the Vega addon (`native/vega`, a circuit over the nym_auth mdoc, `mso_mdoc`), described first; the
+Longfellow addon (`native/longfellow`, a circuit over the same mdoc, with the same interface), in
+its own section; and the BBS addon (`native/bbs`, a scheme over the nym_auth BBS credential,
+`bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query (v0.4) with
+a `ZkpPresentation`. Only `server/utils/services.ts` calls them. Each loads on its own; the site
+starts when at least one loads and offers only the systems of those that did. The
 addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
 a presentation costs no network hop on the server side.
 
-`circuit_zk` calls go to the addon of the circuit: `sign` and the witness and proof steps to the
-addon of the `circuit_id` the wallet chose, `verify` to the addon of the `circuit_id` the
+`mso_mdoc` calls go to the addon of the circuit: `sign` and the witness and proof steps to the
+addon of the `system_id` the wallet chose, `verify` to the addon of the `system_id` the
 presentation names (an unknown one goes to the first loaded addon, which refuses it with code
 `circuit`). `info` merges both addons' `circuits`, Vega first.
 
@@ -34,7 +35,7 @@ When no addon loads, the built server stops at start with the reasons (exit code
 `unavailable`. When one does not load, the site starts with the others and logs, for example,
 `[longfellow] not loaded: …`; `/tech` shows which. An addon call that fails at runtime (it throws,
 or its result is not JSON) is `500 backend_error` (`services.ts`), logged as `[<addon>] <step>
-failed: <reason>` (`[circuit_zk]` for the merged `info`).
+failed: <reason>` (`[circuits]` for the merged `info`).
 
 Configuration (Nuxt runtime config, environment variables):
 
@@ -50,7 +51,7 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Readdit can accept, comma-separated, in preference order |
 | `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
-| `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `mms_zk` schemes Readdit can accept |
+| `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Readdit can accept |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a demo reset; `/tech` switches them (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`). Empty: none, and a wallet request answers 503 `none_accepted` |
 
 ## The circuit
@@ -60,7 +61,7 @@ Configuration (Nuxt runtime config, environment variables):
 | Circuit id | `urn:circuits:vega:nym_auth:v1` |
 | Proof system | `vega-v1`: Microsoft vega-prover `c0ee259`, `VegaMcZkSNARK` over `T256HyraxEngine` |
 | Circuits | nym-auth-circuits `vega-age` (vendored unchanged, `native/vega/VENDOR-SHA256SUMS`): 32 step instances and one core, layout `FULL_MDOC` |
-| Statement | the nym_auth mdoc: issuer signature (ES256), docType, birth date in [E, C], validity at T, device signature on e2, `SHA-256(secret_seed) = ssc`, pseudonym `pseudonym-v1-sha256`, `known-offender-matching-ssc` |
+| Statement | the nym_auth mdoc: issuer signature (ES256), docType, birth date in [E, C], validity at T, device signature on e2, `SHA-256(secret_seed) = ssc`, the `pseudonym` function with `prf` `sha-256` and `known-offender-matching-ssc` |
 | `shapes.zst` SHA-256 | `b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df` |
 | Proof | 96,079 bytes (bincode of `app::Proof`) |
 
@@ -97,10 +98,11 @@ The device key signs `message` with ES256; the circuit verifies that signature o
 
 ## Encoding conventions
 
-- `presentation` is `base64url(CBOR(CircuitZkPresentation))` without padding (rulebook,
-  "Presentation encoding"): `circuit_id`, `proof`, `issuer_key_set` (one DER certificate),
+- `presentation` is `base64url(CBOR(ZkpPresentation))` without padding (rulebook v0.4,
+  "Presentation encoding"): `system_id`, `proof`, `issuer_key_set` (one DER certificate),
   `proof_time` (tag 0), `results`.
-- In decoded `results`, the pseudonym is lowercase hex of the 32-byte `bstr`, and the age predicate is `true`.
+- In decoded `results`, the pseudonym is lowercase hex of the `bstr` (32 bytes for `prf` `sha-256`,
+  48 for `hashdh-bls12381g1`), and the age predicate is `true`.
 - `request` is the decoded Request Object payload, as the site built and signed it (`RequestObject`
   in `shared/types/oid4vp.ts`).
 - `handover` is `{ client_id, nonce, response_uri, jwk_thumbprint: null }`; its values must equal the request's.
@@ -136,7 +138,7 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
   "version": "0.1.0",
   "stub": false,
   "circuits": [{
-    "circuit_id": "urn:circuits:vega:nym_auth:v1",
+    "system_id": "urn:circuits:vega:nym_auth:v1",
     "proof_system": "vega-v1",
     "shapes_sha256": "b457ba53…",
     "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "birth_date.identifier", "pseudonym.verifier_input", "results.nym"]
@@ -152,7 +154,7 @@ the one-time key build at start. The mocked phone sends `circuits` as `wallet_me
 ### Prover step 1: sign
 
 The device key signs DeviceAuthentication over the SessionTranscript of the handover. The message
-is the same for both circuits; `POST /api/wallet/sign` takes the wallet's chosen `circuit_id` and
+is the same for both circuits; `POST /api/wallet/sign` takes the wallet's chosen `system_id` and
 calls that circuit's addon. The phone's
 PIN screen stands for the unlock, and any PIN unlocks; the prover takes no PIN, and an input field
 it does not know (such as a `pin`) is ignored.
@@ -173,7 +175,7 @@ it does not know (such as a `pin`) is ignored.
 
 ```json
 {
-  "circuit_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:vega:nym_auth:v1",
   "credential_query_id": "nym_attestation",
   "request": { "…": "decoded Request Object" },
   "handover": { "…": "as above" },
@@ -184,8 +186,9 @@ it does not know (such as a `pin`) is ignored.
 ```
 
 Before building the witness, the prover checks: the request against what the circuit proves
-(`pseudonym-v1-sha256` with `known-offender-matching-ssc` and `x509_san_dns`, at most one
-`age_check` with `ge`/`le`, rulebook limits); the issuer signature under the `x5chain` certificate's
+(a `zkp_req` query over `mso_mdoc`; one `pseudonym` with `known-offender-matching-ssc`, `ver` 1 and
+`prf` `sha-256`, verifier_id = an `x509_san_dns` client_id; at most one `age_check` with `ge`/`le`,
+rulebook limits); the issuer signature under the `x5chain` certificate's
 key; that the MSO lists both items' digests; `SHA-256(secret_seed) = ssc`; the device signature
 under the credential's device key; the credential's validity now; and the birth date in [E, C].
 Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Witness.summary`:
@@ -207,7 +210,7 @@ Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Wit
 ```json
 {
   "ok": true,
-  "circuit_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:vega:nym_auth:v1",
   "presentation": "<base64url CBOR>",
   "results": { "nym": "<hex32>", "age": true },
   "metrics": {
@@ -244,7 +247,7 @@ Prover refusals:
 ```
 
 ```json
-{ "ok": true, "circuit_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
+{ "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
   "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "peak_memory_mb": 1357 } }
 ```
 
@@ -258,18 +261,18 @@ The verifier takes only `issuer_key_set`, `proof_time` and `results` from the pr
 | Code | Rule |
 | --- | --- |
 | `presentation` | base64url CBOR map with exactly the members above, no duplicates, no trailing bytes |
-| `circuit` | `circuit_id` is this circuit, and the request offered it (id and proof system) |
+| `circuit` | `system_id` is this circuit, and the request offered it (id and proof system) |
 | `request` | the request is one this circuit proves, and the handover matches it |
 | `issuer_key_set` | exactly one certificate (the circuit names one issuer key), byte-equal to a trust anchor and valid now |
 | `proof_time` | a 20-character date-time within the tolerance of `now` |
-| `results` | the keys are exactly the `return` handles of `req`; the pseudonym is 32 bytes, the predicate `true` |
+| `results` | the keys are exactly the `return` handles of `_req`; the pseudonym is 32 bytes, the predicate `true` |
 | `proof_encoding` | the proof decodes (bincode, at most 1 MiB, no trailing bytes) |
 | `proof_invalid` | the SNARK verification fails, or a step instance does not report its position |
 | `public_input` | the proof's public values differ from the verifier's; `input` names the first one that differs |
 
 Readdit repeats the circuit and results-key checks after the call, as a second line of defence.
 
-## The Longfellow addon (`circuit_zk`)
+## The Longfellow addon (`mso_mdoc`)
 
 `native/longfellow/node` (crate `readdit-longfellow-node`) around `native/longfellow/nym-longfellow`,
 on Google's longfellow-zk Rust runtime. It has the Vega addon's interface, objects and JSON, with
@@ -331,15 +334,15 @@ GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code
 arm64, without which the runtime does not compile (Apple Silicon has it by default, Linux arm64 does
 not). A `RUSTFLAGS` environment variable replaces these flags.
 
-## The BBS addon (`mms_zk`)
+## The BBS addon (`bbs_cd`)
 
 `native/bbs/node` (crate `readdit-bbs-node`) around `native/bbs/nym-bbs`, which implements the
-profile of `docs/mms_zk.md` on the vendored bbs-cd-plugins crates. `loadProver()` builds the
+rulebook's `bbs_cd` encoding (`docs/bbs_cd.md`) on the vendored bbs-cd-plugins crates. `loadProver()` builds the
 date-range tables; `loadVerifier(issuerParamsPath)` reads the trusted issuer parameters and
 checks that their schema is the profile's. Calls take and return JSON text; one heavy step runs at
 a time.
 
-**`info`** (both): `implementation`, `version`, `schemes` (`scheme_id`, `proof_system`,
+**`info`** (both): `implementation`, `version`, `schemes` (`system_id`, `proof_system`,
 `schema_id`, `schema_digest`, `plugins` in request order), `load_ms`, `max_threads`; the verifier also
 `issuers` (`issuer_pk`, `schema_id`, `schema_digest`). The site offers a scheme only when the
 verifier reports the registry's proof system, schema and plugins (`server/utils/vp.ts`).
@@ -355,24 +358,26 @@ key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
 ```json
 { "request": { …Request Object… }, "credential_query_id": "nym_attestation_bbs",
   "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null },
-  "credential": { "format": "mms_zk", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
+  "credential": { "format": "bbs_cd", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
   "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" } }
 ```
 
-It answers `{ ok: true, scheme_id, presentation, results, metrics, statement }`: `presentation` is
-base64url of the envelope; `results` as the verifier's; `metrics` `offline_ms` (commitments and
+It answers `{ ok: true, system_id, presentation, results, metrics, statement }`: `presentation` is
+base64url(CBOR(ZkpPresentation)), its `proof` the bbs-cd-plugins envelope, `issuer_key_set` the
+96-byte issuer key, `results.nym` the 48-byte G1 point, no `proof_time`; `results` as the
+verifier's; `metrics` `offline_ms` (commitments and
 the ecdsa-pop preparation), `bbs_ms`, `ecdsa_pop_ms`, `device_sign_ms`, `pseudonym_ms`,
-`date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `presentation_bytes`, `parts` (bytes per
-part), `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
+`date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `proof_bytes` (the envelope),
+`presentation_bytes` (the ZkpPresentation), `parts` (bytes per part), `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
 committed attributes, plugins). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
 is outside the range), `400 unsupported_request`, `unsupported_config`, `unsupported_function`,
 `unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
 does not decode or verify, or the device key is not the credential's), `bad_request`.
 
 **Verifier: `verify`.** `{ request, credential_query_id, presentation, handover }`, all but the
-presentation from the site's session store. It answers `{ ok: true, scheme_id, results, metrics }`
-or `{ ok: false, code, reason, metrics }` with `code` `presentation`, `request`, `scheme` or
-`proof_invalid` (`docs/mms_zk.md` §6). `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
+presentation from the site's session store. It answers `{ ok: true, system_id, results, metrics }`
+or `{ ok: false, code, reason, metrics }` with `code` `presentation`, `scheme`, `issuer_key_set`,
+`request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5). `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
 `ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
 
 ## Readdit's routes and their refusals
@@ -389,15 +394,15 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 503 `unavailable` | The verifier could not make an offer |
 | request_uri | 404 `unknown_session` | |
 | | 405 `method_not_allowed` | Not GET or POST |
-| | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `circuit_zk` or `mms_zk` values are not lists of strings |
+| | 400 `invalid_wallet_metadata` | `wallet_metadata` is not JSON, or its `zkp_req` values are not lists of strings |
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
-| | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no format to offer (the offer is made again at this point, from `/tech`'s switches) |
+| | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no system to offer (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
 | | 400 `state_mismatch` | `state` is not the session's; checked first |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
 | | 400 `already_answered` | A second response, for example a replay; logged as `[vp] <id>: refused a second response` |
-| | 200 | The response was processed. The vp_token must answer exactly one of the request's credential queries, in a format, and for `circuit_zk` with a circuit, whose proof system the site still accepts (else refused with code `format`). A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
+| | 200 | The response was processed. The vp_token must answer exactly one of the request's credential queries, with a system of the query's source format whose proof system the site still accepts (else refused with code `format`). A presentation that does not verify is refused with its rule in the server log (`[vp] <id>: presentation refused: <code> (<input>): <reason>`) and the session trace (`/tech`), not in the answer |
 | | 503 `unavailable` | The verifier failed; the session ends as `unavailable` |
 | `GET /api/vp/session/:id`, `…/complete`, `…/cancel` | 404 `unknown_session`, 403 `other_browser` | Only the browser that started the session |
 | `POST …/complete` | 409 `not_verified` | Before a verified presentation |

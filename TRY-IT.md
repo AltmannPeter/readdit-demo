@@ -17,8 +17,8 @@ You can ignore the code editor that opens. Everything happens in the Readdit tab
 - **First, the technical view:** add `/tech` to the end of the Readdit address and tick a proof
   system under **Readdit accepts** (Vega, for example). Readdit accepts none until you do.
 - **The site:** the Readdit tab. Sign up with the phone on the right side of the dialog. Any 6-digit
-  PIN works. There are two phones, a teen's and an adult's: **Swap phone** above the phone switches
-  between them.
+  PIN works. There are three phones, the teen's, the adult's and the teen's BBS phone: **Swap
+  phone** above the phone hands over to the next one.
 - **Technical view:** what happens underneath, live.
 - **Moderation view:** add `/mod` to the end of the Readdit address. Ban users or reset the demo here.
 

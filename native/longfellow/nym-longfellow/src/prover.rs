@@ -64,7 +64,7 @@ pub struct Credential {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct WitnessInput {
-  pub circuit_id: String,
+  pub system_id: String,
   pub credential_query_id: String,
   pub request: RequestObject,
   pub handover: Handover,
@@ -108,7 +108,7 @@ fn ecdsa(rs: &[u8; 64]) -> Result<EcdsaSignature, String> {
 /// The registry's description of the circuits, for both sides' `info`.
 pub fn circuit_info(sha256: &[u8; 32]) -> Json {
   json!([{
-    "circuit_id": CIRCUIT_ID,
+    "system_id": CIRCUIT_ID,
     "proof_system": PROOF_SYSTEM,
     "artifact_sha256": hex(sha256),
     "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
@@ -190,11 +190,11 @@ impl Prover {
   /// Step 2: takes the credential apart, makes every holder-side check, and builds both vectors.
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
-    if input.circuit_id != CIRCUIT_ID {
-      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.circuit_id)));
+    if input.system_id != CIRCUIT_ID {
+      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
     let s: Statement = statement(&input.request, &input.credential_query_id, &input.handover)?;
-    if s.offered_circuits.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
+    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
       return Err(Refusal::unsupported_circuit("the request does not offer this circuit"));
@@ -279,7 +279,7 @@ impl Prover {
       witness: w,
       transcript_seed: s.session_transcript.clone(),
       presentation: Presentation {
-        circuit_id: CIRCUIT_ID.into(),
+        system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
         issuer_key_set: vec![m.document_signer.clone()],
         proof_time: now.text(),
@@ -301,7 +301,7 @@ impl Prover {
     let proof_bytes = proved.proof.len();
     let presentation = Presentation { proof: proved.proof, ..w.presentation }.encode()?;
     Ok(json!({
-      "circuit_id": CIRCUIT_ID,
+      "system_id": CIRCUIT_ID,
       "presentation": crate::b64url(&presentation),
       "results": w.results,
       "metrics": {

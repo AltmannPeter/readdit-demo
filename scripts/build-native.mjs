@@ -1,8 +1,8 @@
 // Builds the proof backends' Node addons (Rust) and copies each where the site's server loads it
 // (server/utils/services.ts):
-//   native/vega/node       -> native/vega/readdit-vega.node              (circuit_zk: Vega)
-//   native/longfellow/node -> native/longfellow/readdit-longfellow.node  (circuit_zk: Longfellow)
-//   native/bbs/node        -> native/bbs/readdit-bbs.node                (mms_zk: BBS committed disclosures)
+//   native/vega/node       -> native/vega/readdit-vega.node              (mso_mdoc: Vega)
+//   native/longfellow/node -> native/longfellow/readdit-longfellow.node  (mso_mdoc: Longfellow)
+//   native/bbs/node        -> native/bbs/readdit-bbs.node                (bbs_cd: BBS committed disclosures)
 // Needs Rust (https://rustup.rs). Longfellow's target features (carry-less multiply) are in
 // native/longfellow/.cargo/config.toml.
 // Usage: npm run build:native [-- vega|longfellow|bbs]   (default: all three)

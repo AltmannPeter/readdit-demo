@@ -70,7 +70,7 @@ pub struct Credential {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct WitnessInput {
-  pub circuit_id: String,
+  pub system_id: String,
   pub credential_query_id: String,
   pub request: RequestObject,
   pub handover: Handover,
@@ -142,7 +142,7 @@ impl Prover {
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
       "circuits": [{
-        "circuit_id": CIRCUIT_ID,
+        "system_id": CIRCUIT_ID,
         "proof_system": PROOF_SYSTEM,
         "shapes_sha256": hex(&self.shapes_sha256),
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
@@ -183,8 +183,8 @@ impl Prover {
   /// Step 2: takes the credential apart, makes every holder-side check, and computes the witness.
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
-    if input.circuit_id != CIRCUIT_ID {
-      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.circuit_id)));
+    if input.system_id != CIRCUIT_ID {
+      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
     let s: Statement = statement(&input.request, &input.credential_query_id, &input.handover)?;
     if input.credential.format != "mso_mdoc" || input.credential.doctype != DOC_TYPE {
@@ -284,7 +284,7 @@ impl Prover {
     });
     Ok(WitnessData {
       presentation: Presentation {
-        circuit_id: CIRCUIT_ID.into(),
+        system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
         issuer_key_set: vec![m.document_signer.clone()],
         proof_time: now.text(),
@@ -314,7 +314,7 @@ impl Prover {
     let proof_bytes = proof.len();
     let presentation = Presentation { proof, ..w.presentation }.encode()?;
     Ok(json!({
-      "circuit_id": CIRCUIT_ID,
+      "system_id": CIRCUIT_ID,
       "presentation": crate::b64url(&presentation),
       "results": w.results,
       "metrics": {

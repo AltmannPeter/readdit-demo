@@ -2,17 +2,17 @@ import type { RequestObject } from '#shared/types/oid4vp'
 
 /**
  * Mock phone, the proof.
- * circuit_zk (Vega or Longfellow, by `circuit_id`), native steps 2 and 3: the witness from the credential, then the proof. The
+ * mso_mdoc (Vega or Longfellow, by `system_id`), native steps 2 and 3: the witness from the credential, then the proof. The
  * phone sends its credential, its secret_seed and the device signature of step 1; the prover keeps
  * none of them, and the witness lives only for this call.
- * mms_zk (BBS): one step. The phone sends its BBS credential and its device key, which signs inside
+ * bbs_cd (BBS): one step. The phone sends its BBS credential and its device key, which signs inside
  * the ecdsa-pop plugin; the prover keeps neither.
  * `credential_query_id` names the query the wallet answers (DCQL credential_sets: one of them).
  */
 export default defineEventHandler(async (event) => {
-  const { request, circuit_id, credential, secret_seed, device_signature, device_key, credential_query_id } = await readObject<{
+  const { request, system_id, credential, secret_seed, device_signature, device_key, credential_query_id } = await readObject<{
     request: RequestObject
-    circuit_id: unknown
+    system_id: unknown
     credential: WalletCredential | BbsCredential
     secret_seed: unknown
     device_signature: unknown
@@ -21,13 +21,13 @@ export default defineEventHandler(async (event) => {
   }>(event)
   const queries = Array.isArray(request?.dcql_query?.credentials) ? request.dcql_query.credentials : []
   const query = typeof credential_query_id === 'string' ? queries.find((q) => q.id === credential_query_id) : queries[0]
-  if (credential?.format === 'mms_zk') return proveBbs(request as RequestObject, query?.id, credential as BbsCredential, device_key as DeviceKeyJwk)
+  if (credential?.format === 'bbs_cd') return proveBbs(request as RequestObject, query?.id, credential as BbsCredential, device_key as DeviceKeyJwk)
   if (
     typeof query?.id !== 'string' ||
     typeof request?.client_id !== 'string' ||
     typeof request.nonce !== 'string' ||
     typeof request.response_uri !== 'string' ||
-    typeof circuit_id !== 'string' ||
+    typeof system_id !== 'string' ||
     typeof credential !== 'object' ||
     !credential ||
     typeof secret_seed !== 'string' ||
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
   const t0 = Date.now()
   try {
     const result = await prover.prove({
-      circuit_id,
+      system_id,
       credential_query_id: query.id,
       request,
       handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
@@ -54,7 +54,8 @@ export default defineEventHandler(async (event) => {
     if (s) {
       if (result.witness) addTrace(s, 'witness', 'Witness built', { ...result.witness })
       addTrace(s, 'prove', 'Proof created', {
-        circuit_id: result.circuit_id,
+        format: 'mso_mdoc',
+        system_id: result.system_id,
         backend: result.backend,
         metrics: result.metrics,
         presentation_bytes: result.presentation.length,
@@ -70,7 +71,7 @@ export default defineEventHandler(async (event) => {
   }
 })
 
-/** mms_zk: one call to the BBS prover. */
+/** bbs_cd: one call to the BBS prover. */
 async function proveBbs(request: RequestObject, queryId: string | undefined, credential: BbsCredential, deviceKey: DeviceKeyJwk) {
   if (
     typeof queryId !== 'string' ||
@@ -95,8 +96,8 @@ async function proveBbs(request: RequestObject, queryId: string | undefined, cre
     })
     if (s) {
       addTrace(s, 'prove', 'Presentation created', {
-        format: 'mms_zk',
-        scheme_id: result.scheme_id,
+        format: 'bbs_cd',
+        system_id: result.system_id,
         statement: result.statement,
         metrics: result.metrics,
         presentation_bytes: result.presentation.length,
@@ -106,7 +107,7 @@ async function proveBbs(request: RequestObject, queryId: string | undefined, cre
     return result
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : 'error'
-    if (s) addTrace(s, 'prove', 'Presentation not created', { format: 'mms_zk', error: code, ...(e instanceof ServiceError && e.detail && { detail: e.detail }) })
+    if (s) addTrace(s, 'prove', 'Presentation not created', { format: 'bbs_cd', error: code, ...(e instanceof ServiceError && e.detail && { detail: e.detail }) })
     throw refusal(e instanceof ServiceError ? e.status : 500, code, proverMessage(code))
   }
 }

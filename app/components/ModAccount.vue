@@ -10,7 +10,7 @@ export interface ModAccountRow {
   community: string | null
   linkedTo: string | null
   /** The format of the presentation that created the account. */
-  format: 'circuit_zk' | 'mms_zk' | null
+  format: 'mso_mdoc' | 'bbs_cd' | null
   banned: { at: string; reason: string } | null
   comments: number
 }
@@ -43,7 +43,7 @@ const a = computed(() => props.account)
       </div>
       <div v-if="a.format" class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Credential</dt>
-        <dd>{{ a.format === 'mms_zk' ? 'BBS (mms_zk)' : 'mdoc (circuit_zk)' }}</dd>
+        <dd>{{ a.format === 'bbs_cd' ? 'BBS (bbs_cd)' : 'mdoc (mso_mdoc)' }}</dd>
       </div>
       <div v-if="a.community && !props.nested" class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Linked to</dt>

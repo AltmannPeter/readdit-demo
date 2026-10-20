@@ -9,14 +9,14 @@ import { analyzeRequest, consentFor, parseAuthorizationUrl, queryFor } from '~/w
 import { TransportError, httpTransport } from '~/wallet/transport'
 import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
 import { ProverError, prove, proveBbs, unlockAndSign } from '~/wallet/prover'
-import { findCircuit, findScheme } from '#shared/registry/circuits'
+import { findSystem } from '#shared/registry/circuits'
 
 /**
  * The SIROS ID wallet on the phone (mocked screens, real protocol). Drives the holder side of
  * OpenID4VP: scan -> POST request_uri with wallet_metadata -> verify the signed request -> check
- * it and pick a circuit or scheme -> consent -> PIN -> native steps -> POST response_uri. The native
- * steps: for the mdoc (circuit_zk) sign, then witness and prove; for the BBS credential (mms_zk)
- * one prove, in which the device key signs.
+ * it and pick a system (a circuit or a scheme) -> consent -> PIN -> native steps -> POST
+ * response_uri. The native steps: for the mdoc (mso_mdoc) sign, then witness and prove; for the
+ * BBS credential (bbs_cd) one prove, in which the device key signs.
  * It publishes its state for the guide panel (useWalletFlow).
  *
  * It answers response_uri when the person declines and when the rulebook asks for an Error
@@ -90,8 +90,8 @@ watchEffect(() => {
     credential: current.value,
     matching: matching.value.length,
     switching: switching.value,
-    walletCircuits: caps.value?.circuitIds ?? [],
-    walletSchemes: caps.value?.schemeIds ?? [],
+    walletCircuits: phoneSystems().filter((id) => findSystem(id)?.source_format === 'mso_mdoc'),
+    walletSchemes: phoneSystems().filter((id) => findSystem(id)?.source_format === 'bbs_cd'),
     view: view.value,
     consent: consent.value,
     metrics: metrics.value,
@@ -106,8 +106,8 @@ async function prepare(): Promise<boolean> {
   try {
     credentials.value ??= (await loadCredentials()).filter((c) => props.phone.credentials.includes(c.index))
     if (!caps.value) {
-      const c = await $fetch<{ circuits?: Array<{ circuit_id: string }>; schemes?: Array<{ scheme_id: string }> }>('/api/wallet/capabilities')
-      caps.value = { circuitIds: (c.circuits ?? []).map((x) => x.circuit_id), schemeIds: (c.schemes ?? []).map((x) => x.scheme_id) }
+      const c = await $fetch<{ circuits?: Array<{ system_id: string }>; schemes?: Array<{ system_id: string }> }>('/api/wallet/capabilities')
+      caps.value = { systemIds: [...(c.circuits ?? []), ...(c.schemes ?? [])].map((x) => x.system_id) }
     }
     return true
   } catch (e) {
@@ -118,18 +118,20 @@ async function prepare(): Promise<boolean> {
 }
 onMounted(prepare)
 
-/** What this wallet can prove, for the formats of the credentials on this phone. */
+/** The systems this wallet can run for the source formats of the credentials on this phone. */
+function phoneSystems(): string[] {
+  const formats = new Set(credentials.value?.map((c) => c.format) ?? [])
+  return (caps.value?.systemIds ?? []).filter((id) => {
+    const f = findSystem(id)?.source_format
+    return !!f && formats.has(f)
+  })
+}
+
+/** wallet_metadata: those systems and their proof systems, in zkp_req. */
 function walletMetadata(): WalletMetadata {
-  const has = (f: 'mso_mdoc' | 'mms_zk') => credentials.value?.some((c) => c.format === f)
-  const ids = caps.value?.circuitIds ?? []
-  const schemes = caps.value?.schemeIds ?? []
-  const systems = (xs: Array<string | undefined>) => [...new Set(xs.filter(Boolean) as string[])]
-  return {
-    vp_formats_supported: {
-      ...(has('mso_mdoc') && { circuit_zk: { circuit_proof_system_values: systems(ids.map((id) => findCircuit(id)?.proof_system)), circuit_id_values: ids } }),
-      ...(has('mms_zk') && { mms_zk: { proof_system_values: systems(schemes.map((id) => findScheme(id)?.proof_system)), scheme_id_values: schemes } }),
-    },
-  }
+  const ids = phoneSystems()
+  if (!ids.length) return { vp_formats_supported: {} }
+  return { vp_formats_supported: { zkp_req: { proof_system_values: [...new Set(ids.map((id) => findSystem(id)!.proof_system))], system_id_values: ids } } }
 }
 
 function fail(e: WalletError, cause?: string) {
@@ -194,7 +196,7 @@ async function onScanned() {
 /** The request against the chosen credential: the request screen, or Requirement Not Met. */
 async function analyze() {
   const cred = current.value!
-  view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { circuitIds: [], schemeIds: [] })
+  view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { systemIds: [] })
   consent.value = view.value.satisfiable ? await consentFor(view.value, cred, verifierSubject.value) : null
   screen.value = view.value.satisfiable ? 'request' : 'unmet'
 }
@@ -259,10 +261,10 @@ async function onPin() {
       metrics.value = { sign_ms: bbs.device_sign_ms, prove_ms, presentation_bytes, bbs }
       presentation = out.presentation
     } else {
-      const circuitId = view.value!.circuit!.circuit_id
-      const signed = await unlockAndSign({ request: req, credential: focus.value, circuitId })
+      const systemId = view.value!.circuit!.system_id
+      const signed = await unlockAndSign({ request: req, credential: focus.value, systemId })
       metrics.value = { sign_ms: signed.metrics.sign_ms }
-      const out: ProveOutput = await prove({ request: req, queryId, circuitId, deviceSignature: signed.device_signature, credential: focus.value })
+      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value })
       metrics.value = {
         ...metrics.value,
         witness_ms: out.witness_ms ?? out.metrics.witness_ms,

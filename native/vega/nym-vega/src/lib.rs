@@ -1,4 +1,4 @@
-//! Prover and verifier of the nym_auth statement (age range and `pseudonym-v1-sha256`,
+//! Prover and verifier of the nym_auth statement (age range and the `pseudonym` function with `prf` `sha-256`,
 //! configuration `known-offender-matching-ssc`) with Vega, as the Readdit demo runs them.
 //!
 //! The circuits and the witness builder are the nym-auth-circuits archive's `vega-age`, vendored
@@ -12,7 +12,7 @@
 //! | [`dates`] | Full-dates, date-times and the clock |
 //! | [`mdoc`] | The holder's IssuerSigned taken apart |
 //! | [`x509`] | The Document Signer certificate of `issuer_key_set` |
-//! | [`presentation`] | `CircuitZkPresentation` in CBOR (rulebook, "Presentation encoding") |
+//! | [`presentation`] | `ZkpPresentation` in CBOR (rulebook, "Presentation encoding") |
 //! | [`keys`] | The keys from `shapes.zst` |
 //! | [`measure`] | Timing and peak memory |
 //! | [`threads`] | One thread or one per core, per call (`/tech`'s switch) |

@@ -2,7 +2,7 @@
 //! `proof_time` and `results` from the presentation and computes every other public input itself
 //! from the request and handover it holds and from its clock:
 //!
-//! 1. `circuit_id` is this circuit, and the request offered it;
+//! 1. `system_id` is this circuit, and the request offered it;
 //! 2. `issuer_key_set` holds one Document Signer certificate, valid against the trust anchors;
 //! 3. `proof_time` lies within the tolerance of `now`;
 //! 4. the keys of `results` are the `return` handles of `req`;
@@ -35,7 +35,7 @@ const MAX_PROOF_BYTES: u64 = 1 << 20;
 pub struct VerifyInput {
   pub request: RequestObject,
   pub credential_query_id: String,
-  /// base64url(CBOR(CircuitZkPresentation)).
+  /// base64url(CBOR(ZkpPresentation)).
   pub presentation: String,
   pub handover: Handover,
   /// The verifier's clock, RFC 3339.
@@ -87,7 +87,7 @@ impl Verifier {
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
       "circuits": [{
-        "circuit_id": CIRCUIT_ID,
+        "system_id": CIRCUIT_ID,
         "proof_system": PROOF_SYSTEM,
         "shapes_sha256": hex(&self.shapes_sha256),
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
@@ -109,7 +109,7 @@ impl Verifier {
     metrics.insert("total_ms".into(), json!(ms(t)));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
-      Ok((results, circuit_id)) => json!({ "ok": true, "circuit_id": circuit_id, "results": results, "metrics": metrics }),
+      Ok((results, system_id)) => json!({ "ok": true, "system_id": system_id, "results": results, "metrics": metrics }),
       Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "metrics": metrics }),
     }
   }
@@ -123,12 +123,12 @@ impl Verifier {
     let now = dates::rfc3339(&input.now).map_err(|e| refuse("request", format!("now: {e}")))?;
 
     // 1. The circuit.
-    if p.circuit_id != CIRCUIT_ID {
-      return Err(refuse("circuit", format!("unknown circuit {}", p.circuit_id)));
+    if p.system_id != CIRCUIT_ID {
+      return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
     }
     let s = statement(&input.request, &input.credential_query_id, &input.handover)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
-    if s.offered_circuits.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
+    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
       return Err(refuse("circuit", "the request did not offer this circuit"));

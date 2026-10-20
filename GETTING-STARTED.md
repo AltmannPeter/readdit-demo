@@ -78,14 +78,14 @@ over the same mdoc credential, each with its own circuits from the nym-auth-circ
 **http://localhost:3000** is Readdit as the audience sees it, with the guide panel on the right.
 Log in, sign up and age checks open a dialog with a QR code on the left and a phone on the right.
 
-**Two phones.** The demo has two people, each with their own phone: **Teen's phone** (born 14 March
-2011) and **Adult's phone** (born 20 May 1990), each with an "Age and pseudonym" credential. The
-teen's phone also holds "Age and pseudonym (BBS)", the same credential as a BBS credential (teal
-card); it is used only when Readdit accepts BBS (technical view, "Readdit accepts"). The dialog
-shows one phone, named above it with its owner's age, in its own frame colour (grey or red).
-**Swap phone** hands over to the other one while the QR code is on screen, for example to show
-someone borrowing another person's phone. The chosen phone stays until you swap again; reloading the
-page starts on the teen's phone.
+**Three phones, one credential each.** **Teen's phone** (born 14 March 2011) and **Adult's phone**
+(born 20 May 1990) each hold an "Age and pseudonym" credential (an mdoc). **Teen's BBS phone** holds
+the teen's "Age and pseudonym (BBS)", the same credential as a BBS credential (teal card); it can
+answer only when Readdit accepts BBS (technical view, "Readdit accepts"). The dialog shows one
+phone, named above it with its owner's age, in its own frame colour (grey, red or teal). **Swap
+phone** hands over to the next one (teen, adult, teen's BBS, then the teen's again) while the QR
+code is on screen, for example to show someone borrowing another person's phone. The chosen phone
+stays until you swap again; reloading the page starts on the teen's phone.
 
 Logged out, the home page and the open communities show no posts, only a short note on how
 Readdit accounts work, with **Sign up** and **Log in**.
@@ -162,13 +162,14 @@ session; the chips under the service cards select earlier ones, and name the pho
 screen.
 
 - **Badge (top right).** The addons that are loaded: "Vega, Longfellow and BBS addons, in process".
-- **Readdit accepts.** Switches for the proof systems Readdit accepts: Vega and Longfellow (mdoc,
-  `circuit_zk`) and BBS (`mms_zk`). None is ticked at start or after **Reset demo**: tick one
-  before the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the
-  same account; with both ticked the request lists both circuits, Vega first, and the wallet uses
-  Vega. With BBS and an mdoc system on, the request offers both formats and the teen's phone offers
-  **Switch credential** between its two cards; each card gives its own pseudonym, so its own
-  account. Only the ticked ones count, also for a QR code already on screen.
+- **Readdit accepts.** Switches for the proof systems Readdit accepts: Vega and Longfellow (circuits
+  over the mdoc, `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**:
+  tick one before the demo. Vega and Longfellow use the same credential and give the same
+  pseudonym, so the same account; with both ticked the request lists both circuits, Vega first, and
+  the wallet uses Vega. With BBS and an mdoc system on, the request (`zkp_req`) offers both source
+  formats, and the phone on screen answers with its credential: the teen's phone with the mdoc,
+  the teen's BBS phone with the BBS credential. The two give different pseudonyms, so different
+  accounts. Only the ticked ones count, also for a QR code already on screen.
 - **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
   one thread. On, they run on one thread per core, and the line next to the switch says how many.
   Longfellow always runs on one thread: Google's runtime has no parallel code.
@@ -238,9 +239,8 @@ gives Readdit the same pseudonym.
 8. **Site:** sign up again with the same wallet. Readdit shows "Account banned". **Moderation:**
    it is still the same single account.
 9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Readdit accepts" (the
-   reset unticked Vega; tick it too to offer both formats). **Site:** sign up on the teen's phone;
-   with both formats on, **Switch credential** to the BBS card. Then c/teenspace: the age range is
-   proven with BBS. **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age
+   reset unticked Vega; tick it too to offer both formats). **Site:** **Swap phone** to the teen's
+   BBS phone and sign up. Then c/teenspace: the age range is proven with BBS. **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age
    range) and sizes.
 10. **Longfellow.** **Moderation:** **Reset demo**. **Technical:** tick Longfellow. **Site:** sign up
    on the teen's phone, try c/afterdark (requirement not met), then c/teenspace. **Technical:** the
@@ -263,7 +263,7 @@ Readdit has three proof backends, the Vega, Longfellow and BBS addons. There is 
 - **One proof or one verification fails.** The phone shows "Signing Failed" (the proof was not
   made) or "Response Error" (Readdit could not verify it), and the dialog "Not completed:
   Verification is not available right now". Nothing is applied. **Try again** starts a new request.
-  The server log has a `[vega] … failed`, `[longfellow] …`, `[bbs] …` or `[circuit_zk] …` line
+  The server log has a `[vega] … failed`, `[longfellow] …`, `[bbs] …` or `[circuits] …` line
   with the reason, and the technical view the session.
 
 **Before the event:** build the addons on the presentation laptop (`npm run build:native`), start the
@@ -334,8 +334,10 @@ new keys and seeds, and the pseudonyms change. `--days N` (or `--holder DATE:N`)
 N days instead. The issuer's key is written nowhere. Restart the site after a re-issue.
 
 The teen's BBS credential (`app/wallet/demo-wallet-bbs.json`) comes from `bbs-issuer`, with the
-teen's mdoc device key; the BBS verifier trusts `native/bbs/demo/issuer-params.bin`. A re-issue
-makes a new issuer key and seed, so the BBS pseudonyms change (`docs/mms_zk.md`):
+teen's mdoc device key, and a `secret_seed` attribute derived from the teen's 16-byte seed
+(hash_to_scalar, `docs/bbs_cd.md`); the BBS verifier trusts `native/bbs/demo/issuer-params.bin`. A
+re-issue makes a new issuer key; the BBS pseudonyms stay the same as long as the teen's mdoc seed
+does:
 
 ```sh
 cd native/bbs
@@ -383,7 +385,8 @@ measurements, which group P clears.
   verified.
 - `AGENTS.md` – design decisions, architecture, open work. Written for developers and coding agents.
 - `docs/backend-api.md` – the prover and verifier interface (the Vega, Longfellow and BBS addons).
-- `docs/mms_zk.md` – the BBS request profile (`mms_zk`): credential, request, binding, results.
+- `docs/bbs_cd.md` – how the demo implements the rulebook's BBS encoding (`bbs_cd`): credential,
+  request, binding, presentation, verification.
 - `scripts/demo-flow.mjs` – runs the walkthrough headlessly, checks that the guide panel follows
   each step, and saves a viewport screenshot of each step. Needs Playwright:
   `npm i --no-save playwright && npx playwright install chromium`, then

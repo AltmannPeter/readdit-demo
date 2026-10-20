@@ -1,4 +1,4 @@
-//! Node addon: the `mms_zk` (BBS committed disclosures) prover and verifier, called in process by
+//! Node addon: the BBS (`bbs_cd`, committed disclosures) prover and verifier, called in process by
 //! Readdit's server (`server/utils/services.ts`).
 //!
 //! - [`load_prover`] builds the date-range tables and resolves to a [`Prover`];

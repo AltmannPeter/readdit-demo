@@ -1,43 +1,43 @@
 ---
 title: "Nym-authentication Attestation Specification and Rulebook"
-author: "Peter Altmann & Frederic Nieto"
-version: "0.2"
+author: "Peter Altmann & Frédéric Nieto"
+version: "0.4"
 status: "public draft"
-date: "2026-10-09"
+date: "2026-10-20"
 ---
 
 # Introduction and scope
 
 ## Scope
 
-This document specifies the natural-person anonymous/pseudonymous authentication attestation (`eu.europa.ec.eudi.nym_auth.1`). This attestation enables a Holder to:
+This document specifies the natural-person anonymous/pseudonymous authentication attestation (`eu.europa.ec.eudi.nym_auth.1` in its ISO/IEC 18013-5 form, and `eu.europa.ec.eudi.nym_auth.bbs.1` in its BBS form). This attestation enables a Holder to:
 
 1. Generate a pseudonym with various properties for authentication, account binding, and known-offender matching.
 2. Generate a zero-knowledge proof of correct pseudonym generation.
 3. Prove zero-knowledge date-based predicates (e.g., age checks).
 
-This version targets circuit-based Zero-Knowledge Proof (ZKP) presentations using the `circuit_zk` presentation format over an ISO/IEC 18013-5 compliant attestation. The following are out of scope:
+This version targets Zero-Knowledge Proof (ZKP) presentations using the `zkp_req` presentation format, over two encodings of the attestation: ISO/IEC 18013-5 (`mso_mdoc`), proved with circuits, and BBS committed disclosures (`bbs_cd`), proved with a BBS scheme and its plugins. The following are out of scope:
 
-* Non-circuit ZKPs (like BBS and other zero-knowledge signature formats).
 * Non-ZKP fallbacks.
 * SD-JWT VC encodings.
-* Details on revocation and validity checks. The circuit checks these using a yet to be mandated mechanism.
-* The relationship between the circuit provider and the circuit registry.
+* Details on revocation. Validity checks apply where the encoding carries a validity period; the `bbs_cd` encoding carries none in this version.
+* For circuits: The relationship between the system provider and any trust mechanism (e.g., circuit registry).
 * The selection of a trusted issuer.
 
-ZKP proof systems and circuit definitions referenced herein are defined externally in:
+ZKP proof systems, circuit definitions and scheme definitions referenced herein are defined externally in:
 
 * Source for proof systems.
 * Source for circuit definitions.
+* Source for scheme definitions: bbs-cd-plugins 0.1 (ETSI BBS committed disclosures, BLS12-381-SHA-256) and its plugins `ecdsa-pop/0.1`, `pseudonym/0.1` and `date-range/0.1`.
 
 Pseudonym derivation is normatively defined in this document.
 
-Approved circuit verification hashes and parameter mappings are maintained in a registry of approved circuits.
+Approved systems (circuits and schemes), with their verification hashes and parameter mappings, are maintained in a registry of approved systems.
 
 ## System roles
 
 * **Issuer:** Issues a signed attestation with attributes and statements about an identity subject.
-* **Circuit provider:** Issues a signed circuit suitable for a specified presentation request.
+* **System provider:** Issues a signed circuit (`mso_mdoc`) or publishes a scheme (`bbs_cd`) suitable for a specified presentation request.
 * **Prover (Holder, Wallet Unit):** Stores the issuer-signed attestation, generates pseudonyms, and produces ZKP.
 * **Verifier (Relying Party):** Requests at least one function execution and/or a claim via DCQL and validates the ZKP.
 
@@ -59,6 +59,14 @@ In tables, REQ is short for REQUIRED, OPT is short for OPTIONAL, CON is short fo
 | **secret_seed_commitment** | `ssc` | `bstr` (32 bytes) | REQ | **Issuer Known Seed Commitment**: $`C = \text{SHA-256}(\text{secret\_seed})`$ where $`\text{secret\_seed}`$ is a 16-byte random shared secret between the issuer and prover. |
 | **private_seed_commitment** | `psc` | `bstr` (32 bytes) | OPT | **Issuer Unknown Seed Commitment**: $`C = \text{SHA-256}(\text{private\_seed})`$ where $`\text{private\_seed}`$ is a 16-byte random value known only to the prover. |
 
+In the `bbs_cd` encoding the issuer signs the seed itself as a hidden attribute (`secret_seed`) instead of its commitment `ssc`, and adds the device key as an attribute (`device_key`); `psc` is not defined for `bbs_cd` in this version (see the BBS encoding section).
+
+## Non-disclosure of seed commitments
+
+`ssc` and `psc` are stable values that can act as a correlation handle for the Holder.
+
+A Wallet Unit MUST NOT disclose `ssc`, `psc`, `secret_seed` or `birth_date` in a presentation; a Credential Query that requests any of these values MUST be treated as unsatisfiable.
+
 ## Mobile Security Object requirements
 
 For ISO/IEC 18013-5 encoded attestations:
@@ -69,7 +77,7 @@ For ISO/IEC 18013-5 encoded attestations:
 * `issuerAuth` MUST carry the `x5chain` header parameter (label 33) in its unprotected header, containing the Document Signer certificate. The
   `issuerAuth` signature MUST verify under the public key in that certificate.
 
-> **NOTE:** Attestation authenticity is established by the `issuerAuth` signature and its certificate chain. In a `circuit_zk` presentation the signature is verified inside the circuit against the issuer public key set. Certificate chain validation happens when the issuer public key set is built.
+> **NOTE:** Attestation authenticity is established by the `issuerAuth` signature and its certificate chain. In a `zkp_req` presentation over `mso_mdoc` the signature is verified inside the circuit against the issuer key set. Certificate chain validation happens when the issuer key set is built.
 
 ---
 
@@ -97,7 +105,7 @@ psc_type = bstr .size 32
 
 Each data element is issued as a separate `IssuerSignedItem` as defined in ISO/IEC 18013-5. `birth_date` MUST be a CBOR tag 1004 text string (RFC 8943) containing an RFC 3339 `full-date`.
 
-Approved circuits MUST accept any encoding of these data elements and of the MSO that conforms to ISO/IEC 18013-5.
+Approved circuits for `mso_mdoc` MUST accept any encoding of these data elements and of the MSO that conforms to ISO/IEC 18013-5.
 
 ## Compact profile
 
@@ -112,15 +120,33 @@ An attestation conforms to the compact profile if, in addition to ISO/IEC 18013-
 
 Issuers SHOULD issue attestations conforming to the compact profile.
 
-A registry entry MAY target the compact profile. The registry MUST contain at least one approved circuit that supports every function and configuration defined in this document and accepts any ISO/IEC 18013-5 conformant encoding. A Wallet Unit SHOULD use a compact-profile circuit when its attestation conforms and the Verifier accepts one.
+A registry entry MAY target the compact profile. The registry MUST contain at least one approved circuit that supports every function and configuration defined in this document for `mso_mdoc` and accepts any ISO/IEC 18013-5 conformant encoding. A Wallet Unit SHOULD use a compact-profile circuit when its attestation conforms and the Verifier accepts one.
 
-# DCQL profile and presentation syntax (`circuit_zk`)
+# BBS committed-disclosure encoding (`bbs_cd`)
+
+## Schema
+
+For attestations in the BBS committed-disclosure encoding, the schema identifier MUST be `eu.europa.ec.eudi.nym_auth.bbs.1`. The schema is a bbs-cd-plugins 0.1 framework schema with these attributes, in this order:
+
+| Attribute | Type | BBS messages | Content |
+| :--- | :--- | :--- | :--- |
+| `device_key` | `p256-point-xy.ecdsa-sha256`, 96-bit limbs | 6 | The public key of a device key pair whose private key is protected by [hardware / WSCD reference], attested for hashed ECDSA at issuance |
+| `birth_date` | `date-packed` | 1 | (Y − 1900)·372 + (M − 1)·31 + (D − 1), which preserves date order |
+| `secret_seed` | `nym-seed.issuer-known` | 1 | The pseudonym seed: $`\text{hash\_to\_scalar}(\text{secret\_seed}, \texttt{"nym\_auth/v1/bbs-seed"})`$ with the BLS12-381-SHA-256 ciphersuite, where $`\text{secret\_seed}`$ is the 16-byte value shared between the issuer and prover, as for `mso_mdoc`. The issuer MUST NOT issue a zero scalar. |
+
+The schema digest is `ab4183a9ed0b57d6bfb8994c92b432bb9731a3e2fd974ac2f67422e2f7dfb7e1`.
+
+The issuer signs the messages with BBS; the credential header fixes the schema. No attribute is disclosable: a presentation commits to the attributes it uses and hides the rest.
+
+> **NOTE:** The `bbs_cd` encoding has no validity period and no `psc` in this version. `private_seed` would require blind issuance.
+
+# DCQL profile and presentation syntax (`zkp_req`)
 
 ## Overview and fail-closed design
 
-This profile extends OpenID4VP Digital Credentials Query Language (DCQL) for zero-knowledge circuit presentations. 
+This profile extends OpenID4VP Digital Credentials Query Language (DCQL) for zero-knowledge presentations.
 
-A Wallet Unit that does not support the `circuit_zk` format cannot match a Credential Query that uses it, and therefore returns no presentation for it. For `"format": "circuit_zk"`, issuer-signed attributes are never disclosed directly. All calculations and assertions MUST be requested inside `req`.
+A Wallet Unit that does not support the `zkp_req` format cannot match a Credential Query that uses it, and therefore returns no presentation for it. For `"format": "zkp_req"`, attestation attributes are never disclosed directly. All calculations and assertions MUST be requested inside `_req`.
 
 ### Unsatisfiable Credential Queries
 
@@ -133,89 +159,107 @@ An unsatisfiable request makes the affected Credential Query unsatisfiable; whet
 
 ## Query structure
 
-A Credential Query targeting `"eu.europa.ec.eudi.nym_auth.1"` MUST observe the following rules:
+A Credential Query targeting the `nym_auth` attestation (`eu.europa.ec.eudi.nym_auth.1`, or `eu.europa.ec.eudi.nym_auth.bbs.1` for `bbs_cd`) MUST observe the following rules:
 
-* `format` (REQUIRED): MUST be set to `"circuit_zk"`
-* `meta` (REQUIRED): MUST contain doctype_value set to `"eu.europa.ec.eudi.nym_auth.1"`.
-* `req` (REQUIRED): A non-empty array of objects specifying proven zero-knowledge calculations and predicates.
+* `format` (REQUIRED): MUST be set to `"zkp_req"`.
+* `meta` (REQUIRED): MUST contain `source_format` and the matching type value, as defined in the `zkp_req` format section.
+* `_req` (REQUIRED): A non-empty array of objects specifying proven zero-knowledge calculations and predicates. The leading underscore marks a member whose values are proven and never disclosed.
 
 > **NOTE**: Proof system capability negotiation (e.g., supported ZK proof systems) occurs at the protocol level as defined in the capability negotiations subsection.
 
-### `req` item member specification
+### `_req` item member specification
 
-Each object inside the `req` array MUST contain:
+Each object inside the `_req` array MUST contain:
 
 | Member | Type | Presence | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | String | REQ | Function Type Identifier registered in Section 5 (e.g., `"pseudonym-v1-sha256"`, `"age_check"`). |
+| `fn_id` | String | REQ | Function identifier registered in the function catalogue (`"pseudonym"`, `"age_check"`). |
 | `return` | String | REQ | An output handle unique within the Credential Query for mapping the result into `results`. |
-| `params` | Object | OPT | Key-value mapping of declared parameters for the specified function. Omission applies the function's defined defaults. | 
+| `params` | Object | OPT | Key-value mapping of declared parameters for the specified function. Omission applies the function's defined defaults. |
 
 ## Response processing and results mapping
 
-The Wallet Unit generates a proof, using one approved circuit, that covers all requested statements in `req` and is bound to the presentation session as defined in the Binding section.
+The Wallet Unit generates a proof, using one approved system, that covers all requested statements in `_req` and is bound to the presentation session as defined in the Binding section.
 
 > **NOTE:** It is possible to use two distinct attestations, one for age and one for pseudonym, but if both require 2FA the user experience is degraded. In this version, both age verification and pseudonym are satisfied using a single attestation `nym_auth`.
 
 ### Presentation encoding
 
-In the `vp_token`, the value for each `circuit_zk` Credential Query `id` is an array of presentations as defined in OpenID4VP 1.0. Each presentation is the base64url-encoded (without padding) CBOR encoding of a `CircuitZkPresentation`:
+In the `vp_token`, the value for each `zkp_req` Credential Query `id` is an array of presentations as defined in OpenID4VP 1.0. Each presentation is the base64url-encoded (without padding) CBOR encoding of a `ZkpPresentation`:
 
 ```cddl
-CircuitZkPresentation = {
-  "circuit_id"     => tstr,            ; approved circuit used
+ZkpPresentation = {
+  "system_id"      => tstr,            ; approved system used: a circuit or scheme identifier
   "proof"          => bstr,            ; proof as defined by the proof system
   "issuer_key_set" => IssuerKeySet,
-  ? "proof_time"   => tdate,           ; present when the circuit checks validity
+  ? "proof_time"   => tdate,           ; present when the system checks validity
   "results"        => Results
 }
 
-IssuerKeySet = [+ bstr]                ; DER-encoded Document Signer certificates
+IssuerKeySet = [+ bstr]                ; representation defined by the registry entry
 
-Results = { + tstr => ResultValue }    ; keys are the `return` handles in `req`
+Results = { + tstr => ResultValue }    ; keys are the `return` handles in `_req`
 ResultValue = PseudonymValue / PredicateValue
-PseudonymValue = bstr .size 32
+PseudonymValue = bstr                  ; length set by the pseudonym's `prf`
 PredicateValue = true
 ```
 
-The keys of `results` MUST be exactly the `return` handles of the items in `req`. The Verifier MUST reject a presentation with missing or additional keys.
+For `bbs_cd`, `proof` is the bbs-cd-plugins presentation envelope (MAGIC, the BBS proof with its commitments, and one proof per plugin, in request order).
 
-`issuer_key_set` is given in the representation defined by the registry entry of `circuit_id`. For an explicit list, each element is a DER-encoded Document Signer certificate, and the Verifier MUST validate each certificate against its trust anchors.
+The keys of `results` MUST be exactly the `return` handles of the items in `_req`. The Verifier MUST reject a presentation with missing or additional keys.
 
-`proof_time` is the time used by the circuit for validity checks. The Verifier MUST reject the presentation if `proof_time` deviates from its own clock by more than its tolerance.
+`issuer_key_set` is the set of issuer keys among which the proof shows the attestation's issuer to be, without revealing which. It supports set membership over a set of approved issuers. The registry entry of `system_id` defines its representation and how many keys it may hold. The Verifier MUST validate every element against its trust anchors or its list of trusted issuers.
+
+* `mso_mdoc`: each element is a DER-encoded Document Signer certificate.
+* `bbs_cd`: each element is a BBS issuer public key (96 bytes, the ETSI encoding). A BBS proof verifies under one issuer key, so the set holds exactly one element and reveals the issuer to the Verifier.
+
+`proof_time` is the time used by the system for validity checks. The Verifier MUST reject the presentation if `proof_time` deviates from its own clock by more than its tolerance.
 
 ### Verification
 
 To verify a presentation, the Verifier:
 
-1. looks up `circuit_id` in the approved circuit registry and confirms it is
-   one it accepts;
-2. validates `issuer_key_set`;
-3. assembles the public inputs in the order defined by the registry entry,
-   taking `issuer_key_set`, `proof_time` and the values in `results` from the
-   presentation, and recomputing all other public inputs itself (session
-   binding values, `verifier_input`, and the `req` parameters it sent);
-4. verifies `proof` against the circuit and the assembled public inputs.
+1. looks up `system_id` in the approved systems registry and confirms it is one it accepts and offered;
+2. validates `issuer_key_set` as the registry entry defines;
+3. assembles its statement as the registry entry defines, taking `issuer_key_set`, `proof_time` and the values in `results` from the presentation and computing everything else itself (session binding values, `verifier_input`, and the `_req` parameters it sent): for a circuit, the public inputs in the registry's order; for a scheme, the scheme's request;
+4. verifies `proof` against the system and that statement, and confirms that the proof establishes each value in `results`.
 
-The Verifier MUST NOT take any public input other than `issuer_key_set`,
-`proof_time` and `results` from the presentation.
+The Verifier MUST NOT take any part of its statement from the presentation other than `issuer_key_set`, `proof_time` and `results`.
 
-Example `vp_token` (presentation shown in CBOR diagnostic notation before
-encoding):
+> **NOTE:** In a circuit, the values in `results` are public inputs. In a `bbs_cd` presentation, the pseudonym is also carried in the pseudonym plugin's proof; the Verifier confirms the two are equal.
+
+Example `vp_token` (presentations shown in CBOR diagnostic notation before encoding):
 
 ```json
 {
-  "nym_attestation": ["<base64url(CBOR(CircuitZkPresentation))>"]
+  "nym_attestation": ["<base64url(CBOR(ZkpPresentation))>"]
 }
 ```
 
+`mso_mdoc`:
+
 ```cbor-diag
 {
-  "circuit_id": "urn:circuits:longfellow:nym_auth:v1",
+  "system_id": "urn:circuits:longfellow:nym_auth:v1",
   "proof": h'...',
   "issuer_key_set": [h'3082...'],
+  "proof_time": 0("2026-10-20T12:00:00Z"),
   "results": {
-    "nym-123": h'5f2a...e1',
+    "nym": h'5f2a...e1',
+    "age-range-123": true
+  }
+}
+```
+
+`bbs_cd`:
+
+```cbor-diag
+{
+  "system_id": "urn:mms:bbs-cd:nym_auth:v1",
+  "proof": h'42434450...',
+  "issuer_key_set": [h'...'],
+  "results": {
+    "nym": h'a3...',
     "age-range-123": true
   }
 }
@@ -226,6 +270,10 @@ encoding):
 The example shows the decoded payload of a signed Request Object (`openid4vp-v1-signed`), passed to the Digital Credentials API. The JWS is signed with the key of the Verifier's access certificate, carried in the `x5c` header; the leaf certificate MUST contain `rp.example.com` as a dNSName SAN.
 
 > **NOTE:** The example will be updated to align with the OpenID drafts.
+
+EXAMPLE BELOW IS WORK IN PROGRESS AND BEING REVISED.
+
+Alternative 1. The Readdit demo runs this DCQL and metadata over the cross-device redirect flow (`request_uri`, `direct_post`); the example shows the Digital Credentials API.
 
 ```json
 {
@@ -251,12 +299,16 @@ The example shows the decoded payload of a signed Request Object (`openid4vp-v1-
       ]
     },
     "vp_formats_supported": {
-      "circuit_zk": {
-        "circuit_proof_system_values": [
-          "longfellow-libzk-v1"
+      "zkp_req": {
+        "proof_system_values": [
+          "longfellow-libzk-v1",
+          "vega-v1",
+          "bbs-cd-plugins-v0.1"
         ],
-        "circuit_id_values": [
-          "urn:circuits:longfellow:nym_auth:v1"
+        "system_id_values": [
+          "urn:circuits:longfellow:nym_auth:v1",
+          "urn:circuits:vega:nym_auth:v1",
+          "urn:mms:bbs-cd:nym_auth:v1"
         ]
       }
     }
@@ -265,102 +317,146 @@ The example shows the decoded payload of a signed Request Object (`openid4vp-v1-
     "credentials": [
       {
         "id": "nym_attestation",
-        "format": "circuit_zk",
+        "format": "zkp_req",
         "meta": {
-          "source_format": "mdoc_mso",
+          "source_format": "mso_mdoc",
           "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
         },
-        "claims": {
-          "_req": [
-            {
-              "fn_id": "pseudonym-v1-sha256",
-              "id": "nym-123",
-              "params": {
-                "config": "known-offender-matching-ssc",
-                "verifier_id_type": "x509_san_dns"
-              }
-            },
-            {
-              "fn_id": "age_check",
-              "id": "age-range-123",
-              "params": {
-                "ge": "2008-10-10",
-                "le": "2013-10-09"
-              }
+        "_req": [
+          {
+            "fn_id": "pseudonym",
+            "return": "nym",
+            "params": {
+              "config": "known-offender-matching-ssc",
+              "ver": 1,
+              "prf": "sha-256"
             }
+          },
+          {
+            "fn_id": "age_check",
+            "return": "age-range-123",
+            "params": {
+              "ge": "2008-10-10",
+              "le": "2013-10-09"
+            }
+          }
+        ]
+      },
+      {
+        "id": "nym_attestation_bbs",
+        "format": "zkp_req",
+        "meta": {
+          "source_format": "bbs_cd",
+          "schema_id_value": "eu.europa.ec.eudi.nym_auth.bbs.1"
+        },
+        "_req": [
+          {
+            "fn_id": "pseudonym",
+            "return": "nym",
+            "params": {
+              "config": "known-offender-matching-ssc",
+              "ver": 1,
+              "prf": "hashdh-bls12381g1"
+            }
+          },
+          {
+            "fn_id": "age_check",
+            "return": "age-range-123",
+            "params": {
+              "ge": "2008-10-10",
+              "le": "2013-10-09"
+            }
+          }
+        ]
+      }
+    ],
+    "credential_sets": [
+      {
+        "options": [
+          [
+            "nym_attestation"
+          ],
+          [
+            "nym_attestation_bbs"
           ]
-        }
+        ]
       }
     ]
   }
 }
 ```
-> NOTE: Check where the function outputs defined.
+
+> NOTE: `format` is the expected format of the attestation that wraps the response, and NOT the source format of the attestation, or the vp_formats_supported etc.
 
 > **NOTE:** Show variations of the sibling vs nesting between `claims` and `_req`
 
 # Function catalogue
 
-Functions invoked inside req MUST be registered in this specification or an official extension profile. Each registered function defines:
+Functions invoked inside `_req` MUST be registered in this specification or an official extension profile. Each registered function defines:
 
 1. The mathematical operation, possible intermediate values, and parameter constraints.
 2. The implicit credential source attribute(s) bound to the computation.
 3. The expected output representation in the presentation response `results` map.
 
-If a Wallet Unit receives a request for a function `id` not defined below or not listed in an approved circuit for the `doctype_value`, the request is unsatisfiable.
+If a Wallet Unit receives a request for a function `fn_id` not defined below, or not supported by an approved system for the Credential Query's `source_format` and type value, the request is unsatisfiable.
 
-## Pseudonym generation function (`pseudonym-v1-sha256`)
+## Pseudonym generation function (`pseudonym`)
 
-Derives a deterministic pseudonym using the SHA-256 instantiation.
+Derives a deterministic pseudonym with the pseudorandom function named by `prf`.
 
-* Function identifier (`id`): `"pseudonym-v1-sha256"`.
-* Source attribute: `ssc` (or `psc` when configured). Note that the generation does not use `ssc` or `psc` directly, but their openings (`secret_seed` and `private_seed`).
-* Output: a 32-byte value (`PseudonymValue`) placed in `results[<handle>]`.
+* Function identifier (`fn_id`): `"pseudonym"`.
+* Source attribute: for `mso_mdoc`, `ssc` (or `psc` when configured); the generation does not use `ssc` or `psc` directly, but their openings (`secret_seed` and `private_seed`). For `bbs_cd`, `secret_seed`.
+* Output: a `PseudonymValue` placed in `results[<handle>]`: 32 bytes for `prf` `sha-256`; for `prf` `hashdh-bls12381g1`, a compressed BLS12-381 G1 point of 48 bytes, which the Verifier processes as it chooses.
 
-A `req` MUST NOT contain more than one `pseudonym-v1-sha256` item. A Wallet Unit MUST treat a request containing more than one as unsatisfiable.
+A `_req` MUST NOT contain more than one `pseudonym` item. A Wallet Unit MUST treat a request containing more than one as unsatisfiable.
 
 ### Verifier identity
 
-Configurations that use `verifier_input` derive it from `verifier_id`, a UTF-8 string whose form is selected by the Verifier with `verifier_id_type`:
+Configurations that use `verifier_input` derive it from `verifier_id`, a UTF-8 string identifying the Verifier. The request does not select its form. The trust framework under which the Verifier operates MUST fix exactly one form of `verifier_id`, and the Wallet Unit and the Verifier MUST both use that form. The forms a trust framework can fix are:
 
 * `semantic`: `"semantic_id:"` followed by the end Relying Party's semantic identifier as defined in ETSI TS 119 475, Section 5.1.3 (legal persons) or Section 5.1.5 (natural persons). The Wallet Unit MUST take it from the registration certificate when one is present, and otherwise from the access certificate.
 * `x509_san_dns`: the Client Identifier, i.e. `"x509_san_dns:"` followed by the DNS name bound to the access certificate used to sign the request.
 
 The Wallet Unit MUST treat the request as unsatisfiable if:
 
-* the identifier of the requested type cannot be obtained from authenticated sources;
-* `verifier_id_type` is `x509_san_dns` and the Client Identifier uses any other prefix (including `x509_hash`);
-* `verifier_id_type` is `x509_san_dns` and the registration certificate identifies an intermediary.
+* the identifier of the form fixed by the trust framework cannot be obtained from authenticated sources;
+* the form is `x509_san_dns` and the Client Identifier uses any other prefix (including `x509_hash`);
+* the form is `x509_san_dns` and the registration certificate identifies an intermediary.
 
-> **NOTE 1:** The two identifier types yield unrelated pseudonyms for the same Relying Party. A Verifier that changes `verifier_id_type` or its identifier loses continuity with existing pseudonyms.
+> **NOTE 1:** The two forms yield unrelated pseudonyms for the same Relying Party. A change of the form fixed by the trust framework, or of the Verifier's identifier, loses continuity with existing pseudonyms.
+
 > **NOTE 2:** Outside the EUDIW ecosystem intermediaries cannot be detected; with `x509_san_dns` the pseudonym is then distinct per access-certificate holder, not per end Relying Party.
+
 > **NOTE 3:** Within the EUDIW, an intermediary acting without a registration certificate presents its own semantic identifier, so end Relying Parties behind it share a pseudonym space.
 
 ### Parameters
 
 This specification version enables the following function parameters.
 
-| Parameter | Type | Presence | Description | Parameter restrictions | 
+| Parameter | Type | Presence | Description | Parameter restrictions |
 | :-- | :-- | :-- | :-- | :-- |
 | `config` | string | REQ | Identifier for standard configurations. | Allowed values are specified in the configurations below. |
+| `ver` | integer | REQ | Version of the pseudonym function. | `1` in this version. |
+| `prf` | string | REQ | The pseudorandom function. | `sha-256` (`mso_mdoc`, every configuration) or `hashdh-bls12381g1` (`bbs_cd`, `known-offender-matching-ssc` only). |
 | `verifier_context` | string | CON | Additional context supplied by the verifier. | Required for account recovery. MUST NOT be present elsewhere. UTF-8, 1–64 bytes. |
-| `verifier_id_type` | string | CON | Type of verifier identity used in `verifier_input`. | `semantic` or `x509_san_dns`. Required for configurations that use `verifier_input`; MUST NOT be present otherwise. |
 
 A Wallet Unit MUST treat the request as unsatisfiable if `verifier_context` is absent for a configuration that requires it, present for a configuration that does not allow it, or longer than 64 bytes.
 
-A Wallet Unit MUST treat the request as unsatisfiable if `verifier_id_type` is absent for a configuration that uses `verifier_input`, present for a configuration that does not, or has a value other than `semantic` or `x509_san_dns`.
+A Wallet Unit MUST treat the request as unsatisfiable if `ver` is not `1`, or if `prf` is not defined for the Credential Query's `source_format` and the requested configuration.
 
 ### Configurations
 
-All configurations generate the pseudonym as: `pseudonym = SHA256(DST || {secret, private}_seed || prover_input || verifier_input)`. The `attribute_source` determines which seed to use. The `DST` is set to `nym_auth/v1/<config>` (UTF-8 encoded). The verifier MUST recompute and supply its own public inputs to the circuit proof verification.
+With `prf` `sha-256`, all configurations generate the pseudonym as: `pseudonym = SHA256(DST || {secret, private}_seed || prover_input || verifier_input)`. The `config` determines which seed source to use. The `DST` is set to `nym_auth/v1/<config>` (UTF-8 encoded) for `ver` 1. The verifier MUST recompute and supply its own public inputs to the proof verification. `prf` `hashdh-bls12381g1` is defined after the configurations.
+
+`known-offender-matching-ssc` is defined for `mso_mdoc` and `bbs_cd`; the other configurations for `mso_mdoc` only.
 
 #### `known-offender-matching-ssc`
 
 The `known-offender-matching-ssc` configuration is defined as follows:
 
-1. `attribute_source` is the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation. Used to assert `SHA256(secret_seed) == ssc`; generation uses `secret_seed`.
-2. `prover_input` is null (32 zero bytes).
-3. `verifier_input` is `SHA256(verifier_id)`, with `verifier_id` as defined in the Verifier identity subsection.
+1. For `mso_mdoc`, the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation is used to assert `SHA256(secret_seed) == ssc`, with generation using `secret_seed`. For `bbs_cd`, generation uses the `secret_seed` attribute directly.
+2. With `prf` `sha-256`, `prover_input` is null (32 zero bytes). `hashdh-bls12381g1` takes no `prover_input` in this version.
+3. `verifier_input` is `SHA256(verifier_id)` with `prf` `sha-256`, and `UTF-8(verifier_id)` with `prf` `hashdh-bls12381g1`, with `verifier_id` as defined in the Verifier identity subsection.
 
 The configuration's properties are as follows:
 
@@ -369,11 +465,12 @@ The configuration's properties are as follows:
 * It supports known offender matching.
 
 > **NOTE 1**: If the issuer known seed changes, so does the pseudonym generated. A ban can be evaded by changing the issuer to one using a different issuer known seed.
+
 > **NOTE 2**: If the `verifier_input` changes, so does the pseudonym generated. Known offender matching is not possible if the Verifier identity changes.
 
 #### `known-offender-matching-psc`
 
-1. `attribute_source` is the `psc` (issuer unknown seed commitment) value from the `nym_auth` attestation. Used to assert `SHA256(private_seed) == psc`; generation uses `private_seed`.
+1. For `mso_mdoc`, the `psc` (issuer unknown seed commitment) value from the `nym_auth` attestation is used to assert `SHA256(private_seed) == psc`; generation uses `private_seed`.
 2. `prover_input` is null (32 zero bytes).
 3. `verifier_input` is `SHA256(verifier_id)`, with `verifier_id` as defined in the Verifier identity subsection.
 
@@ -384,11 +481,12 @@ The configuration's properties are as follows:
 * To support known offender matching, the issuer MUST only allow one `psc` per identity subject.
 
 > **NOTE 1**: If the issuer changes, it may allow a new `psc`, which changes the pseudonym generated.
+
 > **NOTE 2**: If the `verifier_input` changes, so does the pseudonym generated. Known offender matching is not possible if the Verifier identity changes.
 
 #### `account-recovery-ssc`
 
-1. `attribute_source` is the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation. Used to assert `SHA256(secret_seed) == ssc`; generation uses `secret_seed`.
+1. For `mso_mdoc`, the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation is used to assert `SHA256(secret_seed) == ssc`; generation uses `secret_seed`.
 2. `prover_input` is null (32 zero bytes).
 3. `verifier_input` is `SHA256(SHA256(verifier_id) || SHA256(verifier_context))`, with `verifier_id` as defined in the Verifier identity subsection and `verifier_context` UTF-8 encoded as supplied by the Verifier.
 
@@ -401,7 +499,7 @@ The configuration's properties are as follows:
 
 #### `user-managed-pseudonym-xsite-ssc`
 
-1. `attribute_source` is the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation. Used to assert `SHA256(secret_seed) == ssc`; generation uses `secret_seed`.
+1. For `mso_mdoc`, the `ssc` (issuer known seed commitment) value from the `nym_auth` attestation is used to assert `SHA256(secret_seed) == ssc`; generation uses `secret_seed`.
 2. `prover_input` is the SHA256 digest of a user-supplied value; shared across the sites the user wants to be linked across.
 3. `verifier_input` is null (32 zero bytes).
 
@@ -415,13 +513,30 @@ The configuration's properties are as follows:
 * Does not offer sybil resistance.
 * Does not support known offender matching.
 
+### PRF `hashdh-bls12381g1`
+
+Defined for `source_format` `bbs_cd` with configuration `known-offender-matching-ssc` only.
+
+```
+OP        = hash_to_curve_G1(u8(len(config)) || config || verifier_input, DST)
+pseudonym = secret_seed · OP
+```
+
+* `secret_seed` is the committed message scalar.
+* `config` is the configuration identifier, UTF-8 encoded; `verifier_input` is `UTF-8(verifier_id)`.
+* `verifier_id` MUST be 1 to 255 bytes.
+* `hash_to_curve_G1` is the hash-to-curve of the BLS12-381-SHA-256 ciphersuite (`BLS12381G1_XMD:SHA-256_SSWU_RO_`, RFC 9380), with `DST = "BBS-CD-PLUGINS/0.1/PSEUDONYM/OP"`.
+* The output is `pseudonym` encoded with `point_to_octets_E1` of the BBS ciphersuite (compressed, 48 bytes).
+
+The `pseudonym/0.1` plugin proves that `pseudonym` is computed from the committed `secret_seed`. The construction is a group-valued PRF, $F_s(x)=[s]H(x)$: it hashes the input to a curve point, then multiplies that point by the secret scalar. For a uniformly random secret scalar, it is pseudorandom under DDH in G1 when $H$ is modeled as a random oracle into G1.
+
 ## Date predicate function (`age_check`)
 
-Zero-knowledge comparison operators operating strictly over the `birth_date` attribute (`#6.1004(tstr)`). Used to prove age thresholds, or ranges.
+Zero-knowledge comparison operators operating strictly over the `birth_date` attribute (`#6.1004(tstr)` for `mso_mdoc`, `date-packed` for `bbs_cd`). Used to prove age thresholds, or ranges.
 
 > **NOTE:** Date predicates in this version do not support exact date matches. Because a sufficiently narrow range is equivalent to an exact match, the interval between lower and upper bounds is restricted below. This restriction is specific to this attestation and is not a general rule for other date ranges.
 
-* Function identifier (`id`): `"age_check"`.
+* Function identifier (`fn_id`): `"age_check"`.
 * Source attribute: `birth_date`.
 * Output: The assertion result `true` placed in `results[<handle>]`.
 
@@ -434,75 +549,80 @@ Zero-knowledge comparison operators operating strictly over the `birth_date` att
 
 At least one parameter MUST be present. Dates are RFC 3339 `full-date` strings. Strict bounds are expressed by shifting the date by one day.
 
-A `req` MUST NOT contain more than one `age_check` item. A Wallet Unit MUST treat a request containing more than one `age_check` item as unsatisfiable.
+A `_req` MUST NOT contain more than one `age_check` item. A Wallet Unit MUST treat a request containing more than one `age_check` item as unsatisfiable.
 
-If both `ge` and `le` are present, the Wallet Unit MUST treat the request as unsatisfiable when `le < ge` or when `le − ge + 1` (counted in days) is less than 365.
+If both `ge` and `le` are present, the Wallet Unit MUST treat the request as unsatisfiable when `le < ge` or when `le − ge + 1` (counted in days) is less than 365. For `bbs_cd`, the comparison runs on the `date-packed` encoding, which preserves date order.
 
 If the predicate does not hold for the attestation's `birth_date`, the request is unsatisfiable and the Wallet Unit MUST NOT produce a presentation.
 
 # Presentation
 
-## Approved circuits registry entries
+## Approved systems registry entries
 
-The ecosystem maintains a registry of approved circuits. Given the attestation type (`eu.europa.ec.eudi.nym_auth.1`), presentation format (`circuit_zk`), and the requested functions in `req`, the Wallet Unit and Verifier look up an approved circuit from the registry. Each circuit MUST have a unique identifier.
+The ecosystem maintains a registry of approved systems: circuits and schemes. Given the attestation type (`eu.europa.ec.eudi.nym_auth.1` or `eu.europa.ec.eudi.nym_auth.bbs.1`), the presentation format (`zkp_req`), and the requested functions in `_req`, the Wallet Unit and Verifier look up an approved system from the registry. Each system MUST have a unique identifier.
 
-Each registry entry MUST specify: 
+Each registry entry MUST specify:
 
-* the circuit identifier,
+* the system identifier,
 * the proof system,
-* the underlying credential format and doctype/vct,
-* the supported functions, and parameters,
-* the representation of the issuer public key set, and
-* the ordered list of public inputs with how the Verifier derives each one.
+* the `source_format` and the doctype, schema identifier or vct,
+* the supported functions and parameters, including the pseudonym `prf` values,
+* the representation of the issuer key set and how many keys it may hold, and
+* the Verifier's statement: for a circuit, the ordered list of public inputs with how the Verifier derives each one; for a scheme, its plugins and how the Verifier derives the scheme's request.
 
 ## Input and output classification
 
-The following MUST be private inputs: `secret_seed`, `private_seed`, `prover_input`, `birth_date`, all issuer-signed data and digests, the issuer signature, the device public key and device signature.
+The following MUST be private: `secret_seed`, `private_seed`, `prover_input`, `birth_date`, all issuer-signed data and digests, the issuer signature, the device public key and device signature.
 
-The following MUST be public inputs: `verifier_input`, the session binding values defined by the registry entry, all function parameters values in `req`, `proof_time` when validity is checked, and the issuer public key set.
+The following MUST be part of the Verifier's statement: `verifier_input`, the session binding values defined by the registry entry, all function parameter values in `_req`, `proof_time` when validity is checked, and the issuer key set.
 
 The pseudonym and predicate results are public outputs.
 
-## The `circuit_zk` format
+## The `zkp_req` format
 
 ### Credential Query
 
-For `circuit_zk`, the `meta` object MUST contain exactly one of:
+For `zkp_req`, the `meta` object MUST contain `source_format`, the format of the attestation the proof is made over, and exactly one type value for it:
 
-* `doctype_value` (string): the ISO/IEC 18013-5 `docType` of the underlying ISO/IEC 18013-5 attestation.
-* `vct_values` (array of strings): reserved for a future SD-JWT VC binding (not defined in this version).
+| `source_format` | Type value |
+| :--- | :--- |
+| `mso_mdoc` | `doctype_value` (string): the ISO/IEC 18013-5 `docType` |
+| `bbs_cd` | `schema_id_value` (string): the bbs-cd-plugins schema identifier |
+| `dc+sd-jwt` | `vct_values` (array of strings): reserved for a future SD-JWT VC binding (not defined in this version) |
 
-The `circuit_zk` format does not use `claims`. All requests MUST be present in `req`. This version does not define `req_sets` (corresponding to `claim_sets`).
+The `zkp_req` format does not use `claims`. All requests MUST be present in `_req`. This version does not define `_req_sets` (corresponding to `claim_sets`).
 
 `require_cryptographic_holder_binding` MUST be absent or `true`. A Wallet Unit MUST treat a Credential Query with `require_cryptographic_holder_binding: false` as unsatisfiable.
 
 ### Metadata parameters
 
-The following parameters MAY be used in the `circuit_zk` object of `vp_formats_supported`, in Verifier metadata (`client_metadata`) and in Wallet metadata (`wallet_metadata`):
+The following parameters MAY be used in the `zkp_req` object of `vp_formats_supported`, in Verifier metadata (`client_metadata`) and in Wallet metadata (`wallet_metadata`):
 
-* `circuit_proof_system_values`: OPTIONAL. Non-empty array of proof system identifiers from the approved circuit registry.
-* `circuit_id_values`: OPTIONAL. Non-empty array of unique circuit identifiers from the approved circuit registry.
+* `proof_system_values`: OPTIONAL. Non-empty array of proof system identifiers from the approved systems registry.
+* `system_id_values`: OPTIONAL. Non-empty array of unique system identifiers (circuit and scheme identifiers) from the approved systems registry.
 
-When the Verifier provides these parameters, the Wallet Unit MUST select an approved circuit whose proof system and identifier are both listed and which supports every item in `req`; if none exists, the request is unsatisfiable. The presentation response MUST identify the circuit identifier used.
+When the Verifier provides these parameters, the Wallet Unit MUST select an approved system whose proof system and identifier are both listed, whose `source_format` and type value match the Credential Query, and which supports every item in `_req`; if none exists, the Credential Query is unsatisfiable. The presentation MUST identify the system identifier used.
 
 ### Capability negotiation
 
-The Verifier signals the proof systems and circuits it accepts in `client_metadata.vp_formats_supported.circuit_zk`, using the parameters defined above.
+The Verifier signals the proof systems and systems it accepts in `client_metadata.vp_formats_supported.zkp_req`, using the parameters defined above.
 
-When the Authorization Request uses `request_uri_method=post`, the Wallet Unit MAY send the same parameters in `wallet_metadata.vp_formats_supported.circuit_zk`, and the Verifier SHOULD tailor the Request Object to them.
+When the Authorization Request uses `request_uri_method=post`, the Wallet Unit MAY send the same parameters in `wallet_metadata.vp_formats_supported.zkp_req`, and the Verifier SHOULD tailor the Request Object to them.
 
-Over the Digital Credentials API, the Wallet Unit cannot send `wallet_metadata`. The Verifier SHOULD therefore list every proof system and circuit identifier it accepts, and the Wallet Unit selects among them.
+Over the Digital Credentials API, the Wallet Unit cannot send `wallet_metadata`. The Verifier SHOULD therefore list every proof system and system identifier it accepts, and the Wallet Unit selects among them.
 
 ## Binding
 
-A `circuit_zk` presentation MUST be bound to the presentation session. The circuit MUST verify holder binding over the session binding values defined by the registry entry of the selected circuit.
+A `zkp_req` presentation MUST be bound to the presentation session. The proof MUST verify holder binding over the session binding values defined by the registry entry of the selected system.
 
-For attestations identified by `doctype_value` (ISO/IEC 18013-5), the circuit MUST verify the device signature over the `DeviceAuthentication` structure, which contains the `SessionTranscript`. The `SessionTranscript` is `[null, null, Handover]`, with `Handover` constructed as defined in OpenID4VP 1.0 Appendix B.2.6.
+For `mso_mdoc`, the circuit MUST verify the device signature over the `DeviceAuthentication` structure, which contains the `SessionTranscript`. The `SessionTranscript` is `[null, null, Handover]`, with `Handover` constructed as defined in OpenID4VP 1.0 Appendix B.2.6.
 
-> **NOTE:** The validity date is also a range check, but may employ a different mechanism. As it is a required check, it is not something the verifier includes in `req`.
+For `bbs_cd`, the scheme's request binds the session. Its audience is SHA-256 of the `OpenID4VPHandoverInfo` bytes (OpenID4VP 1.0 Appendix B.2.6.1), or of the `OpenID4VPDCAPIHandoverInfo` bytes over the Digital Credentials API (Appendix B.2.6.2). Its nonce is the request's `nonce`. The `ecdsa-pop/0.1` plugin proves that the committed `device_key` signed a message bound to that request.
+
+> **NOTE:** The validity date is also a range check, but may employ a different mechanism. As it is a required check, it is not something the verifier includes in `_req`.
 
 Over DC API the following applies to bind the pseudonym to the Verifier:
 
-1. Requests for `eu.europa.ec.eudi.nym_auth.1` sent over the Digital Credentials API MUST use the `openid4vp-v1-signed` protocol. An unsigned request MUST be rejected.
+1. Requests for `nym_auth` attestation sent over the Digital Credentials API MUST use the `openid4vp-v1-signed` protocol. An unsigned request MUST be rejected.
 2. The Wallet Unit MUST validate the Request Object signature and certificate chain according to the Client Identifier Prefix and, over the Digital Credentials API, MUST verify that the calling origin is contained in `expected_origins`.
 

@@ -4,7 +4,7 @@
 #
 #   vendor/bbs-cd-plugins/  the bbs-cd-plugins repository, vendored unchanged (its own workspace;
 #                           VENDOR-SHA256SUMS lists the files' hashes; `sha256sum -c` checks them)
-#   nym-bbs/                the mms_zk profile: OpenID4VP request → BBS request, prover, verifier
+#   nym-bbs/                the bbs_cd encoding: zkp_req request → BBS request, prover, verifier
 #   node/                   the napi-rs addon: BbsProver and BbsVerifier objects for Node (napi glue only)
 #   issuer/                 bbs-issuer: issues the demo BBS credential and the issuer parameters
 [workspace]

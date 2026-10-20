@@ -8,7 +8,7 @@ import { ageOn, loadCredentials } from '~/wallet/holder'
 // the verifier; this dialog shows the QR code, follows the status and applies the result
 // to this browser's login. It publishes its state for the guide panel (useDialogFlow).
 // Closing it before the request ends cancels the session on the server.
-// The phone beside it is one of the demo's phones; Swap phone hands over to the other one while
+// The phone beside it is one of the demo's phones; Swap phone hands over to the next one while
 // the QR code is on screen (the site records the swap for the technical view).
 
 interface Completion {
@@ -24,7 +24,7 @@ interface Completion {
 
 const { state, close } = useWallet()
 const { refresh, account } = useAccount()
-const { phone, swap: swapPhone } = usePhone()
+const { phone, other: nextPhone, swap: swapPhone } = usePhone()
 const today = useToday()
 /** Each phone's owner's age today, from the birth date in the phone's credential. */
 const ages = ref<Record<string, number>>({})
@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
               <button
                 class="flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="!canSwap"
-                :title="canSwap ? 'Hand over to the other phone' : 'The phone on screen has already scanned the code'"
+                :title="canSwap ? `Hand over to the ${nextPhone.label.replace(/^\w/, (c) => c.toLowerCase())}` : 'The phone on screen has already scanned the code'"
                 @click="swap"
               >
                 <AppIcon name="swap" class="size-3.5" />

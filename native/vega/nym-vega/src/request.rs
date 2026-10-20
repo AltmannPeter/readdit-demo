@@ -6,7 +6,7 @@
 //! | --- | --- |
 //! | E, C (`age_check.ge`, `age_check.le`) | the request's `age_check`, SPEC.md §3: `ge` d → E = d, `le` d → C = d; absent bounds → `0000-00-00` and `9999-12-31` |
 //! | e2 (`session_transcript`) | the handover ([`crate::handover`]) |
-//! | verifier_input | SHA-256(client_id); `verifier_id_type` `x509_san_dns` makes client_id the verifier_id |
+//! | verifier_input | SHA-256(verifier_id); the demo's trust framework fixes the `x509_san_dns` form, so verifier_id = client_id |
 //! | docType and identifier patterns | the registry entry: `eu.europa.ec.eudi.nym_auth.1`, `birth_date` |
 
 use serde::Deserialize;
@@ -39,13 +39,14 @@ pub struct CredentialQuery {
   pub id: String,
   pub format: String,
   pub meta: Json,
+  #[serde(rename = "_req")]
   pub req: Vec<ReqItem>,
   pub require_cryptographic_holder_binding: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReqItem {
-  pub id: String,
+  pub fn_id: String,
   #[serde(rename = "return")]
   pub handle: String,
   #[serde(default)]
@@ -59,18 +60,24 @@ pub struct ClientMetadata {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct VpFormats {
-  pub circuit_zk: CircuitZkFormats,
+  pub zkp_req: ZkpReqFormats,
 }
 
+/// `vp_formats_supported.zkp_req` (rulebook, "Metadata parameters").
 #[derive(Clone, Debug, Deserialize)]
-pub struct CircuitZkFormats {
-  pub circuit_id_values: Option<Vec<String>>,
-  pub circuit_proof_system_values: Option<Vec<String>>,
+pub struct ZkpReqFormats {
+  pub system_id_values: Option<Vec<String>>,
+  pub proof_system_values: Option<Vec<String>>,
 }
 
 /// The pseudonym configuration and verifier identity type the circuit implements.
 pub const CONFIG: &str = pseudonym::CONFIG;
-pub const VERIFIER_ID_TYPE: &str = "x509_san_dns";
+/// The pseudonym function version and PRF the circuit implements.
+pub const VERSION: u64 = 1;
+pub const PRF: &str = "sha-256";
+/// The source format and the format of the credential query.
+pub const SOURCE_FORMAT: &str = "mso_mdoc";
+pub const FORMAT: &str = "zkp_req";
 const CLIENT_ID_PREFIX: &str = "x509_san_dns:";
 
 /// The age bounds of a request. Without a bound the circuit's range is open on that side.
@@ -117,8 +124,8 @@ pub struct Statement {
   pub nym_handle: String,
   /// The `return` handle of the age check, when one is requested.
   pub age_handle: Option<String>,
-  /// The circuit ids and proof systems the request offers (None: any).
-  pub offered_circuits: Option<Vec<String>>,
+  /// The system ids and proof systems the request offers (None: any).
+  pub offered_ids: Option<Vec<String>>,
   pub offered_systems: Option<Vec<String>>,
 }
 
@@ -159,19 +166,20 @@ pub fn statement(
     .iter()
     .find(|q| q.id == credential_query_id)
     .ok_or_else(|| Refusal::unsupported_request(format!("no credential query {credential_query_id}")))?;
-  if q.format != "circuit_zk" {
-    return Err(Refusal::unsupported_request(format!("format {} is not circuit_zk", q.format)));
+  if q.format != FORMAT {
+    return Err(Refusal::unsupported_request(format!("format {} is not {FORMAT}", q.format)));
   }
+  let source = q.meta.get("source_format").and_then(Json::as_str);
   let doctype = q.meta.get("doctype_value").and_then(Json::as_str);
   let meta_keys = q.meta.as_object().map_or(0, |m| m.len());
-  if doctype != Some(DOC_TYPE) || meta_keys != 1 {
-    return Err(Refusal::unsupported_request(format!("meta must hold exactly doctype_value {DOC_TYPE}")));
+  if source != Some(SOURCE_FORMAT) || doctype != Some(DOC_TYPE) || meta_keys != 2 {
+    return Err(Refusal::unsupported_request(format!("meta must hold exactly source_format {SOURCE_FORMAT} and doctype_value {DOC_TYPE}")));
   }
   if q.require_cryptographic_holder_binding == Some(false) {
     return Err(Refusal::unsupported_request("require_cryptographic_holder_binding is false"));
   }
   if q.req.is_empty() {
-    return Err(Refusal::unsupported_request("req is empty"));
+    return Err(Refusal::unsupported_request("_req is empty"));
   }
 
   let mut nym_handle = None;
@@ -182,13 +190,20 @@ pub fn statement(
       return Err(Refusal::unsupported_request(format!("return handle {} is not unique", r.handle)));
     }
     handles.push(r.handle.as_str());
-    match r.id.as_str() {
-      "pseudonym-v1-sha256" => {
+    match r.fn_id.as_str() {
+      "pseudonym" => {
         if nym_handle.is_some() {
-          return Err(Refusal::unsupported_request("more than one pseudonym-v1-sha256 item"));
+          return Err(Refusal::unsupported_request("more than one pseudonym item"));
         }
-        if let Some(k) = r.params.keys().find(|k| !["config", "verifier_id_type", "verifier_context"].contains(&k.as_str())) {
+        if let Some(k) = r.params.keys().find(|k| !["config", "ver", "prf", "verifier_context"].contains(&k.as_str())) {
           return Err(Refusal::unsupported_request(format!("unknown pseudonym parameter {k}")));
+        }
+        if r.params.get("ver").and_then(Json::as_u64) != Some(VERSION) {
+          return Err(Refusal::unsupported_request(format!("pseudonym ver {:?}: the rulebook defines {VERSION}", r.params.get("ver"))));
+        }
+        let prf = param_str(&r.params, "prf")?;
+        if prf != Some(PRF) {
+          return Err(Refusal::unsupported_config(format!("prf {prf:?}: this circuit implements {PRF}")));
         }
         let config = param_str(&r.params, "config")?;
         if config != Some(CONFIG) {
@@ -197,12 +212,9 @@ pub fn statement(
         if param_str(&r.params, "verifier_context")?.is_some() {
           return Err(Refusal::unsupported_request("verifier_context is not allowed for this configuration"));
         }
-        let id_type = param_str(&r.params, "verifier_id_type")?;
-        if id_type != Some(VERIFIER_ID_TYPE) {
-          return Err(Refusal::unsupported_request(format!("verifier_id_type {id_type:?}: this circuit takes {VERIFIER_ID_TYPE}")));
-        }
+        // The trust framework fixes the x509_san_dns form: verifier_id is the client_id.
         if !request.client_id.starts_with(CLIENT_ID_PREFIX) || request.client_id.len() == CLIENT_ID_PREFIX.len() {
-          return Err(Refusal::unsupported_request("verifier_id_type x509_san_dns needs an x509_san_dns client_id"));
+          return Err(Refusal::unsupported_request("the x509_san_dns verifier_id needs an x509_san_dns client_id"));
         }
         nym_handle = Some(r.handle.clone());
       }
@@ -232,10 +244,10 @@ pub fn statement(
     }
   }
   // The circuit always reveals a pseudonym, so it proves only requests that ask for one.
-  let nym_handle = nym_handle.ok_or_else(|| Refusal::unsupported_request("this circuit needs a pseudonym-v1-sha256 item"))?;
+  let nym_handle = nym_handle.ok_or_else(|| Refusal::unsupported_request("this circuit needs a pseudonym item"))?;
 
   let session_transcript = handover.session_transcript().map_err(Refusal::bad_request)?;
-  let formats = &request.client_metadata.vp_formats_supported.circuit_zk;
+  let formats = &request.client_metadata.vp_formats_supported.zkp_req;
   Ok(Statement {
     client_id: request.client_id.clone(),
     verifier_input: pseudonym::verifier_input(&request.client_id),
@@ -244,8 +256,8 @@ pub fn statement(
     age: age.as_ref().map_or(AgeBounds { born_from: None, born_by: None }, |(_, b)| *b),
     nym_handle,
     age_handle: age.map(|(h, _)| h),
-    offered_circuits: formats.circuit_id_values.clone(),
-    offered_systems: formats.circuit_proof_system_values.clone(),
+    offered_ids: formats.system_id_values.clone(),
+    offered_systems: formats.proof_system_values.clone(),
   })
 }
 
@@ -273,13 +285,13 @@ mod tests {
       }
       let request: RequestObject = serde_json::from_value(serde_json::json!({
         "client_id": "x509_san_dns:readdit.example", "nonce": "n", "response_uri": "https://r/x",
-        "dcql_query": { "credentials": [{ "id": "q", "format": "circuit_zk",
-          "meta": { "doctype_value": DOC_TYPE },
-          "req": [
-            { "id": "pseudonym-v1-sha256", "return": "nym", "params": { "config": CONFIG, "verifier_id_type": "x509_san_dns" } },
-            { "id": "age_check", "return": "age", "params": params }
+        "dcql_query": { "credentials": [{ "id": "q", "format": "zkp_req",
+          "meta": { "source_format": "mso_mdoc", "doctype_value": DOC_TYPE },
+          "_req": [
+            { "fn_id": "pseudonym", "return": "nym", "params": { "config": CONFIG, "ver": 1, "prf": "sha-256" } },
+            { "fn_id": "age_check", "return": "age", "params": params }
           ] }] },
-        "client_metadata": { "vp_formats_supported": { "circuit_zk": {} } }
+        "client_metadata": { "vp_formats_supported": { "zkp_req": {} } }
       }))
       .expect("request");
       let handover = Handover {

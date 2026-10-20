@@ -95,7 +95,7 @@ export default defineEventHandler(async (event) => {
   addTrace(s, 'created', 'Session created', {
     purpose,
     client_id: clientIdFor(host),
-    queries: dcql.credentials.map((q) => ({ id: q.id, format: q.format, req: q.req })),
+    queries: dcql.credentials.map((q) => ({ id: q.id, format: q.format, source_format: q.meta.source_format, _req: q._req })),
     offer,
     ...(s.phone && { phone: s.phone }),
   })

@@ -1,31 +1,26 @@
-import type { AgeCheckReq, CredentialQuery, PseudonymConfig, RequestObject } from '#shared/types/oid4vp'
-import { NYM_DOCTYPE } from '#shared/types/oid4vp'
-import type { CircuitEntry, SchemeEntry } from '#shared/registry/circuits'
-import { selectCircuit, selectScheme } from '#shared/utils/negotiation'
+import type { AgeCheckReq, CredentialQuery, PseudonymConfig, PseudonymPrf, RequestObject } from '#shared/types/oid4vp'
+import { typeValueOf } from '#shared/types/oid4vp'
+import type { CircuitEntry, SchemeEntry, SystemEntry } from '#shared/registry/circuits'
+import { selectSystem } from '#shared/utils/negotiation'
 import { derivePseudonym } from '#shared/utils/pseudonym'
 import { fromHex } from '#shared/utils/bytes'
 import type { CredentialView } from './holder'
 import { credentialLabel, mdocMaterial } from './holder'
 import { CONFIG_PROPERTIES } from './rulebook'
 
-/** What the wallet can prove: the circuits (circuit_zk) and schemes (mms_zk) of /api/wallet/capabilities. */
+/** What the wallet can prove: the systems (circuits over mso_mdoc, schemes over bbs_cd) of /api/wallet/capabilities. */
 export interface WalletCaps {
-  circuitIds: string[]
-  schemeIds: string[]
+  systemIds: string[]
 }
 
-/** The request format a credential answers. */
-export const formatOf = (c: CredentialView) => (c.format === 'mms_zk' ? 'mms_zk' : 'circuit_zk')
-
-/** The credential query of `req` that `cred` can answer: the same format and document type or schema. */
+/** The zkp_req credential query of `req` that `cred` can answer: its source format and its
+ *  doctype (mso_mdoc) or schema id (bbs_cd). */
 export function queryFor(req: RequestObject, cred: CredentialView): CredentialQuery | undefined {
-  return (req.dcql_query?.credentials ?? []).find((q) =>
-    q.format === 'circuit_zk' ? cred.format === 'mso_mdoc' && q.meta?.doctype_value === cred.docType : q.format === 'mms_zk' && cred.format === 'mms_zk' && q.meta?.schema_id_value === cred.docType,
-  )
+  return (req.dcql_query?.credentials ?? []).find((q) => q.format === 'zkp_req' && !!q.meta && q.meta.source_format === cred.format && typeValueOf(q.meta) === cred.docType)
 }
 
 export type RequestItemView =
-  | { kind: 'pseudonym'; handle: string; config: PseudonymConfig; verifierIdType?: string; verifierContext?: string; function: 'pseudonym-v1-sha256' | 'pseudonym-bbs-v1' }
+  | { kind: 'pseudonym'; handle: string; config: PseudonymConfig; prf: PseudonymPrf; verifierContext?: string }
   | { kind: 'age'; handle: string; ge?: string; le?: string; minAge?: number; maxAge?: number }
 
 export interface RequestView {
@@ -40,8 +35,10 @@ export interface RequestView {
   problem?: 'age' | 'unsupported' | 'no_circuit'
   /** For unsupported / no_circuit: the rule the request breaks, for the guide. */
   reason?: string
-  /** The credential query the wallet answers, and the circuit (circuit_zk) or scheme (mms_zk). */
+  /** The credential query the wallet answers, and the system it selected: a circuit (mso_mdoc)
+   *  or a scheme (bbs_cd). */
   query?: CredentialQuery
+  system?: SystemEntry
   circuit?: CircuitEntry
   scheme?: SchemeEntry
 }
@@ -77,12 +74,17 @@ export function parseAuthorizationUrl(url: string): { clientId: string; requestU
   return clientId && requestUri ? { clientId, requestUri, method } : null
 }
 
-const ID_TYPE_CONFIGS = new Set(['known-offender-matching-ssc', 'known-offender-matching-psc', 'account-recovery-ssc'])
+/** The configurations that derive verifier_input from verifier_id (rulebook v0.4, "Configurations"). */
+const VERIFIER_INPUT_CONFIGS = new Set(['known-offender-matching-ssc', 'known-offender-matching-psc', 'account-recovery-ssc'])
 
 /**
- * Checks the request against the rulebook (circuit_zk) or the mms_zk profile, the credential and
- * what the wallet can run. With several credential queries, they must be alternatives in one
- * credential set (each option one query); the wallet answers the one its credential fits.
+ * Checks the request against the rulebook (v0.4, `zkp_req`), the credential and what the wallet
+ * can run. With several credential queries, they must be alternatives in one credential set (each
+ * option one query); the wallet answers the one its credential fits.
+ *
+ * verifier_id: the demo's trust framework fixes the x509_san_dns form (rulebook, "Verifier
+ * identity"), so verifier_id is the client_id, and a client_id with another prefix makes a
+ * configuration that uses verifier_input unsatisfiable.
  */
 export function analyzeRequest(req: RequestObject, cred: CredentialView, today: string, caps: WalletCaps): RequestView {
   const host = req.client_id.startsWith('x509_san_dns:') ? req.client_id.slice('x509_san_dns:'.length) : ''
@@ -109,37 +111,38 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
   }
   const q = queryFor(req, cred)
   if (!q) {
-    const asked = queries.map((x) => `${x.format} ${x.format === 'circuit_zk' ? x.meta?.doctype_value : x.meta?.schema_id_value}`).join(', ')
+    const asked = queries.map((x) => `${x.format} ${x.meta?.source_format} ${x.meta ? typeValueOf(x.meta) : ''}`).join(', ')
     return reject('unsupported', `the request asks for ${asked}; this credential is ${cred.format} ${cred.docType}`)
   }
   view.query = q
   if ((q as { require_cryptographic_holder_binding?: boolean }).require_cryptographic_holder_binding === false) return reject('unsupported', 'require_cryptographic_holder_binding is false')
-  if (!q.req?.length) return reject('unsupported', 'req is empty')
+  if (Object.keys(q.meta).length !== 2) return reject('unsupported', 'meta holds source_format and exactly one type value')
+  if ('claims' in q) return reject('unsupported', 'zkp_req does not use claims')
+  if (!q._req?.length) return reject('unsupported', '_req is empty')
 
   let nyms = 0
   let ages = 0
   let ageFails = false
-  for (const r of q.req) {
-    if (r.id === 'pseudonym-v1-sha256' && q.format === 'circuit_zk') {
+  const handles = new Set<string>()
+  for (const r of q._req) {
+    if (handles.has(r.return)) return reject('unsupported', `return handle ${r.return} is not unique`)
+    handles.add(r.return)
+    if (r.fn_id === 'pseudonym') {
       nyms++
-      const { config, verifier_id_type: idType, verifier_context: ctx } = r.params
+      const { config, ver, prf, verifier_context: ctx } = r.params
+      const unknown = Object.keys(r.params).find((k) => !['config', 'ver', 'prf', 'verifier_context'].includes(k))
+      if (unknown) return reject('unsupported', `pseudonym parameter ${unknown} is not defined by the rulebook`)
       if (!(config in CONFIG_PROPERTIES)) return reject('unsupported', `pseudonym configuration ${config} is not defined by the rulebook`)
-      const usesVerifierInput = ID_TYPE_CONFIGS.has(config)
-      if (usesVerifierInput !== !!idType) return reject('unsupported', `${config} ${usesVerifierInput ? 'needs' : 'takes no'} verifier_id_type`)
-      if (idType && idType !== 'x509_san_dns' && idType !== 'semantic') return reject('unsupported', `verifier_id_type ${idType} is not defined by the rulebook`)
-      if (idType === 'x509_san_dns' && !host) return reject('unsupported', `verifier_id_type x509_san_dns with client_id ${req.client_id}`)
-      if (idType === 'semantic') return reject('unsupported', "verifier_id_type semantic needs the verifier's registration certificate, which this demo does not have")
+      if (ver !== 1) return reject('unsupported', `pseudonym ver ${String(ver)}: the rulebook defines 1`)
+      const prfOk = q.meta.source_format === 'mso_mdoc' ? prf === 'sha-256' : prf === 'hashdh-bls12381g1' && config === 'known-offender-matching-ssc'
+      if (!prfOk) return reject('unsupported', `prf ${String(prf)} is not defined for ${q.meta.source_format} with ${config}`)
+      if (VERIFIER_INPUT_CONFIGS.has(config) && !host) return reject('unsupported', `the x509_san_dns verifier_id needs an x509_san_dns client_id, not ${req.client_id}`)
+      if (prf === 'hashdh-bls12381g1' && new TextEncoder().encode(req.client_id).length > 255) return reject('unsupported', 'verifier_id is longer than 255 bytes')
       if ((config === 'account-recovery-ssc') !== (ctx != null)) return reject('unsupported', `verifier_context is ${ctx != null ? 'only for' : 'required by'} account-recovery-ssc`)
       if (ctx != null && (new TextEncoder().encode(ctx).length < 1 || new TextEncoder().encode(ctx).length > 64)) return reject('unsupported', 'verifier_context must be 1 to 64 bytes')
       if (config === 'known-offender-matching-psc' && !cred.attributes.psc) return reject('unsupported', 'known-offender-matching-psc needs psc, which the credential does not contain')
-      view.items.push({ kind: 'pseudonym', function: 'pseudonym-v1-sha256', handle: r.return, config, ...(idType && { verifierIdType: idType }), ...(ctx != null && { verifierContext: ctx }) })
-    } else if (r.id === 'pseudonym-bbs-v1' && q.format === 'mms_zk') {
-      nyms++
-      const { config, verifier_id_type: idType } = r.params
-      if (config !== 'known-offender-matching-ssc') return reject('unsupported', `pseudonym-bbs-v1 configuration ${config}; the profile defines known-offender-matching-ssc`)
-      if (idType !== 'x509_san_dns' || !host) return reject('unsupported', `pseudonym-bbs-v1 needs verifier_id_type x509_san_dns and an x509_san_dns client_id`)
-      view.items.push({ kind: 'pseudonym', function: 'pseudonym-bbs-v1', handle: r.return, config, verifierIdType: idType })
-    } else if (r.id === 'age_check') {
+      view.items.push({ kind: 'pseudonym', handle: r.return, config, prf, ...(ctx != null && { verifierContext: ctx }) })
+    } else if (r.fn_id === 'age_check') {
       ages++
       const { ge, le } = r.params
       if (!ge && !le) return reject('unsupported', 'age_check without ge or le')
@@ -147,26 +150,19 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
       view.items.push(ageItem(r, today))
       if (!((!ge || cred.attributes.birth_date >= ge) && (!le || cred.attributes.birth_date <= le))) ageFails = true
     } else {
-      return reject('unsupported', `function ${(r as { id: string }).id} is not defined for ${q.format}`)
+      return reject('unsupported', `function ${(r as { fn_id: string }).fn_id} is not in the rulebook's catalogue`)
     }
   }
-  if (nyms > 1 || ages > 1) return reject('unsupported', 'more than one pseudonym or age_check in req')
+  if (nyms > 1 || ages > 1) return reject('unsupported', 'more than one pseudonym or age_check in _req')
 
-  if (q.format === 'circuit_zk') {
-    const offer = req.client_metadata?.vp_formats_supported?.circuit_zk ?? {}
-    const circuit = selectCircuit({ offer, walletCircuitIds: caps.circuitIds, query: q })
-    if (!circuit) {
-      return reject('no_circuit', `the request offers ${offer.circuit_id_values?.join(', ') || 'no circuit id'}; the wallet runs ${caps.circuitIds.join(', ') || 'none'}`)
-    }
-    view.circuit = circuit
-  } else {
-    const offer = req.client_metadata?.vp_formats_supported?.mms_zk ?? {}
-    const scheme = selectScheme({ offer, walletSchemeIds: caps.schemeIds, query: q })
-    if (!scheme) {
-      return reject('no_circuit', `the request offers ${offer.scheme_id_values?.join(', ') || 'no scheme id'}; the wallet runs ${caps.schemeIds.join(', ') || 'none'}`)
-    }
-    view.scheme = scheme
+  const offer = req.client_metadata?.vp_formats_supported?.zkp_req ?? {}
+  const system = selectSystem({ offer, walletSystemIds: caps.systemIds, query: q })
+  if (!system) {
+    return reject('no_circuit', `the request offers ${offer.system_id_values?.join(', ') || 'no system id'} for ${q.meta.source_format}; the wallet runs ${caps.systemIds.join(', ') || 'none'}`)
   }
+  view.system = system
+  if (system.source_format === 'mso_mdoc') view.circuit = system
+  else view.scheme = system
 
   if (ageFails) return { ...view, satisfiable: false, problem: 'age' }
   return view
@@ -211,7 +207,7 @@ export interface ConsentView {
   fields: Array<{ kind: 'pseudonym' | 'age'; name: string; value?: string; notes?: string[] }>
   /** The pseudonym this request discloses, computed by the wallet as the circuit will, with the
    *  rulebook's properties of the requested configuration. */
-  pseudonym?: { handle: string; config: PseudonymConfig; function: 'pseudonym-v1-sha256' | 'pseudonym-bbs-v1'; verifierId: string; value?: string; properties: string[] }
+  pseudonym?: { handle: string; config: PseudonymConfig; prf: PseudonymPrf; verifierId: string; value?: string; properties: string[] }
   age?: { handle: string; text: string; range: string; ge?: string; le?: string }
   /** The other values the verifier receives, from the circuit's registry entry. */
   alsoSent: Array<{ label: string; value: string }>
@@ -237,10 +233,10 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
   for (const item of view.items) {
     if (item.kind === 'pseudonym') {
       const verifierId = view.clientId
-      // pseudonym-v1-sha256: the wallet computes it as the circuit will. pseudonym-bbs-v1
-      // (SHA-256(seed·OP), a BLS12-381 point) comes out of the proof.
+      // prf sha-256: the wallet computes it as the circuit will. hashdh-bls12381g1 (seed·OP, a
+      // BLS12-381 G1 point) comes out of the proof.
       const value =
-        item.function === 'pseudonym-v1-sha256'
+        item.prf === 'sha-256'
           ? await derivePseudonym({ config: item.config, seed: fromHex(mdocMaterial(cred.index).secret_seed), verifierId, verifierContext: item.verifierContext })
           : undefined
       const p = CONFIG_PROPERTIES[item.config]
@@ -253,7 +249,7 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
           ? `The issuer, ${cred.issuer.name}, knows the seed and can link the pseudonym to the holder.`
           : `The issuer, ${cred.issuer.name}, cannot link the pseudonym to the holder.`,
       )
-      out.pseudonym = { handle: item.handle, config: item.config, function: item.function, verifierId, ...(value && { value }), properties }
+      out.pseudonym = { handle: item.handle, config: item.config, prf: item.prf, verifierId, ...(value && { value }), properties }
       // What the configuration means for the person (rulebook properties, CONFIG_PROPERTIES).
       // Each fits on one line at the phone's width.
       const notes = ['Your personal data will not be shared']
@@ -288,11 +284,11 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
   }
 
   for (const e of cred.elements) {
-    const label = ELEMENT_LABELS[e.id] ?? (e.id === 'nym_seed' ? 'Pseudonym seed' : e.id === 'device_key' ? 'Device key' : e.id)
+    const label = ELEMENT_LABELS[e.id] ?? (e.id === 'secret_seed' ? 'Pseudonym seed (secret_seed)' : e.id === 'device_key' ? 'Device key' : e.id)
     if (e.id === 'device_key') continue
     out.notShared.push(e.id === 'birth_date' ? { label, value: fmtDate(cred.attributes.birth_date) } : { label })
   }
-  if (cred.format === 'mms_zk') out.notShared.push({ label: 'Device key' }, { label: 'The credential itself: the BBS signature' })
+  if (cred.format === 'bbs_cd') out.notShared.push({ label: 'Device key' }, { label: 'The credential itself: the BBS signature' })
   else out.notShared.push({ label: 'Secret seed' }, { label: 'Device key' }, { label: 'The credential itself: issuer signature and validity dates' })
   return out
 }

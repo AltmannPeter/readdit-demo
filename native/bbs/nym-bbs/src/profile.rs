@@ -1,12 +1,13 @@
-//! The `mms_zk` profile (`docs/mms_zk.md`): the credential schema, and the BBS request that both
-//! sides derive from an OpenID4VP Request Object, its `mms_zk` credential query and the handover.
+//! The `bbs_cd` encoding of the nym_auth attestation (rulebook v0.4, "BBS committed-disclosure
+//! encoding"; `docs/bbs_cd.md`): the credential schema, and the BBS request that both sides derive
+//! from an OpenID4VP Request Object, its `zkp_req` credential query over `bbs_cd` and the handover.
 //!
 //! | BBS request | From |
 //! | --- | --- |
 //! | audience | SHA-256(OpenID4VPHandoverInfoBytes): client_id, nonce, jwk_thumbprint, response_uri |
 //! | nonce | the Request Object's `nonce`, as UTF-8 (16 to 64 bytes) |
 //! | credentials | one: the issuer's public key and the schema digest; nothing disclosed |
-//! | plugins | `ecdsa-pop/0.1` on `device_key` (hashed, 96-bit limbs); `pseudonym/0.1` on `nym_seed` (the req's configuration, verifier input = client_id); `date-range/0.1` on `birth_date` when `age_check` is asked |
+//! | plugins | `ecdsa-pop/0.1` on `device_key` (hashed, 96-bit limbs); `pseudonym/0.1` on `secret_seed` (`prf` `hashdh-bls12381g1`: the configuration, verifier input = UTF-8(verifier_id), verifier_id = client_id); `date-range/0.1` on `birth_date` when `age_check` is asked |
 
 use bbs_cd_plugin::issuer::IssuerParams;
 use bbs_cd_plugin::request::{CredentialRequest, PluginRequest, Request};
@@ -19,23 +20,27 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 use sha2::Digest;
 
-use crate::credential::FORMAT;
 use crate::error::Refusal;
 
-/// The registry's scheme id: this schema with these plugins (`shared/registry/circuits.ts`).
-pub const SCHEME_ID: &str = "urn:mms:bbs-cd:nym_auth:v1";
+/// The registry's system id: this schema with these plugins (`shared/registry/circuits.ts`).
+pub const SYSTEM_ID: &str = "urn:mms:bbs-cd:nym_auth:v1";
 /// The proof system: the bbs-cd-plugins framework on ETSI BBS committed disclosures v0.7.
 pub const PROOF_SYSTEM: &str = "bbs-cd-plugins-v0.1";
 /// The credential's schema id: the nym_auth attestation, BBS-encoded.
 pub const SCHEMA_ID: &str = "eu.europa.ec.eudi.nym_auth.bbs.1";
-pub const FUNCTION_PSEUDONYM: &str = "pseudonym-bbs-v1";
+/// The credential query's format and source format (rulebook, "The `zkp_req` format").
+pub const FORMAT: &str = "zkp_req";
+pub const SOURCE_FORMAT: &str = "bbs_cd";
+pub const FUNCTION_PSEUDONYM: &str = "pseudonym";
 pub const FUNCTION_AGE: &str = "age_check";
-pub const VERIFIER_ID_TYPE: &str = "x509_san_dns";
+/// The pseudonym function's version and PRF for `bbs_cd`.
+pub const VERSION: u64 = 1;
+pub const PRF: &str = "hashdh-bls12381g1";
 const CLIENT_ID_PREFIX: &str = "x509_san_dns:";
 
 pub const DEVICE_KEY: &str = "device_key";
 pub const BIRTH_DATE: &str = "birth_date";
-pub const NYM_SEED: &str = "nym_seed";
+pub const SECRET_SEED: &str = "secret_seed";
 /// Device-key limb size: 3 limbs per coordinate.
 pub const LIMB_BITS: u8 = 96;
 
@@ -47,7 +52,7 @@ pub fn schema() -> bbs_cd_plugin::Result<Schema> {
     vec![
       AttributeSpec::scalars(DEVICE_KEY, TYPE_P256_KEY_HASHED, n_limbs(LIMB_BITS) as u16, LIMB_BITS as u16),
       AttributeSpec::scalars(BIRTH_DATE, TYPE_DATE, 1, RECOMMENDED_BITS),
-      AttributeSpec::scalars(NYM_SEED, TYPE_NYM_SEED_ISSUER_KNOWN, 1, 255),
+      AttributeSpec::scalars(SECRET_SEED, TYPE_NYM_SEED_ISSUER_KNOWN, 1, 255),
     ],
   )
 }
@@ -74,14 +79,14 @@ pub struct CredentialQuery {
   pub format: String,
   #[serde(default)]
   pub meta: Json,
-  #[serde(default)]
+  #[serde(default, rename = "_req")]
   pub req: Vec<ReqItem>,
   pub require_cryptographic_holder_binding: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReqItem {
-  pub id: String,
+  pub fn_id: String,
   #[serde(rename = "return")]
   pub handle: String,
   #[serde(default)]
@@ -95,12 +100,13 @@ pub struct ClientMetadata {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct VpFormats {
-  pub mms_zk: Option<MmsZkFormats>,
+  pub zkp_req: Option<ZkpReqFormats>,
 }
 
+/// `vp_formats_supported.zkp_req` (rulebook, "Metadata parameters").
 #[derive(Clone, Debug, Deserialize)]
-pub struct MmsZkFormats {
-  pub scheme_id_values: Option<Vec<String>>,
+pub struct ZkpReqFormats {
+  pub system_id_values: Option<Vec<String>>,
   pub proof_system_values: Option<Vec<String>>,
 }
 
@@ -171,7 +177,8 @@ impl Handover {
 pub struct Statement {
   pub request: Request,
   pub handover_digest: [u8; 32],
-  /// The relying party's identifier: client_id (`x509_san_dns:<host>`).
+  /// verifier_input: UTF-8(verifier_id), verifier_id = client_id (`x509_san_dns:<host>`; the
+  /// demo's trust framework fixes that form).
   pub verifier_id: Vec<u8>,
   pub pseudonym: PseudonymParams,
   pub nym_handle: String,
@@ -193,7 +200,7 @@ fn iso_date(what: &str, v: &Json) -> Result<Ymd, Refusal> {
   Ok(d)
 }
 
-/// The BBS request and what it must show, from the Request Object, the `mms_zk` query
+/// The BBS request and what it must show, from the Request Object, the `zkp_req` query over `bbs_cd`
 /// `query_id`, the handover and the issuer's parameters.
 pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issuer: &IssuerParams) -> Result<Statement, Refusal> {
   if handover.client_id != req.client_id || handover.nonce != req.nonce || handover.response_uri != req.response_uri {
@@ -208,20 +215,31 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
   if q.format != FORMAT {
     return Err(Refusal::unsupported_request(format!("format {}, expected {FORMAT}", q.format)));
   }
-  if q.meta.get("schema_id_value").and_then(Json::as_str) != Some(SCHEMA_ID) {
-    return Err(Refusal::unsupported_request(format!("meta.schema_id_value is not {SCHEMA_ID}")));
+  let meta_keys = q.meta.as_object().map_or(0, |m| m.len());
+  if q.meta.get("source_format").and_then(Json::as_str) != Some(SOURCE_FORMAT)
+    || q.meta.get("schema_id_value").and_then(Json::as_str) != Some(SCHEMA_ID)
+    || meta_keys != 2
+  {
+    return Err(Refusal::unsupported_request(format!("meta must hold exactly source_format {SOURCE_FORMAT} and schema_id_value {SCHEMA_ID}")));
+  }
+  if q.req.is_empty() {
+    return Err(Refusal::unsupported_request("_req is empty"));
   }
   if q.require_cryptographic_holder_binding == Some(false) {
     return Err(Refusal::unsupported_request("the scheme always binds the device key"));
   }
-  let offer = req.client_metadata.vp_formats_supported.mms_zk.as_ref().ok_or_else(|| Refusal::unsupported_scheme("the request has no mms_zk metadata"))?;
-  if offer.scheme_id_values.as_ref().is_some_and(|v| !v.iter().any(|s| s == SCHEME_ID))
+  let offer = req.client_metadata.vp_formats_supported.zkp_req.as_ref().ok_or_else(|| Refusal::unsupported_scheme("the request has no zkp_req metadata"))?;
+  if offer.system_id_values.as_ref().is_some_and(|v| !v.iter().any(|s| s == SYSTEM_ID))
     || offer.proof_system_values.as_ref().is_some_and(|v| !v.iter().any(|s| s == PROOF_SYSTEM))
   {
     return Err(Refusal::unsupported_scheme("the request does not offer this scheme"));
   }
+  // The trust framework fixes the x509_san_dns form: verifier_id is the client_id, 1 to 255 bytes.
   if !req.client_id.strip_prefix(CLIENT_ID_PREFIX).is_some_and(|h| !h.is_empty()) {
     return Err(Refusal::unsupported_request(format!("client_id {} is not x509_san_dns", req.client_id)));
+  }
+  if req.client_id.len() > 255 {
+    return Err(Refusal::unsupported_request("verifier_id is longer than 255 bytes"));
   }
   if !(16..=64).contains(&req.nonce.len()) {
     return Err(Refusal::unsupported_request("nonce must be 16 to 64 bytes"));
@@ -231,21 +249,28 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
   let mut age: Option<(String, DateRangeParams)> = None;
   let mut handles = Vec::new();
   for r in &q.req {
+    if handles.contains(&r.handle) {
+      return Err(Refusal::unsupported_request(format!("return handle {} is not unique", r.handle)));
+    }
     handles.push(r.handle.clone());
-    match r.id.as_str() {
+    match r.fn_id.as_str() {
       FUNCTION_PSEUDONYM => {
         if nym.is_some() {
           return Err(Refusal::unsupported_request("more than one pseudonym in req"));
         }
+        if let Some(k) = r.params.keys().find(|k| !["config", "ver", "prf"].contains(&k.as_str())) {
+          return Err(Refusal::unsupported_request(format!("unknown pseudonym parameter {k}")));
+        }
+        if r.params.get("ver").and_then(Json::as_u64) != Some(VERSION) {
+          return Err(Refusal::unsupported_request(format!("pseudonym ver {:?}: the rulebook defines {VERSION}", r.params.get("ver"))));
+        }
+        let prf = r.params.get("prf").and_then(Json::as_str).unwrap_or_default();
+        if prf != PRF {
+          return Err(Refusal::unsupported_config(format!("prf {prf}: bbs_cd defines {PRF}")));
+        }
         let config = r.params.get("config").and_then(Json::as_str).unwrap_or_default();
         if config != CONFIG_KNOWN_OFFENDER_MATCHING_SSC {
           return Err(Refusal::unsupported_config(format!("pseudonym configuration {config}")));
-        }
-        if r.params.get("verifier_id_type").and_then(Json::as_str) != Some(VERIFIER_ID_TYPE) {
-          return Err(Refusal::unsupported_config(format!("{config} needs verifier_id_type {VERIFIER_ID_TYPE}")));
-        }
-        if r.params.keys().any(|k| k != "config" && k != "verifier_id_type") {
-          return Err(Refusal::unsupported_config("unknown pseudonym parameter"));
         }
         nym = Some((r.handle.clone(), config.to_string()));
       }
@@ -266,14 +291,14 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
       other => return Err(Refusal::unsupported_function(format!("function {other}"))),
     }
   }
-  let (nym_handle, config) = nym.ok_or_else(|| Refusal::unsupported_request(format!("the scheme always reveals a pseudonym; req has no {FUNCTION_PSEUDONYM}")))?;
+  let (nym_handle, config) = nym.ok_or_else(|| Refusal::unsupported_request(format!("the scheme always reveals a pseudonym; _req has no {FUNCTION_PSEUDONYM}")))?;
 
   let verifier_id = req.client_id.as_bytes().to_vec();
   let pseudonym = PseudonymParams { config, verifier_input: verifier_id.clone() };
   let digest = handover.digest().map_err(Refusal::bad_request)?;
   let mut plugins = vec![
     PluginRequest { plugin_id: cd_ecdsa_pop::PLUGIN_ID.to_vec(), credential: 0, attribute: DEVICE_KEY.into(), params: EcdsaParams::hashed(LIMB_BITS).encode() },
-    PluginRequest { plugin_id: cd_pseudonym::PLUGIN_ID.to_vec(), credential: 0, attribute: NYM_SEED.into(), params: pseudonym.encode() },
+    PluginRequest { plugin_id: cd_pseudonym::PLUGIN_ID.to_vec(), credential: 0, attribute: SECRET_SEED.into(), params: pseudonym.encode() },
   ];
   let index_age = age.as_ref().map(|(_, p)| {
     plugins.push(PluginRequest { plugin_id: cd_date_range::PLUGIN_ID.to_vec(), credential: 0, attribute: BIRTH_DATE.into(), params: p.encode() });
@@ -306,6 +331,6 @@ pub fn committed(s: &Statement) -> Vec<&'static str> {
   if s.age.is_some() {
     v.push(BIRTH_DATE);
   }
-  v.push(NYM_SEED);
+  v.push(SECRET_SEED);
   v
 }

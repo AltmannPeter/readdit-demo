@@ -1,8 +1,8 @@
-//! `CircuitZkPresentation` (rulebook, "Presentation encoding"):
+//! `ZkpPresentation` (rulebook v0.4, "Presentation encoding"), for a circuit over `mso_mdoc`:
 //!
 //! ```cddl
-//! CircuitZkPresentation = {
-//!   "circuit_id"     => tstr,
+//! ZkpPresentation = {
+//!   "system_id"      => tstr,          ; the circuit id
 //!   "proof"          => bstr,
 //!   "issuer_key_set" => [+ bstr],      ; DER Document Signer certificates
 //!   ? "proof_time"   => tdate,         ; present when the circuit checks validity
@@ -24,7 +24,7 @@ pub enum ResultValue {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Presentation {
-  pub circuit_id: String,
+  pub system_id: String,
   pub proof: Vec<u8>,
   pub issuer_key_set: Vec<Vec<u8>>,
   /// `YYYY-MM-DDThh:mm:ssZ`.
@@ -48,7 +48,7 @@ impl Presentation {
       })
       .collect();
     let map = Value::Map(vec![
-      (Value::Text("circuit_id".into()), Value::Text(self.circuit_id.clone())),
+      (Value::Text("system_id".into()), Value::Text(self.system_id.clone())),
       (Value::Text("proof".into()), Value::Bytes(self.proof.clone())),
       (
         Value::Text("issuer_key_set".into()),
@@ -70,15 +70,15 @@ impl Presentation {
       return Err("trailing bytes after the presentation".into());
     }
     let Value::Map(entries) = value else { return Err("not a CBOR map".into()) };
-    let (mut circuit_id, mut proof, mut issuer_key_set, mut proof_time, mut results) = (None, None, None, None, None);
+    let (mut system_id, mut proof, mut issuer_key_set, mut proof_time, mut results) = (None, None, None, None, None);
     for (key, value) in entries {
       let Value::Text(key) = key else { return Err("a member key is not a text string".into()) };
       let slot_taken = |taken: bool| if taken { Err(format!("member {key} appears twice")) } else { Ok(()) };
       match key.as_str() {
-        "circuit_id" => {
-          slot_taken(circuit_id.is_some())?;
-          let Value::Text(t) = value else { return Err("circuit_id is not a text string".into()) };
-          circuit_id = Some(t);
+        "system_id" => {
+          slot_taken(system_id.is_some())?;
+          let Value::Text(t) = value else { return Err("system_id is not a text string".into()) };
+          system_id = Some(t);
         }
         "proof" => {
           slot_taken(proof.is_some())?;
@@ -128,7 +128,7 @@ impl Presentation {
       }
     }
     Ok(Presentation {
-      circuit_id: circuit_id.ok_or("no circuit_id")?,
+      system_id: system_id.ok_or("no system_id")?,
       proof: proof.ok_or("no proof")?,
       issuer_key_set: issuer_key_set.ok_or("no issuer_key_set")?,
       proof_time: proof_time.ok_or("no proof_time, which this circuit needs")?,

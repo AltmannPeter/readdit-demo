@@ -1,8 +1,8 @@
 // The holders' material, which the mocked SIROS ID wallet carries outright: for each nym_auth
 // credential, the mdoc, its device key pair and its secret_seed, issued by native/vega/issuer
 // (nym-issuer) into demo-wallet.json under one Document Signer; and the BBS credential
-// (mms_zk, docs/mms_zk.md) with the same device key as the mdoc it was issued next to, issued by
-// native/bbs/issuer (bbs-issuer) into demo-wallet-bbs.json. The demo has no true holder
+// (bbs_cd, docs/bbs_cd.md) with the device key and secret_seed of the mdoc holder it was issued
+// for, issued by native/bbs/issuer (bbs-issuer) into demo-wallet-bbs.json. The demo has no true holder
 // binding: a real wallet keeps the device key in secure hardware and never shows the seed. The
 // wallet sends each native step only what it needs (app/wallet/prover.ts), from the credential
 // the person chose, and decodes its own credentials for the screens below.
@@ -13,6 +13,7 @@ import { readIssuerSigned, type IssuerSignedView } from '#shared/utils/mdoc'
 import { fromHex, toHex, utf8, sha256 } from '#shared/utils/bytes'
 import { fromBase64url, toBase64url } from '#shared/utils/mdoc'
 import { findScheme, SCHEME_REGISTRY } from '#shared/registry/circuits'
+import type { SourceFormat } from '#shared/types/oid4vp'
 
 export interface WalletCredential {
   format: 'mso_mdoc'
@@ -39,7 +40,7 @@ export interface MdocMaterial {
 
 /** The BBS credential as bbs-issuer writes it (native/bbs/nym-bbs/src/credential.rs). */
 export interface BbsWalletCredential {
-  format: 'mms_zk'
+  format: 'bbs_cd'
   schema_id: string
   /** base64url IssuerParams: var8(pk) ‖ var16(schema). */
   issuer_params: string
@@ -78,8 +79,8 @@ export function mdocMaterial(index: number): MdocMaterial {
 export interface CredentialView {
   /** Position in the wallet (holders[index]). */
   index: number
-  /** mso_mdoc: the nym_auth mdoc (circuit_zk); mms_zk: the BBS credential. */
-  format: 'mso_mdoc' | 'mms_zk'
+  /** The attestation's encoding (a zkp_req query's source_format): the mdoc, or the BBS credential. */
+  format: SourceFormat
   /** The mdoc's docType, or the BBS credential's schema id. */
   docType: string
   namespace: string
@@ -94,17 +95,19 @@ export interface CredentialView {
   mso: { version: string; digestAlgorithm: string; signatureAlgorithm: string }
   deviceKey: { kty: string; crv: string; jwkThumbprint: string }
   sizes: { issuerSigned: number }
-  /** mms_zk only: the BBS issuer key, the schema and its attributes. */
+  /** bbs_cd only: the BBS issuer key, the schema and its attributes. */
   bbs?: { issuerKey: string; schemaId: string; attributes: Array<{ name: string; type: string; messages: number }>; messages: number }
 }
 
 /**
- * The demo's phones, one person each: the wallet on a phone holds only that person's credentials
- * (indexes into holders). The site's dialog shows one phone at a time and can swap them, so the
- * audience sees someone try another person's phone. Colours match the credential cards.
+ * The demo's phones, one credential each (indexes into holders): the teen's mdoc, the adult's
+ * mdoc, and the teen's BBS credential on a phone of its own, so which encoding answers a request
+ * is the phone's, not a choice between cards. The site's dialog shows one phone at a time and
+ * can swap them, so the audience sees someone try another person's phone. Colours match the
+ * credential cards.
  */
 export interface PhoneDef {
-  id: 'teen' | 'adult'
+  id: 'teen' | 'adult' | 'teen-bbs'
   label: string
   credentials: number[]
   /** The phone frame's colour, and the credential cards' (CARD_COLOURS). */
@@ -113,8 +116,9 @@ export interface PhoneDef {
 }
 
 export const PHONES: PhoneDef[] = [
-  { id: 'teen', label: "Teen's phone", credentials: [0, 2], bezel: '#3c434e', tone: '#5B6573' },
+  { id: 'teen', label: "Teen's phone", credentials: [0], bezel: '#3c434e', tone: '#5B6573' },
   { id: 'adult', label: "Adult's phone", credentials: [1], bezel: '#5c1d25', tone: '#8C2F39' },
+  { id: 'teen-bbs', label: "Teen's BBS phone", credentials: [2], bezel: '#1d3b45', tone: '#2E5E6E' },
 ]
 
 export const findPhone = (id: string) => PHONES.find((p) => p.id === id) ?? PHONES[0]!
@@ -202,7 +206,7 @@ async function decodeBbs(holder: BbsMaterial, index: number): Promise<Credential
   const bytes = fromBase64url(c.issuer_params).length + fromBase64url(c.signature).length + c.messages.reduce((n, m) => n + (m.startsWith('o:') ? fromBase64url(m.slice(2)).length : fromHex(m).length), 0)
   return {
     index,
-    format: 'mms_zk',
+    format: 'bbs_cd',
     docType: params.schemaId,
     namespace: '',
     title: NYM_BBS_TITLE,
