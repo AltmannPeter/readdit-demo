@@ -108,6 +108,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "community-longfellow-node"
+version = "0.1.0"
+dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "nym-longfellow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "compile-algebra"
 version = "0.1.0"
 dependencies = [
@@ -719,18 +731,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "readdit-longfellow-node"
-version = "0.1.0"
-dependencies = [
- "napi",
- "napi-build",
- "napi-derive",
- "nym-longfellow",
- "serde",
- "serde_json",
 ]
 
 [[package]]

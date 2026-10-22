@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 
-// The account in the header: the Readdit account, or, without one, the community account this
+// The account in the header: the Community account, or, without one, the community account this
 // browser joined with (a community with its own pseudonym), marked with its community.
 const { account, memberships, signOut } = useAccount()
 const wallet = useWallet()
@@ -43,7 +43,7 @@ function logIn() {
       <div class="card absolute right-0 z-50 mt-2 w-72 p-2 shadow-lg">
         <div class="px-3 py-2">
           <p class="text-sm font-semibold">u/{{ shown.handle }}</p>
-          <p class="mt-0.5 text-xs text-muted">{{ shown.community ? `${COMMUNITY_PREFIX}${shown.community} account only, no Readdit account` : 'Pseudonymous account' }}</p>
+          <p class="mt-0.5 text-xs text-muted">{{ shown.community ? `${COMMUNITY_PREFIX}${shown.community} account only, no Community account` : 'Pseudonymous account' }}</p>
         </div>
         <template v-if="account && joined.length">
           <hr class="my-1 border-line" />
@@ -55,7 +55,7 @@ function logIn() {
         <hr class="my-1 border-line" />
         <button v-if="!account" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-canvas" @click="logIn">
           <AppIcon name="user" class="size-4 text-muted" />
-          Log in to Readdit
+          Log in to Community
         </button>
         <button class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-canvas" @click="logOut">
           <AppIcon name="logout" class="size-4 text-muted" />

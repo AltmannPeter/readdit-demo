@@ -1,10 +1,10 @@
-//! The archive's known answers, then end to end on Readdit's demo credentials.
+//! The archive's known answers, then end to end on Community's demo credentials.
 //!
 //! - `archive_witness_and_proof`: the witness of the archive's fixture (verifier 1, DC API
 //!   handover) equals `circuits/mdoc/test/*.bin` slot for slot (SPEC.md L7, as `nymauth-lf
 //!   check`), and the archive's `test/proof.bin` verifies, with the refusals of L9.
 //! - `prove_verify_and_refusals`: the holder's three steps and the verifier on
-//!   `app/wallet/demo-wallet.json` with the OpenID4VP B.2.6.1 handover Readdit uses.
+//!   `app/wallet/demo-wallet.json` with the OpenID4VP B.2.6.1 handover Community uses.
 
 use nym_longfellow::cbor::{NULL, bstr, tstr, write_head};
 use nym_longfellow::circuit::DOC_TYPE;
@@ -91,7 +91,7 @@ fn archive_witness_and_proof() {
   assert!(pair.verify(&flipped, &public, &nym, &transcript).is_err());
 }
 
-// ---- Readdit's flow ----
+// ---- Community's flow ----
 
 fn request(host: &str, nonce: &str, age: Option<Value>) -> Value {
   let mut req = vec![json!({ "fn_id": "pseudonym", "return": "nym", "params": { "config": "known-offender-matching-ssc", "ver": 1, "prf": "sha-256" } })];
@@ -161,7 +161,7 @@ fn prove_verify_and_refusals() {
   };
   let range = json!({ "ge": next(d(18)).text(), "le": d(13).text() });
 
-  let req = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(range.clone()));
+  let req = request("community.example", "0123456789abcdef0123456789abcdef", Some(range.clone()));
   let out = present(&prover, teen, &req).expect("teen proves 13-17");
   let pres = out["presentation"].as_str().unwrap();
   let v = verify(&verifier, &req, pres, &now());
@@ -169,7 +169,7 @@ fn prove_verify_and_refusals() {
   assert_eq!(v["results"]["age"], true);
   let nym = v["results"]["nym"].as_str().unwrap().to_string();
   let seed: [u8; 16] = unhex("seed", teen["secret_seed"].as_str().unwrap()).unwrap();
-  assert_eq!(nym, nym_longfellow::hex(&witness::pseudonym(&seed, &sha256(b"x509_san_dns:readdit.example"))));
+  assert_eq!(nym, nym_longfellow::hex(&witness::pseudonym(&seed, &sha256(b"x509_san_dns:community.example"))));
   println!("presentation {} bytes, metrics {}", pres.len() * 3 / 4, out["metrics"]);
 
   // Refusals: another verifier's request, a moved proof_time, another pseudonym, a changed bound.
@@ -177,7 +177,7 @@ fn prove_verify_and_refusals() {
   assert_eq!(verify(&verifier, &other, pres, &now())["code"], "proof_invalid");
   let later = nym_longfellow::dates::from_unix(nym_longfellow::dates::unix(&nym_longfellow::dates::now().unwrap()) + 3600).unwrap();
   assert_eq!(verify(&verifier, &req, pres, &later.text())["code"], "proof_time");
-  let narrower = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(json!({ "ge": next(d(17)).text(), "le": d(13).text() })));
+  let narrower = request("community.example", "0123456789abcdef0123456789abcdef", Some(json!({ "ge": next(d(17)).text(), "le": d(13).text() })));
   let r = verify(&verifier, &narrower, pres, &now());
   assert_eq!((r["code"].as_str(), r["input"].as_str()), (Some("proof_invalid"), Some("hash")), "{r}");
   let bytes = nym_longfellow::unb64url("p", pres).unwrap();
@@ -188,13 +188,13 @@ fn prove_verify_and_refusals() {
   // The adult cannot prove 13 to 17; proves 18+.
   let refused = present(&prover, adult, &req).expect_err("adult refused");
   assert_eq!(refused.error, "unsatisfiable");
-  let req18 = request("readdit.example", "fedcba9876543210fedcba9876543210", Some(json!({ "le": d(18).text() })));
+  let req18 = request("community.example", "fedcba9876543210fedcba9876543210", Some(json!({ "le": d(18).text() })));
   let out18 = present(&prover, adult, &req18).expect("adult proves 18+");
   assert_eq!(verify(&verifier, &req18, out18["presentation"].as_str().unwrap(), &now())["ok"], true);
   assert_eq!(present(&prover, teen, &req18).expect_err("teen refused").error, "unsatisfiable");
 
   // Sign-up without age: the same pseudonym as with it.
-  let plain = request("readdit.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", None);
+  let plain = request("community.example", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", None);
   let out2 = present(&prover, teen, &plain).unwrap();
   let v2 = verify(&verifier, &plain, out2["presentation"].as_str().unwrap(), &now());
   assert_eq!(v2["ok"], true, "{v2}");

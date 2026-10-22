@@ -34,9 +34,12 @@ export interface Measurement {
     prove_ms: number | null
     proof_bytes: number | null
     presentation_bytes: number | null
+    /** The proof's working memory: the most heap the prover's own code held (absent in older records). */
+    heap_mb?: number | null
+    /** The server process's peak resident set during the step (Linux only). */
     peak_memory_mb: number | null
   }
-  verify: { threads: number | null; total_ms: number | null; verify_ms: number | null; peak_memory_mb: number | null }
+  verify: { threads: number | null; total_ms: number | null; verify_ms: number | null; heap_mb?: number | null; peak_memory_mb: number | null }
   machine: Machine
 }
 
@@ -50,7 +53,7 @@ export function machine(): Machine {
   }
 }
 
-const g = globalThis as unknown as { __readditMeasurements?: Measurement[] }
+const g = globalThis as unknown as { __communityMeasurements?: Measurement[] }
 
 function file(): string {
   return resolve(process.cwd(), String(useRuntimeConfig().measurementsFile))
@@ -58,7 +61,7 @@ function file(): string {
 
 /** Every record, read from the file once. A line that does not parse is skipped. */
 export function measurements(): Measurement[] {
-  if (g.__readditMeasurements) return g.__readditMeasurements
+  if (g.__communityMeasurements) return g.__communityMeasurements
   const list: Measurement[] = []
   try {
     if (existsSync(file())) {
@@ -74,7 +77,7 @@ export function measurements(): Measurement[] {
   } catch (e) {
     console.warn(`[measurements] cannot read ${file()}: ${(e as Error).message}`)
   }
-  g.__readditMeasurements = list
+  g.__communityMeasurements = list
   return list
 }
 
@@ -108,12 +111,14 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
       prove_ms: num(pm.prove_ms),
       proof_bytes: num(pm.proof_bytes),
       presentation_bytes: num(pm.presentation_bytes),
+      heap_mb: num(pm.heap_mb),
       peak_memory_mb: num(pm.peak_memory_mb),
     },
     verify: {
       threads: num(verify?.threads),
       total_ms: num(verify?.total_ms),
       verify_ms: num(verify?.verify_ms),
+      heap_mb: num(verify?.heap_mb),
       peak_memory_mb: num(verify?.peak_memory_mb),
     },
     machine: machine(),
@@ -129,7 +134,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
 
 /** Empties the file and the list. */
 export async function clearMeasurements() {
-  g.__readditMeasurements = []
+  g.__communityMeasurements = []
   await mkdir(dirname(file()), { recursive: true })
   await writeFile(file(), '')
 }
@@ -159,6 +164,10 @@ export interface MeasurementRow {
   verify: Spread | null
   proof_bytes: Spread | null
   presentation_bytes: Spread | null
+  /** The prover's and the verifier's own heap (the step's requirement). */
+  prove_heap_mb: Spread | null
+  verify_heap_mb: Spread | null
+  /** The server process's peak resident set (Linux only): Node and all addons. */
   peak_memory_mb: number | null
   last: string
 }
@@ -186,6 +195,8 @@ export function measurementSummary() {
       verify: spread(ms.map((x) => x.verify.total_ms)),
       proof_bytes: spread(ms.map((x) => x.prove.proof_bytes)),
       presentation_bytes: spread(ms.map((x) => x.prove.presentation_bytes)),
+      prove_heap_mb: spread(ms.map((x) => x.prove.heap_mb ?? null)),
+      verify_heap_mb: spread(ms.map((x) => x.verify.heap_mb ?? null)),
       peak_memory_mb: peaks.length ? Math.max(...peaks) : null,
       last: ms.at(-1)!.at,
     }

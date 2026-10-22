@@ -4,6 +4,7 @@ import type { CircuitEntry, SchemeEntry, SystemEntry } from '#shared/registry/ci
 import { selectSystem } from '#shared/utils/negotiation'
 import { derivePseudonym } from '#shared/utils/pseudonym'
 import { fromHex } from '#shared/utils/bytes'
+import { encryptionKeyOf, responseEncOf } from '#shared/utils/jwe'
 import type { CredentialView } from './holder'
 import { credentialLabel, mdocMaterial } from './holder'
 import { CONFIG_PROPERTIES } from './rulebook'
@@ -96,6 +97,11 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
     satisfiable: true,
   }
   const reject = (problem: 'unsupported' | 'no_circuit', reason: string): RequestView => ({ ...view, satisfiable: false, problem, reason })
+
+  // The rulebook's presentations are always encrypted: direct_post.jwt to a key the wallet can use.
+  if (req.response_mode !== 'direct_post.jwt') return reject('unsupported', `response_mode ${String(req.response_mode)}: a nym_auth presentation is sent encrypted (direct_post.jwt)`)
+  if (!encryptionKeyOf(req)) return reject('unsupported', 'client_metadata.jwks has no ECDH-ES P-256 key to encrypt the response to')
+  if (!responseEncOf(req)) return reject('unsupported', `encrypted_response_enc_values_supported lists neither A128GCM nor A256GCM`)
 
   const queries = req.dcql_query?.credentials ?? []
   const sets = req.dcql_query?.credential_sets

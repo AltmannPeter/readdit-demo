@@ -3,7 +3,7 @@ import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { PROOF_SYSTEMS, type CircuitEntry, type SchemeEntry } from '#shared/registry/circuits'
 
 definePageMeta({ layout: false })
-useHead({ title: 'Technical view · Readdit' })
+useHead({ title: 'Technical view · Community' })
 
 interface Service {
   up: boolean
@@ -28,7 +28,7 @@ interface Trace {
 }
 interface Session {
   id: string
-  purpose: { kind: 'signin'; intent?: 'signup' | 'login'; community?: string } | { kind: 'age' | 'community'; community: string }
+  purpose: { kind: 'signin'; intent?: 'signup' | 'login'; community?: string } | { kind: 'age' | 'community'; community: string } | { kind: 'dev'; age: string }
   phone?: string
   status: string
   createdAt: number
@@ -70,6 +70,8 @@ interface MeasurementRow {
   verify: Spread | null
   proof_bytes: Spread | null
   presentation_bytes: Spread | null
+  prove_heap_mb: Spread | null
+  verify_heap_mb: Spread | null
   peak_memory_mb: number | null
   last: string
 }
@@ -107,14 +109,18 @@ const step = (name: string) => session.value?.trace.filter((t) => t.step === nam
 const prove = computed(() => step('prove')?.data)
 const verify = computed(() => step('verify')?.data)
 
+const DEV_AGES: Record<string, string> = { none: 'no age', over18: '18+', range13to17: '13–17' }
 const purposeText = (p: Session['purpose']) =>
-  p.kind === 'signin'
+  p.kind === 'dev'
+    ? `Developer view, ${DEV_AGES[p.age] ?? p.age}`
+    : p.kind === 'signin'
     ? `${p.intent === 'login' ? 'Log in' : 'Sign up'}${p.community ? ` and age check, ${COMMUNITY_PREFIX}${p.community}` : ''}`
     : p.kind === 'community'
       ? `Join ${COMMUNITY_PREFIX}${p.community}`
       : `Age check, ${COMMUNITY_PREFIX}${p.community}`
 const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(1)} kB` : `${n} B`)
-const mb = (n?: number | null) => (n == null ? '' : `${Math.round(n)} MB`)
+const mb = (n?: number | null) => (n == null ? '' : `${n < 10 ? n.toFixed(1) : Math.round(n)} MB`)
+const mbSpread = (s: Spread | null) => (!s ? '–' : s.min === s.max ? mb(s.median) : `${mb(s.median)} (${mb(s.min).replace(' MB', '')}–${mb(s.max)})`)
 type Counts = { shared: number; precommitted: number; rest: number; public: number } | { hash: { inputs: number; public: number }; signature: { inputs: number; public: number } }
 const n = (x: number) => x.toLocaleString('en-GB')
 const values = (c?: Counts | null) =>
@@ -212,7 +218,7 @@ const statusTone = (s: string) =>
     <header class="border-b border-line bg-surface">
       <div class="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
         <AppLogo class="size-7" />
-        <span class="font-bold">readdit</span>
+        <span class="font-bold">community</span>
         <span class="text-muted">·</span>
         <span class="font-semibold">Technical view</span>
         <span
@@ -229,7 +235,7 @@ const statusTone = (s: string) =>
       <!-- accepted proof systems -->
       <section class="card p-4">
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <h2 class="text-sm font-semibold">Readdit accepts</h2>
+          <h2 class="text-sm font-semibold">Community accepts</h2>
           <label v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
             <input
               type="checkbox"
@@ -245,7 +251,7 @@ const statusTone = (s: string) =>
           Only the ticked ones: a wallet request offers their systems in zkp_req when the phone fetches it, so a QR code already on screen follows too, and a presentation in a proof system unticked meanwhile is refused. Vega and Longfellow are circuits over the mdoc (mso_mdoc): the request lists both, Vega first. With BBS (bbs_cd) as well, the DCQL query carries one zkp_req credential query per source format, as alternatives (credential_sets). Nothing is ticked when the demo starts or after a reset.
         </p>
         <p v-if="!data.acceptedProofSystems.length" class="mt-2 text-xs font-semibold text-adult" data-none-accepted>
-          Readdit accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
+          Community accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
         </p>
         <p v-if="acceptError" class="mt-1 text-xs text-adult">{{ acceptError }}</p>
         <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line pt-3">
@@ -295,7 +301,7 @@ const statusTone = (s: string) =>
         </div>
       </section>
 
-      <p v-if="!session" class="card p-8 text-center text-sm text-muted">No sessions yet. Start a log-in or age check on Readdit.</p>
+      <p v-if="!session" class="card p-8 text-center text-sm text-muted">No sessions yet. Start a log-in or age check on Community.</p>
 
       <template v-else>
         <!-- session picker -->
@@ -360,22 +366,26 @@ const statusTone = (s: string) =>
                     sign {{ ms(t.data.metrics.sign_ms) }}<template v-if="t.data.challenge_digest"> · e2 {{ t.data.challenge_digest.slice(0, 16) }}…</template>
                   </p>
                   <p v-else-if="t.step === 'witness' && t.data?.metrics" class="text-xs text-muted">
-                    {{ ms(t.data.metrics.witness_ms) }}<template v-if="t.data.counts"> · {{ values(t.data.counts) }}</template> · proof_time {{ t.data.proof_time }}
+                    {{ ms(t.data.metrics.witness_ms) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.counts"> · {{ values(t.data.counts) }}</template> · proof_time {{ t.data.proof_time }}
                   </p>
                   <p v-else-if="t.step === 'prove' && t.data?.format === 'bbs_cd' && t.data?.metrics" class="text-xs text-muted">
-                    commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
+                    commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
                   </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
-                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.backend"> · {{ t.data.backend }} addon</template>
+                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.backend"> · {{ t.data.backend }} addon</template>
                   </p>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
+                  <p v-else-if="t.step === 'decrypt' || t.step === 'wallet.encrypt'" class="text-xs text-muted">
+                    {{ t.data?.header?.alg }} · {{ t.data?.header?.enc }} · {{ kb(t.data?.bytes) }} · {{ ms(t.data?.decrypt_ms ?? t.data?.encrypt_ms) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
+                  </p>
+                  <p v-else-if="t.step === 'wallet.match' && t.data?.reason" class="text-xs text-muted">{{ t.data.reason }}</p>
                   <p v-else-if="(t.step === 'verify' || t.step === 'refused') && t.data?.code" class="text-xs text-adult">
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.threads"> on {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.threads"> on {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>
@@ -414,7 +424,7 @@ const statusTone = (s: string) =>
               <h2 class="border-b border-line px-5 py-3 text-sm font-semibold">Capability negotiation</h2>
               <dl v-for="f in formats" :key="f" class="divide-y divide-line border-b border-line text-xs last:border-b-0">
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
-                  <dt class="text-muted">Readdit accepts</dt>
+                  <dt class="text-muted">Community accepts</dt>
                   <dd class="font-mono">{{ f }}: {{ ids(session.offer) }}</dd>
                 </div>
                 <div class="grid grid-cols-[9rem_1fr] gap-2 px-5 py-2.5">
@@ -441,7 +451,7 @@ const statusTone = (s: string) =>
                 <li v-for="(p, i) in session.circuit.public_inputs" :key="p.name" class="grid grid-cols-[1.5rem_12.5rem_1fr] gap-2 px-5 py-2">
                   <span class="text-muted tabular-nums">{{ i + 1 }}</span>
                   <span class="font-mono">{{ p.name }}</span>
-                  <span class="text-muted">{{ p.source === 'presentation' ? 'from presentation' : 'recomputed by Readdit' }}: {{ p.derivation }}</span>
+                  <span class="text-muted">{{ p.source === 'presentation' ? 'from presentation' : 'recomputed by Community' }}: {{ p.derivation }}</span>
                 </li>
               </ol>
             </section>
@@ -452,7 +462,7 @@ const statusTone = (s: string) =>
               <ol class="divide-y divide-line text-xs">
                 <li v-for="x in session.scheme.statement" :key="x.name" class="grid grid-cols-[12.5rem_1fr] gap-2 px-5 py-2">
                   <span class="font-mono">{{ x.name }}</span>
-                  <span class="text-muted">recomputed by Readdit: {{ x.derivation }}</span>
+                  <span class="text-muted">recomputed by Community: {{ x.derivation }}</span>
                 </li>
                 <li v-for="p in session.scheme.plugins" :key="p.id" class="grid grid-cols-[12.5rem_1fr] gap-2 px-5 py-2">
                   <span class="font-mono">{{ p.id }} on {{ p.attribute }}</span>
@@ -501,7 +511,9 @@ const statusTone = (s: string) =>
                 <th class="px-3 py-2 font-medium">Verify</th>
                 <th class="px-3 py-2 font-medium">Proof</th>
                 <th class="px-3 py-2 font-medium">Presentation</th>
-                <th class="px-3 py-2 font-medium">Peak memory</th>
+                <th class="px-3 py-2 font-medium">Prover memory</th>
+                <th class="px-3 py-2 font-medium">Verifier memory</th>
+                <th class="px-3 py-2 font-medium">Process peak</th>
                 <th v-if="machines.length > 1" class="px-3 py-2 font-medium">Machine</th>
               </tr>
             </thead>
@@ -515,6 +527,8 @@ const statusTone = (s: string) =>
                 <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.verify) }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.proof_bytes) }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.presentation_bytes) }}</td>
+                <td class="px-3 py-2.5 tabular-nums" data-measured-heap>{{ mbSpread(r.prove_heap_mb) }}</td>
+                <td class="px-3 py-2.5 tabular-nums">{{ mbSpread(r.verify_heap_mb) }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ r.peak_memory_mb ? mb(r.peak_memory_mb) : '–' }}</td>
                 <td v-if="machines.length > 1" class="px-3 py-2.5">{{ machineText(r.machine) }}</td>
               </tr>
@@ -522,7 +536,7 @@ const statusTone = (s: string) =>
           </table>
         </div>
         <p class="border-t border-line px-5 py-2 text-[11px] leading-snug text-muted">
-          Peak memory is the server process's peak resident set during the step (Linux only), so it includes Node and the loaded backends.
+          Prover and verifier memory: the most heap the addon's own code held during the step, above what it held before (for a circuit, witness and proof together); the keys and circuits loaded at start are not in it. Process peak: the server process's peak resident set during a step (Linux only), so it includes Node and all three addons.
         </p>
       </section>
     </main>

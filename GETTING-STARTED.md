@@ -1,27 +1,28 @@
-# Readdit demo: getting started
+# Community demo: getting started
 
-Readdit is a small Reddit-style site. You sign up with a pseudonym from an EU Digital Identity
+Community is a small Reddit-style site. You sign up with a pseudonym from an EU Digital Identity
 Wallet, prove your age range without showing your date of birth, and stay banned if a moderator
 bans you. The phone on screen plays the SIROS ID wallet. The site and the phone are mocked. The
 OpenID4VP messages, the signed requests, the circuit negotiation and the zero-knowledge proofs are
 real: the site's server proves and verifies with Vega, Longfellow or BBS, each compiled from Rust
 into a Node addon.
 
-**Before you start:** Readdit accepts no proof system when it starts or after a demo reset. Tick
-one under **Readdit accepts** in the technical view (section 3) first; until then, sign-up, log-in
+**Before you start:** Community accepts no proof system when it starts or after a demo reset. Tick
+one under **Community accepts** in the technical view (section 3) first; until then, sign-up, log-in
 and age checks stop at "No proof accepted".
 
-The demo has three views, each in its own browser window:
+The demo has four views, each in its own browser window:
 
 | View | Address | Who it is for |
 | --- | --- | --- |
-| **Site** | http://localhost:3000 | The audience: Readdit, the phone and the guide panel |
+| **Site** | http://localhost:3000 | The audience: Community, the phone and the guide panel |
+| **Developer** | http://localhost:3000/dev | Developers: the same flow as a sequence diagram, with the QR code and the phone in a popup |
 | **Technical** | http://localhost:3000/tech | Anyone who wants to see what happens underneath |
 | **Moderation** | http://localhost:3000/mod | The moderator: bans and demo reset |
 
 ## 1. Start it
 
-Pick one of the ways below. All serve all three views.
+Pick one of the ways below. All serve all four views.
 
 ### With Node.js (recommended)
 
@@ -30,15 +31,15 @@ https://nodejs.org), and a recent stable Rust for the proof addons (tested with 
 https://rustup.rs).
 
 ```sh
-cd readdit-demo
+cd community-demo
 npm install
 npm run build:native   # builds the Vega, Longfellow and BBS addons (Rust), a few minutes the first time
 npm run dev            # the site
 ```
 
 `npm run build:native` compiles `native/vega`, `native/longfellow` and `native/bbs` and copies the
-addons to `native/vega/readdit-vega.node`, `native/longfellow/readdit-longfellow.node` and
-`native/bbs/readdit-bbs.node` (`npm run build:native -- longfellow` builds one). Run it again after
+addons to `native/vega/community-vega.node`, `native/longfellow/community-longfellow.node` and
+`native/bbs/community-bbs.node` (`npm run build:native -- longfellow` builds one). Run it again after
 changing the Rust code. When the site starts, it loads the three and logs `[vega] prover and
 verifier ready`, `[longfellow] …` and `[bbs] …`. It starts with the ones that load.
 
@@ -47,7 +48,7 @@ verifier ready`, `[longfellow] …` and `[bbs] …`. It starts with the ones tha
 **Requires** Docker with Compose. Check with `docker compose version`.
 
 ```sh
-cd readdit-demo
+cd community-demo
 docker compose up -d --build      # first run takes several minutes: it compiles the Rust addons
 docker compose down               # to stop
 ```
@@ -59,8 +60,8 @@ limits the Rust build's parallel jobs.
 ### In GitHub Codespaces (nothing to install)
 
 Open the repository on GitHub and click **Open in GitHub Codespaces** in the README. The codespace
-builds the same image as Docker and opens Readdit in a browser tab. Instead of `localhost:3000`,
-the three views are at the codespace's address (`https://<name>-3000.app.github.dev`, plus `/tech`
+builds the same image as Docker and opens Community in a browser tab. Instead of `localhost:3000`,
+the views are at the codespace's address (`https://<name>-3000.app.github.dev`, plus `/dev`, `/tech`
 and `/mod`). Step by step, for people who do not code: `TRY-IT.md`.
 
 Then open the three addresses above in three separate browser windows. A good layout: the site
@@ -68,29 +69,29 @@ full screen on the projector, and the technical and moderation views on the lapt
 
 **Proof backends.** Proofs come from a **prover** and a **verifier**, in addons that the site's
 server loads. The prover plays the phone's native steps: the PIN unlocks the device key, which signs
-the request; then the witness and the proof. The verifier checks the proof against Readdit's own
+the request; then the witness and the proof. The verifier checks the proof against Community's own
 request. Vega (`native/vega`) and Longfellow (`native/longfellow`) prove the same nym_auth statement
 over the same mdoc credential, each with its own circuits from the nym-auth-circuits archive; BBS
 (`native/bbs`) proves it over a BBS credential.
 
 ## 2. The site view
 
-**http://localhost:3000** is Readdit as the audience sees it, with the guide panel on the right.
+**http://localhost:3000** is Community as the audience sees it, with the guide panel on the right.
 Log in, sign up and age checks open a dialog with a QR code on the left and a phone on the right.
 
 **Three phones, one credential each.** **Teen's phone** (born 14 March 2011) and **Adult's phone**
 (born 20 May 1990) each hold an "Age and pseudonym" credential (an mdoc). **Teen's BBS phone** holds
 the teen's "Age and pseudonym (BBS)", the same credential as a BBS credential (teal card); it can
-answer only when Readdit accepts BBS (technical view, "Readdit accepts"). The dialog shows one
+answer only when Community accepts BBS (technical view, "Community accepts"). The dialog shows one
 phone, named above it with its owner's age, in its own frame colour (grey, red or teal). **Swap
 phone** hands over to the next one (teen, adult, teen's BBS, then the teen's again) while the QR
 code is on screen, for example to show someone borrowing another person's phone. The chosen phone
 stays until you swap again; reloading the page starts on the teen's phone.
 
 Logged out, the home page and the open communities show no posts, only a short note on how
-Readdit accounts work, with **Sign up** and **Log in**.
+Community accounts work, with **Sign up** and **Log in**.
 
-Sign up and log in send the same wallet request, a pseudonym; Readdit applies it differently.
+Sign up and log in send the same wallet request, a pseudonym; Community applies it differently.
 **Sign up** only creates an account: when the wallet already has one, the dialog says "Account
 already exists" and offers **Log in**. **Log in** only logs in: with no account for the wallet, the dialog says "No
 account" and offers **Sign up**.
@@ -118,12 +119,12 @@ On the phone (SIROS ID), the screens and their wording follow the SIROS ID walle
 **The guide panel** follows the flow by itself. For the current step it shows a title and a short
 summary; **Details** opens the technical facts of that step: the request, the pseudonym's properties
 under `known-offender-matching-ssc`, what is and is not shared, the proof's measured time and size,
-the verification's measured time (decoding, verification, and the verifier call as Readdit timed
-it, all on this machine), and what Readdit checks. All of it is derived from the actual request, credential and metrics.
+the verification's measured time (decoding, verification, and the verifier call as Community timed
+it, all on this machine), and what Community checks. All of it is derived from the actual request, credential and metrics.
 The panel's button at the top right collapses it to a narrow strip; the browser remembers the
 choice. Its footer links to the technical and moderation views.
 
-Each credential has its own secret seed, so each phone gives Readdit a different pseudonym and so a
+Each credential has its own secret seed, so each phone gives Community a different pseudonym and so a
 different account. The guide names the phone in use at every step.
 
 Communities:
@@ -132,17 +133,17 @@ Communities:
 - **c/teenspace** is for ages 13–17. The teen's phone gets in; the adult's phone meets
   "Requirement Not Met".
 - **c/afterdark** is for ages 18+. On the teen's phone the wallet shows "Requirement Not Met", and
-  nothing is shared. Swap to the adult's phone at the QR code: it makes the proof, but Readdit rejects
+  nothing is shared. Swap to the adult's phone at the QR code: it makes the proof, but Community rejects
   it when you are logged in with the teen's account ("Pseudonym does not match"). Logged out, or
   logged in with the adult's account, you get in.
-- **c/france** (badge "Proof of human") is about French politics and society and wants real people,
+- **c/france** is about French politics and society and wants real people,
   no bots. It has its own pseudonym: **Join with wallet** asks for a pseudonym for
-  `france.readdit.example`, so each person gets one c/france account, not linked to their Readdit
-  account unless they choose to (only the issuer could link it otherwise). No age limit and no Readdit account needed. Posts and comments
+  `france.community.example`, so each person gets one c/france account, not linked to their Community
+  account unless they choose to (only the issuer could link it otherwise). No age limit and no Community account needed. Posts and comments
   there are visible only with a c/france account, and appear under the c/france pseudonym. Logged in
-  to Readdit, you choose: **Join and link to u/…**, or **Log out and join separately**. A Readdit
+  to Community, you choose: **Join and link to u/…**, or **Log out and join separately**. A Community
   account can be linked to one c/france account only, and the other way round. A ban in c/france
-  does not touch the Readdit account; a ban of the Readdit account also bans the linked c/france
+  does not touch the Community account; a ban of the Community account also bans the linked c/france
   account, and unbanning lifts both.
   With only a c/france account, the header shows it with a "c/france" mark.
 - **Logged out**, an age-restricted community shows its age requirement and **Verify age with
@@ -162,7 +163,7 @@ session; the chips under the service cards select earlier ones, and name the pho
 screen.
 
 - **Badge (top right).** The addons that are loaded: "Vega, Longfellow and BBS addons, in process".
-- **Readdit accepts.** Switches for the proof systems Readdit accepts: Vega and Longfellow (circuits
+- **Community accepts.** Switches for the proof systems Community accepts: Vega and Longfellow (circuits
   over the mdoc, `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**:
   tick one before the demo. Vega and Longfellow use the same credential and give the same
   pseudonym, so the same account; with both ticked the request lists both circuits, Vega first, and
@@ -177,7 +178,7 @@ screen.
   implementation and version, the time they took to load once at start, the threads they run on
   now, and the circuit they run. The verifier card
   shows its trust anchor and the `proof_time` tolerance. **Request signing** shows the certificate
-  that signs Readdit's requests.
+  that signs Community's requests.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
   presentation size, and the size of the signed request.
 - **Flow.** Each step with its time from the start of the session: session created, request
@@ -186,59 +187,89 @@ screen.
   memory), presentation received, proof verified or rejected (with the rule and the public input
   that failed), result applied to the account, or why not (cancelled, expired, no account,
   banned, a different account).
-- **Request.** What Readdit asked for (pseudonym, age range). **Raw JSON** shows the full signed
+- **Request.** What Community asked for (pseudonym, age range). **Raw JSON** shows the full signed
   Request Object.
-- **Capability negotiation.** Per format, the circuits or schemes Readdit accepts, the ones the
+- **Capability negotiation.** Per format, the circuits or schemes Community accepts, the ones the
   wallet supports, the ones sent in the request, and the one used.
 - **Circuit** (mdoc). The circuit's public inputs in order, and for each one whether it comes from
-  the presentation or Readdit computes it itself. **Scheme** (BBS): what Readdit derives from the
+  the presentation or Community computes it itself. **Scheme** (BBS): what Community derives from the
   request, and what each plugin proves.
-- **Public outputs.** What Readdit learned: the pseudonym and, for age checks, `true`.
+- **Public outputs.** What Community learned: the pseudonym and, for age checks, `true`.
 - **Measured on this server.** Every presentation proved through the phone and verified, saved to
   `.data/measurements.jsonl` (it survives restarts and **Reset demo**): per proof system, what was
   proven (pseudonym, or pseudonym and age) and thread count, the number of runs, prove and verify
-  times (median and range), proof and presentation size, and the server process's peak memory.
+  times (median and range), proof and presentation size, the memory the prover and the verifier
+  needed (their own heap, without Node or the keys loaded at start), and the server process's peak
+  memory (Linux only).
   Prove is the phone's work, run here on the server's CPU, so a phone would be slower. The line
   above the table names this machine. **Clear** (click twice) empties the file. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
   not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
   mobile uplink. The bottom row gives the time per presentation.
 
-## 4. The moderation view
+## 4. The developer view
+
+**http://localhost:3000/dev**, or **Developer** in the site's header (and **Community** to go back).
+It runs the same flow as the site, for developers: the newest wallet session of this browser, from
+either view, as a sequence diagram between the Community website, its backend and the wallet.
+There is no guide panel here.
+
+- **Accepted proof systems.** What the technical view accepts now. Switch them there.
+- **Pseudonym presentation with age proof.** Choose **None**, **18+** or **13–17**, then
+  **Request**. The **nym_auth** button shows the attestation in both encodings, with the demo
+  credentials' values.
+- **QR popup.** The real request: a phone whose wallet supports `zkp_req` and encrypted responses
+  (`direct_post.jwt`), and that can reach the site, can scan it. **Simulate scan** lists the three
+  demo phones beside the code, each with its credential's encoding and whether the technical view
+  accepts it now; pick one and **Scan**. **Change phone** goes back to the list until the phone has
+  scanned. The popup stays until **Close** on the phone's success screen. **Cancel request** ends
+  the request.
+- **The diagram.** One row per step, from the session's trace. **OID4VP extensions** and **ZKP**
+  highlight the steps the rulebook adds and the proof steps. Click a row for its details.
+- **Inspector** (under the diagram). The DCQL query, the request (QR payload, signed Request Object),
+  the response (JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
+  checks.
+- **Community account.** A request here creates the account or logs in, and records the proven age
+  range, as on the site.
+
+Keys: **1**, **2**, **3** request with no age proof, 18+ or 13–17; **S** simulate scan (the phone list); **R** clear
+the diagram; **E** and **Z** the highlights; **I** the inspector.
+
+## 5. The moderation view
 
 **http://localhost:3000/mod** is the moderator's page. Nothing on the site links to it.
 
 - **Recent comments.** Each comment has a **Ban user** button.
-- **Accounts.** Every account with its pseudonym (all Readdit knows about it), join date, age checks
-  passed and status, with **Ban** or **Unban**. A c/france account linked to a Readdit account is
+- **Accounts.** Every account with its pseudonym (all Community knows about it), join date, age checks
+  passed and status, with **Ban** or **Unban**. A c/france account linked to a Community account is
   listed under it; an unlinked one stands on its own.
 - **Reset demo** (top right). Click it twice to clear all accounts, bans, comments and sessions.
   An open wallet dialog then says "This code is no longer valid. Try again."
 
 A ban logs the user out within a few seconds and hides their comments. The site view shows a ban
 notice. Signing up again with the same wallet ends in "Account banned", because the wallet always
-gives Readdit the same pseudonym.
+gives Community the same pseudonym.
 
-## 5. A full run through all three views
+## 6. A full run through the views
 
-0. **Technical:** tick Vega under "Readdit accepts" (nothing is ticked at start).
+0. **Technical:** tick Vega under "Community accepts" (nothing is ticked at start).
 1. **Site:** sign up on the teen's phone (scan, **Share**, any 6-digit PIN, **Close** on the phone).
    You get a pseudonym such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
 2. **Site:** open c/afterdark. The phone says the requirement is not met. **Technical:** the
    session ends with an error response, and no proof is created.
-3. **Site:** **Try again**, then **Swap phone** to the adult's phone, and share. Readdit says
+3. **Site:** **Try again**, then **Swap phone** to the adult's phone, and share. Community says
    "Pseudonym does not match": the proof is valid, but it is not the teen's account's.
    **Technical:** the session shows the swap and a verified proof that was not applied.
 4. **Site:** open c/teenspace and verify on the teen's phone. You get in. **Technical:** the request
    now holds a pseudonym and an age range, and the outputs are the same pseudonym and `true`.
-5. **Site:** open c/afterdark again. Readdit refuses on its own, without asking the wallet.
+5. **Site:** open c/afterdark again. Community refuses on its own, without asking the wallet.
 6. **Site:** open c/france and **Join and link to u/…** on the teen's phone. The request's client_id is
-   `x509_san_dns:france.readdit.example`; you get a second pseudonym, linked to your account.
+   `x509_san_dns:france.community.example`; you get a second pseudonym, linked to your account.
 7. **Site:** comment on a c/teenspace post. **Moderation:** click **Ban user** on that comment.
    **Site:** the ban notice appears.
-8. **Site:** sign up again with the same wallet. Readdit shows "Account banned". **Moderation:**
+8. **Site:** sign up again with the same wallet. Community shows "Account banned". **Moderation:**
    it is still the same single account.
-9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Readdit accepts" (the
+9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Community accepts" (the
    reset unticked Vega; tick it too to offer both formats). **Site:** **Swap phone** to the teen's
    BBS phone and sign up. Then c/teenspace: the age range is proven with BBS. **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age
    range) and sizes.
@@ -246,22 +277,27 @@ gives Readdit the same pseudonym.
    on the teen's phone, try c/afterdark (requirement not met), then c/teenspace. **Technical:** the
    circuit used is `urn:circuits:longfellow:nym_auth:v1`; the proof is about 344 kB. Without the
    reset, logging in with Longfellow reaches the account made with Vega: the pseudonym is the same.
+11. **Developer.** **Moderation:** **Reset demo**. **Technical:** tick Vega. **Developer:** choose
+   **18+**, **Request**, **Simulate scan**, the teen's phone, **Scan**: it says the requirement is not met; **Close**
+   on the phone. The diagram ends with an encrypted error response. Then press **3** and **S**,
+   **Scan**, **Share** and any PIN: the account is created with the age range 13–17. **Community:** you are
+   logged in, c/teenspace opens and c/afterdark is refused, without a new request.
 
 **Start over:** in the moderation view, click **Reset demo** twice, then reload the site window.
 
-## 6. When the proof backend fails
+## 7. When the proof backend fails
 
-Readdit has three proof backends, the Vega, Longfellow and BBS addons. There is no fallback.
+Community has three proof backends, the Vega, Longfellow and BBS addons. There is no fallback.
 
 - **An addon is missing or cannot load.** The site starts with the others and logs, for example,
   `[longfellow] not loaded: …`; the technical view's cards say why, and its switch for that proof
   system is off. With none, the built site (`npm run start`, Docker) stops at start with
-  `[backends] Readdit cannot start without a proof backend. Build the addons with npm run
+  `[backends] Community cannot start without a proof backend. Build the addons with npm run
   build:native, then start the site again.` The development server keeps running, so that a
   rebuilt addon is picked up on restart; until then every wallet dialog says "Verification is not
   available right now. Try again later."
 - **One proof or one verification fails.** The phone shows "Signing Failed" (the proof was not
-  made) or "Response Error" (Readdit could not verify it), and the dialog "Not completed:
+  made) or "Response Error" (Community could not verify it), and the dialog "Not completed:
   Verification is not available right now". Nothing is applied. **Try again** starts a new request.
   The server log has a `[vega] … failed`, `[longfellow] …`, `[bbs] …` or `[circuits] …` line
   with the reason, and the technical view the session.
@@ -273,20 +309,20 @@ site, tick the proof system you will show in the technical view, and run the who
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `NUXT_VEGA_ADDON` | `native/vega/readdit-vega.node` | The Vega addon (`npm run build:native`) |
+| `NUXT_VEGA_ADDON` | `native/vega/community-vega.node` | The Vega addon (`npm run build:native`) |
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
-| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/readdit-longfellow.node` | The Longfellow addon |
+| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
 | `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits the site can accept, in preference order |
-| `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon |
+| `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
 | `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
-| `NUXT_PUBLIC_SITE_HOST` | `readdit.example` | DNS name in `client_id` and the request-signing certificate |
+| `NUXT_PUBLIC_SITE_HOST` | `community.example` | DNS name in `client_id` and the request-signing certificate |
 | `NUXT_VP_SESSION_TTL_S` | `600` | How long a wallet request (its QR code) stays valid, in seconds |
 
 The demo person's birth date is in the credential itself (`app/wallet/demo-wallet.json`); see
@@ -294,11 +330,11 @@ The demo person's birth date is in the credential itself (`app/wallet/demo-walle
 
 ## Troubleshooting
 
-- **The site stops at start with `Readdit cannot start without a proof backend`.** Run
+- **The site stops at start with `Community cannot start without a proof backend`.** Run
   `npm run build:native`, then start the site again.
 - **"Connection Error" on the phone** (development server). No addon is loaded. The technical
   view's prover cards say why. Run `npm run build:native` and restart the site.
-- **"No proof accepted" in the dialog.** Nothing is ticked under "Readdit accepts" (the start
+- **"No proof accepted" in the dialog.** Nothing is ticked under "Community accepts" (the start
   state, and after **Reset demo**): tick a proof system in the technical view.
 - **"Verification is not available".** The addon of every ticked proof system failed to load: tick
   one whose cards are green in the technical view.
@@ -366,16 +402,16 @@ started with two settings, which it checks first:
 
 ```sh
 npm run build
-NUXT_MEASUREMENTS_FILE=/tmp/readdit-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 \
+NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
   node .output/server/index.mjs > /tmp/server.log 2>&1 &
 node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log --startup .output/server/index.mjs
 ```
 
-Requests then expire after 40 s, so the expiry paths take a minute. `READDIT_TEST_FAULTS=1` turns
+Requests then expire after 40 s, so the expiry paths take a minute. `COMMUNITY_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
 `--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch and the
-measurements). The scratch measurements file keeps the run's proofs out of the demo's own
+measurements, V the developer view). The scratch measurements file keeps the run's proofs out of the demo's own
 measurements, which group P clears.
 
 ## More

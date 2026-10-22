@@ -1,4 +1,4 @@
-# Readdit site (Nuxt) with its three proof backends compiled in as Node addons (Rust): Vega and
+# Community site (Nuxt) with its three proof backends compiled in as Node addons (Rust): Vega and
 # Longfellow (circuits over mso_mdoc, native/vega and native/longfellow) and BBS (bbs_cd, native/bbs).
 #   docker compose up -d --build        then http://localhost:3000
 
@@ -9,8 +9,8 @@ ARG JOBS
 WORKDIR /native
 COPY native/vega ./
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
- && cargo build --release --locked -p readdit-vega-node \
- && cp target/release/libreaddit_vega_node.so readdit-vega.node
+ && cargo build --release --locked -p community-vega-node \
+ && cp target/release/libcommunity_vega_node.so community-vega.node
 
 # 2. The BBS addon: native/bbs/node, built against the vendored bbs-cd-plugins and its locked dependencies.
 FROM rust:1-bookworm AS native-bbs
@@ -18,8 +18,8 @@ ARG JOBS
 WORKDIR /native
 COPY native/bbs ./
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
- && cargo build --release --locked -p readdit-bbs-node \
- && cp target/release/libreaddit_bbs_node.so readdit-bbs.node
+ && cargo build --release --locked -p community-bbs-node \
+ && cp target/release/libcommunity_bbs_node.so community-bbs.node
 
 # 3. The Longfellow addon: native/longfellow/node, built against the vendored longfellow-zk crates
 #    and its locked dependencies. native/longfellow/.cargo/config.toml enables carry-less multiply
@@ -29,8 +29,8 @@ ARG JOBS
 WORKDIR /native
 COPY native/longfellow ./
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
- && cargo build --release --locked -p readdit-longfellow-node \
- && cp target/release/libreaddit_longfellow_node.so readdit-longfellow.node
+ && cargo build --release --locked -p community-longfellow-node \
+ && cp target/release/libcommunity_longfellow_node.so community-longfellow.node
 
 # 4. The site.
 FROM node:24-bookworm-slim AS build
@@ -45,9 +45,9 @@ RUN npm install --no-audit --no-fund && npm run build
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY --from=build /app/.output ./.output
-COPY --from=native /native/readdit-vega.node ./native/vega/readdit-vega.node
-COPY --from=native-longfellow /native/readdit-longfellow.node ./native/longfellow/readdit-longfellow.node
-COPY --from=native-bbs /native/readdit-bbs.node ./native/bbs/readdit-bbs.node
+COPY --from=native /native/community-vega.node ./native/vega/community-vega.node
+COPY --from=native-longfellow /native/community-longfellow.node ./native/longfellow/community-longfellow.node
+COPY --from=native-bbs /native/community-bbs.node ./native/bbs/community-bbs.node
 COPY native/vega/circuits/mdoc/shapes.zst ./native/vega/circuits/mdoc/shapes.zst
 COPY native/vega/demo/document-signer.pem ./native/vega/demo/document-signer.pem
 COPY native/longfellow/circuits/mdoc/circuits.zst native/longfellow/circuits/mdoc/params.tsv native/longfellow/circuits/mdoc/hash-semantic.tsv ./native/longfellow/circuits/mdoc/

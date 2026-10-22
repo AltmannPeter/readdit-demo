@@ -1,7 +1,7 @@
 {
   // GitHub Codespaces: builds the same image as docker compose (Dockerfile) and runs the site in it.
-  // The image's own command starts Readdit on port 3000; Codespaces forwards it over HTTPS.
-  "name": "Readdit demo",
+  // The image's own command starts Community on port 3000; Codespaces forwards it over HTTPS.
+  "name": "Community demo",
   "build": {
     "dockerfile": "../Dockerfile",
     "context": ".."
@@ -15,7 +15,7 @@
   "postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends ca-certificates",
   "forwardPorts": [3000],
   "portsAttributes": {
-    "3000": { "label": "Readdit", "onAutoForward": "openBrowser" }
+    "3000": { "label": "Community", "onAutoForward": "openBrowser" }
   },
   "customizations": {
     "codespaces": { "openFiles": ["TRY-IT.md"] }

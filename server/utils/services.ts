@@ -101,7 +101,7 @@ export interface WitnessSummary {
     | { shared: number; precommitted: number; rest: number; public: number }
     | { hash: { inputs: number; public: number }; signature: { inputs: number; public: number } }
     | null
-  metrics: { witness_ms?: number }
+  metrics: { witness_ms?: number; heap_mb?: number | null }
 }
 
 export interface ProveMetrics {
@@ -111,6 +111,10 @@ export interface ProveMetrics {
   prove_ms?: number
   /** witness + prove, per presentation */
   total_ms?: number
+  /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
+   *  prove), above what was held before it. */
+  heap_mb?: number | null
+  /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
   proof_bytes?: number
   presentation_bytes?: number
@@ -134,6 +138,10 @@ export interface VerifyMetrics {
   proof_bytes?: number
   /** The threads the check ran on (Vega, BBS: the /tech switch; Longfellow: 1). */
   threads?: number
+  /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
+   *  prove), above what was held before it. */
+  heap_mb?: number | null
+  /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
 }
 
@@ -202,7 +210,7 @@ export const CIRCUIT_BACKENDS = ['vega', 'longfellow'] as const
 export type CircuitBackend = (typeof CIRCUIT_BACKENDS)[number]
 const LABELS: Record<CircuitBackend, string> = { vega: 'Vega', longfellow: 'Longfellow' }
 
-const g = globalThis as unknown as { __readditCircuits?: Partial<Record<CircuitBackend, Promise<Native>>> }
+const g = globalThis as unknown as { __communityCircuits?: Partial<Record<CircuitBackend, Promise<Native>>> }
 
 function backendPaths(name: CircuitBackend) {
   const cfg = useRuntimeConfig()
@@ -216,7 +224,7 @@ function backendPaths(name: CircuitBackend) {
  * again. The caller reports it (server/plugins/backends.ts at start, `nativeFor` below on a request).
  */
 export function loadCircuitBackend(name: CircuitBackend): Promise<Native> {
-  const cache = (g.__readditCircuits ??= {})
+  const cache = (g.__communityCircuits ??= {})
   if (cache[name]) return cache[name]
   const loading = (async () => {
     const cfg = useRuntimeConfig()
@@ -278,11 +286,11 @@ async function backendFor(service: 'prover' | 'verifier', circuitId: string | un
  * One call into an addon, with its result parsed. A call that throws (a panic in the addon, a
  * result that is not JSON) is a failure of the backend: 500 backend_error, logged with the reason.
  * `takeFault` fails the call the same way when a test armed it (test-faults.ts; never without
- * READDIT_TEST_FAULTS=1).
+ * COMMUNITY_TEST_FAULTS=1).
  */
 async function call<T>(service: 'prover' | 'verifier', step: FaultStep, fn: () => Promise<T>, backend: string): Promise<T> {
   try {
-    if (takeFault(step)) throw new Error(`test fault: the ${step} call failed (READDIT_TEST_FAULTS)`)
+    if (takeFault(step)) throw new Error(`test fault: the ${step} call failed (COMMUNITY_TEST_FAULTS)`)
     return await fn()
   } catch (e) {
     console.error(`[${backend}] ${step} failed: ${(e as Error).message}`)
@@ -417,6 +425,10 @@ export interface BbsProveMetrics {
   /** offline + online */
   prove_ms?: number
   total_ms?: number
+  /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
+   *  prove), above what was held before it. */
+  heap_mb?: number | null
+  /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
   proof_bytes?: number
   presentation_bytes?: number
@@ -452,11 +464,11 @@ interface NativeBbs {
   verifier: NativeBbsVerifier
 }
 
-const gb = globalThis as unknown as { __readditBbs?: Promise<NativeBbs> }
+const gb = globalThis as unknown as { __communityBbs?: Promise<NativeBbs> }
 
 /** Loads the BBS addon and the trusted issuer parameters, once; a failure is retried at the next call. */
 export function loadBbs(): Promise<NativeBbs> {
-  if (gb.__readditBbs) return gb.__readditBbs
+  if (gb.__communityBbs) return gb.__communityBbs
   const loading = (async () => {
     const cfg = useRuntimeConfig()
     const path = (p: unknown) => resolve(process.cwd(), String(p))
@@ -469,9 +481,9 @@ export function loadBbs(): Promise<NativeBbs> {
     const [prover, verifier] = await Promise.all([addon.loadProver(), addon.loadVerifier(path(cfg.bbsIssuerParams))])
     return { prover, verifier }
   })()
-  gb.__readditBbs = loading
+  gb.__communityBbs = loading
   loading.catch(() => {
-    if (gb.__readditBbs === loading) gb.__readditBbs = undefined
+    if (gb.__communityBbs === loading) gb.__communityBbs = undefined
   })
   return loading
 }

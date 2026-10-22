@@ -1,7 +1,7 @@
 /**
- * Ban an account. Banning a Readdit account also bans the community accounts linked to it
- * (`cascade`: lifted again when the Readdit account is unbanned). Banning a community account
- * leaves the Readdit account and its other community accounts alone.
+ * Ban an account. Banning a Community account also bans the community accounts linked to it
+ * (`cascade`: lifted again when the Community account is unbanned). Banning a community account
+ * leaves the Community account and its other community accounts alone.
  */
 export default defineEventHandler(async (event) => {
   const { pseudonym, reason } = await readObject<{ pseudonym: unknown; reason: unknown }>(event)
@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   a.banned = { at, reason: typeof reason === 'string' && reason ? reason : 'Community rules' }
   if (!a.community) {
     for (const linked of store().accounts.values()) {
-      if (linked.linkedTo === a.pseudonym && !linked.banned) linked.banned = { at, reason: `Readdit account u/${a.handle} banned`, cascade: true }
+      if (linked.linkedTo === a.pseudonym && !linked.banned) linked.banned = { at, reason: `Community account u/${a.handle} banned`, cascade: true }
     }
   }
   return { ok: true }

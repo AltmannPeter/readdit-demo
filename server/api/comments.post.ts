@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const text = typeof body === 'string' ? body.trim() : ''
   if (!post) throw refusal(400, 'bad_request', 'Unknown post.')
   const community = findCommunity(post.community)
-  // A community with its own pseudonym: the comment is the community account's, never the Readdit account's.
+  // A community with its own pseudonym: the comment is the community account's, never the Community account's.
   const account = community?.nymHost ? memberAccount(community.slug, b.data) : mainAccount(b.data.pseudonym)
   if (!account || account.banned) {
     throw community?.nymHost ? refusal(403, 'registration_required', 'Join this community with your wallet first.') : refusal(401, 'login_required', 'Log in to comment.')

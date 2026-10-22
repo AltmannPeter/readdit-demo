@@ -1,4 +1,4 @@
-# Readdit's BBS backend: ETSI BBS committed disclosures (draft v0.7) with the ecdsa-pop,
+# Community's BBS backend: ETSI BBS committed disclosures (draft v0.7) with the ecdsa-pop,
 # date-range and pseudonym plugins of sirosfoundation/bbs-cd-plugins, compiled into a Node addon
 # that the site's server calls in process.
 #

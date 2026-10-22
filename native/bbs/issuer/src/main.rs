@@ -1,4 +1,4 @@
-//! bbs-issuer: issues Readdit's demo BBS credential (the `bbs_cd` encoding of the nym_auth
+//! bbs-issuer: issues Community's demo BBS credential (the `bbs_cd` encoding of the nym_auth
 //! attestation, rulebook v0.4; `docs/bbs_cd.md`).
 //!
 //! ```text

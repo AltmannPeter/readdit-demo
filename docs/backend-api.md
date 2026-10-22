@@ -23,7 +23,7 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   server starts (`server/plugins/backends.ts`), and keep them. Setup is deterministic. Nothing
   randomized and no witness is kept between requests.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
-  runs at a time, so each step's time and peak memory are its own.
+  runs at a time, so each step's time and memory are its own.
 - **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false), which
   `services.ts` sets from `/tech`'s switch. False runs the step in a one-thread rayon pool, true in a
   pool of one thread per core (`nym-vega/src/threads.rs`); the proof does not depend on it. The
@@ -41,17 +41,17 @@ Configuration (Nuxt runtime config, environment variables):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `NUXT_VEGA_ADDON` | `native/vega/readdit-vega.node` | The addon (`npm run build:native`), relative to the working directory |
+| `NUXT_VEGA_ADDON` | `native/vega/community-vega.node` | The addon (`npm run build:native`), relative to the working directory |
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The verifier's trust anchors (PEM) |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far `proof_time` may lie from the verifier's clock |
-| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/readdit-longfellow.node` | The Longfellow addon |
+| `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Readdit can accept, comma-separated, in preference order |
-| `NUXT_BBS_ADDON` | `native/bbs/readdit-bbs.node` | The BBS addon (`npm run build:native`) |
+| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Community can accept, comma-separated, in preference order |
+| `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
-| `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Readdit can accept |
+| `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Community can accept |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a demo reset; `/tech` switches them (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`). Empty: none, and a wallet request answers 503 `none_accepted` |
 
 ## The circuit
@@ -82,18 +82,20 @@ Public inputs, in the registry order (`shared/registry/circuits.ts`; 18 field el
 The site offers the circuit only when the verifier reports the same id, proof system, public-input
 names and order, and `shapes.zst` hash as the registry (`server/utils/vp.ts`).
 
-Session binding. Readdit invokes the wallet cross-device with a QR code, so OpenID4VP 1.0
+Session binding. Community invokes the wallet cross-device with a QR code, so OpenID4VP 1.0
 Appendix B.2.6.1 applies:
 
 ```
-SessionTranscript     = [null, null, ["OpenID4VPHandover", SHA-256(cbor([client_id, nonce, null, response_uri]))]]
+SessionTranscript     = [null, null, ["OpenID4VPHandover", SHA-256(cbor([client_id, nonce, jwk_thumbprint, response_uri]))]]
 DeviceAuthenticationBytes = #6.24(bstr(cbor(["DeviceAuthentication", SessionTranscript, docType, #6.24(bstr(h'A0'))])))
 message = cbor(["Signature1", bstr(h'A10126'), bstr(h''), bstr(DeviceAuthenticationBytes)])
 e2 = SHA-256(message)
 ```
 
-`jwk_thumbprint` is null because the response is `direct_post` without encryption. The encoding
-matches the specification's example byte for byte (`nym-vega` test `openid4vp_appendix_b261_example`).
+The response is encrypted (`direct_post.jwt`), so `jwk_thumbprint` is the RFC 7638 SHA-256
+thumbprint (32 bytes) of the session's encryption key in `client_metadata.jwks`; with `direct_post`
+it would be null. The encoding matches the specification's example byte for byte (`nym-vega` test
+`openid4vp_appendix_b261_example`).
 The device key signs `message` with ES256; the circuit verifies that signature on e2.
 
 ## Encoding conventions
@@ -105,7 +107,10 @@ The device key signs `message` with ES256; the circuit verifies that signature o
   48 for `hashdh-bls12381g1`), and the age predicate is `true`.
 - `request` is the decoded Request Object payload, as the site built and signed it (`RequestObject`
   in `shared/types/oid4vp.ts`).
-- `handover` is `{ client_id, nonce, response_uri, jwk_thumbprint: null }`; its values must equal the request's.
+- `handover` is `{ client_id, nonce, response_uri, jwk_thumbprint }`; its values must equal the request's.
+  `jwk_thumbprint` is base64url of the 32-byte thumbprint of the request's encryption key
+  (`shared/utils/jwe.ts`, `handoverOf`), or null for an unencrypted request. The verifier side takes
+  it from the session's own key (`server/utils/vp.ts`, `handoverFor`).
 - Every addon call takes and returns JSON text. A prover refusal is `{ "ok": false, "status": <n>, "error": "<code>", "detail": "…" }`.
 
 ## The addon
@@ -163,7 +168,7 @@ it does not know (such as a `pin`) is ignored.
 {
   "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" },
   "doc_type": "eu.europa.ec.eudi.nym_auth.1",
-  "handover": { "client_id": "x509_san_dns:readdit.example", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null }
+  "handover": { "client_id": "x509_san_dns:community.example", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" }
 }
 ```
 
@@ -215,14 +220,22 @@ Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Wit
   "results": { "nym": "<hex32>", "age": true },
   "metrics": {
     "load_ms": 276.1, "witness_ms": 11.2, "prove_ms": 251.0, "total_ms": 262.2,
-    "peak_memory_mb": 1357, "proof_bytes": 96079, "presentation_bytes": 96708, "threads": 32
+    "heap_mb": 412.3, "peak_memory_mb": 1357, "proof_bytes": 96079, "presentation_bytes": 96708, "threads": 32
   }
 }
 ```
 
-`total_ms` is witness + prove, per presentation. `peak_memory_mb` is the server process's peak
-resident set during the step (Linux: `VmHWM` after resetting it through `/proc/self/clear_refs`);
-it includes Node and both sides' keys, and is absent where it cannot be measured.
+`total_ms` is witness + prove, per presentation. `heap_mb` is the proof's working memory: the most
+heap the addon's own code held at once during the witness and prove steps, above what it held
+before the witness step (the witness stays held between the two). A counting allocator in the
+addon (`node/src/alloc.rs`, the only `unsafe` code; the library crates forbid it) wraps the system
+allocator and reports to `measure::Heap`, so the figure excludes Node, V8, the other addons and the
+keys or circuits loaded at start, on every platform. The witness summary has the witness step's own
+`heap_mb`; the verifier and the BBS prover report theirs. Without the allocator (the crates' own
+tests) it is null. The example's figure is illustrative. `peak_memory_mb` is the server process's
+peak resident set during the step (Linux: `VmHWM` after resetting it through `/proc/self/clear_refs`);
+it includes Node, all three addons and both sides' keys, and is absent where it cannot be measured
+(macOS).
 
 Prover refusals:
 
@@ -238,17 +251,17 @@ Prover refusals:
 
 ```json
 {
-  "request": { "…": "the Request Object Readdit sent" },
+  "request": { "…": "the Request Object Community sent" },
   "credential_query_id": "nym_attestation",
   "presentation": "<base64url CBOR>",
-  "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null },
+  "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
   "now": "2026-10-13T00:37:08.000Z"
 }
 ```
 
 ```json
 { "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
-  "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "peak_memory_mb": 1357 } }
+  "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
 ```
 
 ```json
@@ -270,11 +283,11 @@ The verifier takes only `issuer_key_set`, `proof_time` and `results` from the pr
 | `proof_invalid` | the SNARK verification fails, or a step instance does not report its position |
 | `public_input` | the proof's public values differ from the verifier's; `input` names the first one that differs |
 
-Readdit repeats the circuit and results-key checks after the call, as a second line of defence.
+Community repeats the circuit and results-key checks after the call, as a second line of defence.
 
 ## The Longfellow addon (`mso_mdoc`)
 
-`native/longfellow/node` (crate `readdit-longfellow-node`) around `native/longfellow/nym-longfellow`,
+`native/longfellow/node` (crate `community-longfellow-node`) around `native/longfellow/nym-longfellow`,
 on Google's longfellow-zk Rust runtime. It has the Vega addon's interface, objects and JSON, with
 these differences.
 
@@ -316,7 +329,7 @@ values.
 Session binding is the B.2.6.1 SessionTranscript above, as for Vega. The archive's fixtures use
 the Digital Credentials API handover instead (`OpenID4VPDCAPIHandover`); the circuits see only e2
 and the transcript only seeds Fiat–Shamir, so the same circuits serve both (`nym-longfellow`
-tests: the archive's witness slot for slot and its proof, then Readdit's handover end to end).
+tests: the archive's witness slot for slot and its proof, then Community's handover end to end).
 
 **Witness summary.** `public_inputs` gives T, E and C as text and the other inputs as hex, with
 `mac.tags` and `mac.a_v` empty (they exist only once the proof is made); `counts` is `{ hash: {
@@ -336,7 +349,7 @@ not). A `RUSTFLAGS` environment variable replaces these flags.
 
 ## The BBS addon (`bbs_cd`)
 
-`native/bbs/node` (crate `readdit-bbs-node`) around `native/bbs/nym-bbs`, which implements the
+`native/bbs/node` (crate `community-bbs-node`) around `native/bbs/nym-bbs`, which implements the
 rulebook's `bbs_cd` encoding (`docs/bbs_cd.md`) on the vendored bbs-cd-plugins crates. `loadProver()` builds the
 date-range tables; `loadVerifier(issuerParamsPath)` reads the trusted issuer parameters and
 checks that their schema is the profile's. Calls take and return JSON text; one heavy step runs at
@@ -357,7 +370,7 @@ key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
 
 ```json
 { "request": { …Request Object… }, "credential_query_id": "nym_attestation_bbs",
-  "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": null },
+  "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
   "credential": { "format": "bbs_cd", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
   "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" } }
 ```
@@ -368,7 +381,7 @@ base64url(CBOR(ZkpPresentation)), its `proof` the bbs-cd-plugins envelope, `issu
 verifier's; `metrics` `offline_ms` (commitments and
 the ecdsa-pop preparation), `bbs_ms`, `ecdsa_pop_ms`, `device_sign_ms`, `pseudonym_ms`,
 `date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `proof_bytes` (the envelope),
-`presentation_bytes` (the ZkpPresentation), `parts` (bytes per part), `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
+`presentation_bytes` (the ZkpPresentation), `parts` (bytes per part), `heap_mb`, `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
 committed attributes, plugins). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
 is outside the range), `400 unsupported_request`, `unsupported_config`, `unsupported_function`,
 `unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
@@ -380,7 +393,7 @@ or `{ ok: false, code, reason, metrics }` with `code` `presentation`, `scheme`, 
 `request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5). `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
 `ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
 
-## Readdit's routes and their refusals
+## Community's routes and their refusals
 
 Every refusal carries a plain status text and a code in the error body's `data.error`.
 
@@ -390,7 +403,7 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 401 `login_required` | An age check without a logged-in (and not banned) account |
 | | 403 `age_refused` | The ages already proven for the account do not overlap the community's requirement |
 | | 409 `age_verified` | The ages already proven already meet it: no new request |
-| | 503 `none_accepted` | Readdit accepts no proof system (the start state, and after a demo reset) |
+| | 503 `none_accepted` | Community accepts no proof system (the start state, and after a demo reset) |
 | | 503 `unavailable` | The verifier could not make an offer |
 | request_uri | 404 `unknown_session` | |
 | | 405 `method_not_allowed` | Not GET or POST |
@@ -398,7 +411,9 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
 | | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no system to offer (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
-| | 400 `state_mismatch` | `state` is not the session's; checked first |
+| | 400 `invalid_response` | `response` is not a JWE (ECDH-ES, A128GCM) to the session's key, or its payload is not a JSON object; logged as `[vp] <id>: refused a response that does not decrypt` |
+| | 400 `state_mismatch` | `state` (inside the JWE) is not the session's; checked first after decryption |
+| | 400 `unencrypted` | A vp_token sent as form fields (`direct_post`); logged as `[vp] <id>: refused an unencrypted response`. An unencrypted error response (`error`, `state`) is accepted |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
 | | 400 `already_answered` | A second response, for example a replay; logged as `[vp] <id>: refused a second response` |
@@ -407,11 +422,17 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `GET /api/vp/session/:id`, `…/complete`, `…/cancel` | 404 `unknown_session`, 403 `other_browser` | Only the browser that started the session |
 | `POST …/complete` | 409 `not_verified` | Before a verified presentation |
 | `POST /api/wallet/sign`, `/prove` | 400 `bad_request` | Missing or mistyped fields; the prover's refusals above otherwise |
+| `POST /api/wallet/trace` | 400 `bad_request` | An unknown step (`authenticate`, `match`, `consent`, `decline`, `encrypt`), a label over 80 characters, or over 8 kB of data. 204 otherwise, also for an unknown `state` (nothing recorded) |
+| `GET /api/dev/latest` | | This browser's newest session for the developer view, created after `?after=<ms>`, and what `/tech` accepts |
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
 | `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
 | `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
 | `POST /api/tech/measurements/clear` | | Empties the measurements file |
+
+`{ purpose: 'dev', age: 'none' | 'over18' | 'range13to17' }` is the developer view's request: the
+pseudonym, and the age range 18+ or 13–17 if chosen; its completion creates the account or logs in
+and records the age range (`banned` for a banned account).
 
 `{ purpose: 'signin', intent, community }` is the request of a logged-out visitor at an
 age-restricted community: one presentation of the pseudonym and the community's age range, which
@@ -426,7 +447,7 @@ account; nothing is created), `banned`, `mismatch` (an age proof for another pse
 logged-in account's), `logged_out` (the browser was logged out meanwhile), or the reason the session
 failed: `denied`, `invalid_request`, `invalid`, `unavailable`, `expired`, `cancelled`.
 
-**Test only.** With `READDIT_TEST_FAULTS=1` in the server's environment, `POST /api/test/fault
+**Test only.** With `COMMUNITY_TEST_FAULTS=1` in the server's environment, `POST /api/test/fault
 { "step": "prover.info" | "prover.sign" | "prover.prove" | "verifier.info" | "verifier.verify" }`
 makes the next addon call of that step fail as a failing addon would (`server/utils/test-faults.ts`),
 in either addon: `prover.info` and the others name the step, not the backend.

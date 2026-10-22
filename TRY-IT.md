@@ -1,26 +1,28 @@
-# Try Readdit in your browser
+# Try Community in your browser
 
-Readdit runs in a GitHub Codespace.
+Community runs in a GitHub Codespace.
 
 ## Start it
 
 1. Open https://codespaces.new/AltmannPeter/readdit-demo?quickstart=1 and sign in to GitHub.
 2. Click **Create codespace**.
 3. Wait. The first start builds the demo and takes about 10 minutes. Later starts take about a minute.
-4. Readdit opens in a new browser tab. If it does not, click the **Ports** tab at the bottom of the
-   window, then the globe icon next to **Readdit (3000)**. If your browser blocked a pop-up, allow it.
+4. Community opens in a new browser tab. If it does not, click the **Ports** tab at the bottom of the
+   window, then the globe icon next to **Community (3000)**. If your browser blocked a pop-up, allow it.
 
-You can ignore the code editor that opens. Everything happens in the Readdit tab.
+You can ignore the code editor that opens. Everything happens in the Community tab.
 
 ## Use it
 
-- **First, the technical view:** add `/tech` to the end of the Readdit address and tick a proof
-  system under **Readdit accepts** (Vega, for example). Readdit accepts none until you do.
-- **The site:** the Readdit tab. Sign up with the phone on the right side of the dialog. Any 6-digit
+- **First, the technical view:** add `/tech` to the end of the Community address and tick a proof
+  system under **Community accepts** (Vega, for example). Community accepts none until you do.
+- **The site:** the Community tab. Sign up with the phone on the right side of the dialog. Any 6-digit
   PIN works. There are three phones, the teen's, the adult's and the teen's BBS phone: **Swap
   phone** above the phone hands over to the next one.
+- **Developer view:** **Developer** at the top of the Community tab. The same flow as a sequence
+  diagram, with the QR code and the phone in a popup (**Simulate scan**, pick a phone, **Scan**).
 - **Technical view:** what happens underneath, live.
-- **Moderation view:** add `/mod` to the end of the Readdit address. Ban users or reset the demo here.
+- **Moderation view:** add `/mod` to the end of the Community address. Ban users or reset the demo here.
 
 `GETTING-STARTED.md` describes the views and a full run through the demo.
 

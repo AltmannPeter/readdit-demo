@@ -22,7 +22,7 @@ use serde_json::{Map, Value as Json, json};
 
 use crate::circuit::{CIRCUIT_ID, PROOF_SYSTEM, RUNTIME};
 use crate::handover::Handover;
-use crate::measure::{Peak, ms};
+use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, statement};
 use crate::witness::Public;
@@ -98,10 +98,12 @@ impl Verifier {
   pub fn verify(&self, input: &VerifyInput) -> Json {
     let t = Instant::now();
     let peak = Peak::start();
+    let heap = Heap::start();
     let mut metrics = Map::new();
     metrics.insert("load_ms".into(), json!(self.load_ms));
     let outcome = self.check(input, &mut metrics);
     metrics.insert("total_ms".into(), json!(ms(t)));
+    metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
       Ok((results, system_id)) => json!({ "ok": true, "system_id": system_id, "results": results, "metrics": metrics }),

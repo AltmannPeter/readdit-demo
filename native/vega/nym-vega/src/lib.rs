@@ -1,5 +1,5 @@
 //! Prover and verifier of the nym_auth statement (age range and the `pseudonym` function with `prf` `sha-256`,
-//! configuration `known-offender-matching-ssc`) with Vega, as the Readdit demo runs them.
+//! configuration `known-offender-matching-ssc`) with Vega, as the Community demo runs them.
 //!
 //! The circuits and the witness builder are the nym-auth-circuits archive's `vega-age`, vendored
 //! unchanged. This crate adds what an OpenID4VP presentation needs around them:

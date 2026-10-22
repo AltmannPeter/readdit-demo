@@ -19,7 +19,7 @@ use serde_json::{Map, Value as Json, json};
 use crate::circuit::{CIRCUIT_ID, DOC_TYPE, PROOF_SYSTEM, PUBLIC_INPUTS, RUNTIME};
 use crate::error::Refusal;
 use crate::handover::{self, Handover};
-use crate::measure::{Peak, ms};
+use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, Statement, statement};
 use crate::witness::{self, Private, Public};
@@ -82,6 +82,9 @@ pub struct WitnessData {
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
+  /// The heap held before the witness step, and the most it held during it (measure::Heap).
+  heap_base: usize,
+  witness_high: usize,
   /// What the witness step reports: its time, sizes and the public values it claims.
   pub summary: Json,
 }
@@ -190,6 +193,7 @@ impl Prover {
   /// Step 2: takes the credential apart, makes every holder-side check, and builds both vectors.
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
+    let heap = Heap::start();
     if input.system_id != CIRCUIT_ID {
       return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
@@ -273,7 +277,7 @@ impl Prover {
         "hash": { "inputs": l.hash.ninputs, "public": l.hash.npub },
         "signature": { "inputs": l.sig.ninputs, "public": l.sig.npub },
       },
-      "metrics": { "witness_ms": witness_ms },
+      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()) },
     });
     Ok(WitnessData {
       witness: w,
@@ -287,6 +291,8 @@ impl Prover {
       },
       results,
       witness_ms,
+      heap_base: heap.base(),
+      witness_high: heap.high(),
       summary,
     })
   }
@@ -294,10 +300,14 @@ impl Prover {
   /// Step 3: proves both circuits from the witness, and encodes the presentation.
   pub fn prove(&self, w: WitnessData) -> Result<Json, String> {
     let peak = Peak::start();
+    let heap = Heap::start();
     let t = Instant::now();
     let proved = self.pair.prove(w.witness, &w.transcript_seed)?;
     let prove_ms = ms(t);
     let peak_mb = peak.read();
+    // The proof's working memory: the most the witness and prove steps held at once, above what
+    // was held before the witness step (the witness itself stays held between the two).
+    let heap_mb = mb(heap.high().max(w.witness_high).saturating_sub(w.heap_base));
     let proof_bytes = proved.proof.len();
     let presentation = Presentation { proof: proved.proof, ..w.presentation }.encode()?;
     Ok(json!({
@@ -309,6 +319,7 @@ impl Prover {
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
+        "heap_mb": heap_mb,
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
         "presentation_bytes": presentation.len(),

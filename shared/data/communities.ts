@@ -93,7 +93,7 @@ export const communities: Community[] = [
     color: '#1d4ed8',
     createdYear: 2025,
     gate: null,
-    nymHost: 'france.readdit.example',
+    nymHost: 'france.community.example',
     rules: [
       'One account per person, proven with your wallet. Your c/france pseudonym is not linked to other sites.',
       'Argue the point, not the person.',
@@ -102,7 +102,7 @@ export const communities: Community[] = [
   },
 ]
 
-/** DNS names Readdit signs requests for: its own and those of communities with their own pseudonym. */
+/** DNS names Community signs requests for: its own and those of communities with their own pseudonym. */
 export function verifierHosts(siteHost: string): string[] {
   return [siteHost, ...communities.flatMap((c) => (c.nymHost ? [c.nymHost] : []))]
 }

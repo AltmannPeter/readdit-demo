@@ -1,11 +1,17 @@
-//! Timing and peak memory of the heavy steps.
+//! Timing and memory of the heavy steps.
 //!
-//! Peak memory is the process's peak resident set size (VmHWM in `/proc/self/status`) during a
+//! Heap memory ([`Heap`]) is what this addon's own Rust code holds: the addon's counting allocator
+//! wraps the system allocator, so a step's figure is the most it held above what was held when it
+//! began. That is the step's own requirement, on every platform; Node, V8, the other addons and the
+//! keys or circuits loaded at start are not in it.
+//!
+//! Peak memory ([`Peak`]) is the process's peak resident set size (VmHWM in `/proc/self/status`) during a
 //! step, after resetting the peak with `5` in `/proc/self/clear_refs` (Linux 4.0 and later). The
 //! process is the site's server, so the figure includes Node and both sides' keys. Elsewhere the
 //! figure is unavailable and reported as absent. One heavy step runs at a time ([`exclusive`]),
-//! so a step's peak and time are its own.
+//! so no other heavy step runs while a step is measured.
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -38,4 +44,54 @@ impl Peak {
     let kb: f64 = line.split_whitespace().nth(1)?.parse().ok()?;
     Some((kb * 1.024).round() / 1e3)
   }
+}
+
+/// The heap this addon's Rust code holds, and its high-water mark, as the addon's counting
+/// allocator reports them (`node/src/alloc.rs`, the one place with the `unsafe` an allocator
+/// needs). Without that allocator (the crate's own tests) nothing is counted and the figures are
+/// absent.
+static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static HIGH: AtomicUsize = AtomicUsize::new(0);
+static COUNTING: AtomicBool = AtomicBool::new(false);
+
+/// The allocator handed out `n` more bytes.
+pub fn heap_grew(n: usize) {
+  COUNTING.store(true, Relaxed);
+  let now = CURRENT.fetch_add(n, Relaxed) + n;
+  HIGH.fetch_max(now, Relaxed);
+}
+
+/// The allocator took `n` bytes back.
+pub fn heap_shrank(n: usize) {
+  CURRENT.fetch_sub(n, Relaxed);
+}
+
+/// A heap measurement in progress: the bytes held when it began, and the high-water mark since.
+/// One heavy step runs at a time ([`exclusive`]), so the mark is the step's.
+pub struct Heap {
+  base: usize,
+}
+
+impl Heap {
+  /// Starts a measurement: the high-water mark is reset to what is held now.
+  pub fn start() -> Self {
+    let base = CURRENT.load(Relaxed);
+    HIGH.store(base, Relaxed);
+    Heap { base }
+  }
+
+  /// The bytes held when the measurement began.
+  pub fn base(&self) -> usize {
+    self.base
+  }
+
+  /// The most bytes held at once since [`Heap::start`].
+  pub fn high(&self) -> usize {
+    HIGH.load(Relaxed).max(self.base)
+  }
+}
+
+/// Bytes as MB (10^6 bytes), to 0.1 MB; absent when the heap is not counted.
+pub fn mb(bytes: usize) -> Option<f64> {
+  COUNTING.load(Relaxed).then(|| (bytes as f64 / 1e5).round() / 10.0)
 }

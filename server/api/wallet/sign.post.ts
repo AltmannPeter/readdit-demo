@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
     throw refusal(400, 'bad_request', proverMessage('bad_request'))
   }
 
-  // Session for the tech trace, if this request came from Readdit.
+  // Session for the tech trace, if this request came from Community.
   const sid = typeof request.state === 'string' ? store().byState.get(request.state) : undefined
   const s = sid ? store().sessions.get(sid) : undefined
 
@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
       {
         device_key,
         doc_type: NYM_DOCTYPE,
-        handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
+        handover: await handoverOf(request),
       },
       typeof system_id === 'string' ? system_id : undefined,
     )

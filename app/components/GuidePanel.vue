@@ -5,7 +5,7 @@ import { loadCredentials } from '~/wallet/holder'
 import type { GuideStep } from '~/guide/steps'
 import { STAGES, guideStep } from '~/guide/steps'
 
-// The presenter's guide, docked beside the product. It is not part of Readdit or the wallet: it
+// The presenter's guide, docked beside the product. It is not part of Community or the wallet: it
 // follows the flow state and says, for the current step, what the step is about
 // (app/guide/steps.ts).
 const guide = useGuidePanel()
@@ -200,8 +200,8 @@ watch(shownKey, () => (detailsOpen.value = false))
       </div>
 
       <footer class="flex shrink-0 gap-5 border-t border-white/10 px-5 py-3 text-xs">
-        <a href="/tech" target="readdit-tech" class="text-[#8b939e] hover:text-white">Technical view ↗</a>
-        <a href="/mod" target="readdit-mod" class="text-[#8b939e] hover:text-white">Moderation ↗</a>
+        <a href="/tech" target="community-tech" class="text-[#8b939e] hover:text-white">Technical view ↗</a>
+        <a href="/mod" target="community-mod" class="text-[#8b939e] hover:text-white">Moderation ↗</a>
       </footer>
     </template>
 

@@ -1,21 +1,10 @@
 <script setup lang="ts">
+// The home page's side card: the logged-in account. Logged out, nothing.
 const { account } = useAccount()
-const wallet = useWallet()
 </script>
 
 <template>
-  <div v-if="!account" class="card p-4">
-    <h2 class="font-semibold">Welcome to Readdit</h2>
-    <p class="mt-2 text-sm leading-relaxed text-muted">
-      Sign up with your EU Digital Identity Wallet. Your account uses a pseudonym that is valid only on Readdit, with no email address or password.
-    </p>
-    <div class="mt-4 grid gap-2">
-      <button class="btn-outline w-full" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
-      <button class="btn-primary w-full" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
-    </div>
-  </div>
-
-  <div v-else class="card p-4">
+  <div v-if="account" class="card p-4">
     <div class="flex items-center gap-3">
       <UserAvatar :seed="account.handle" size="lg" />
       <div class="min-w-0">

@@ -1,24 +1,56 @@
+import { compactDecrypt, decodeProtectedHeader } from 'jose'
 import { RETURN_AGE, RETURN_PSEUDONYM } from '#shared/utils/dcql'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
 import type { FailReason } from '../../../utils/store'
 
 /**
- * response_uri (direct_post). Form fields: vp_token (JSON) + state, or error + state.
+ * response_uri (direct_post.jwt). Form field `response`: a JWE (ECDH-ES, A128GCM) to the session's
+ * key, whose payload holds the response parameters: vp_token (a JSON object) and state, or error
+ * and state. An unencrypted error response (error + state as form fields) is accepted too, as
+ * OpenID4VP allows a wallet that cannot encrypt; an unencrypted vp_token is refused.
  * Verification runs here, with the request and session values from the site's own store.
  *
- * Refused before anything is processed: 404 unknown_session, 400 state_mismatch (checked first, so
- * a caller without the request's state learns nothing about the session), 410 expired or cancelled,
- * 400 not_requested (the request was never fetched) and 400 already_answered (a second response:
- * a replay). A response that was processed answers 200, whether the presentation was accepted or
- * refused; the refusal's rule goes to the server log and the session trace (/tech), not to the
- * caller. 503 unavailable when the verifier failed and nothing could be decided.
+ * Refused before anything is processed: 404 unknown_session, 400 invalid_response (not a JWE to
+ * this session's key, or a payload that is not a JSON object), 400 state_mismatch (checked first
+ * after decryption, so a caller without the request's state learns nothing about the session),
+ * 400 unencrypted, 410 expired or cancelled, 400 not_requested (the request was never fetched)
+ * and 400 already_answered (a second response: a replay). None of these changes the session. A
+ * response that was processed answers 200, whether the presentation was accepted or refused; the
+ * refusal's rule goes to the server log and the session trace (/tech), not to the caller.
+ * 503 unavailable when the verifier failed and nothing could be decided.
  */
 export default defineEventHandler(async (event) => {
   const s = getVpSession(getRouterParam(event, 'id')!)
   const raw = (await readRawBody(event, 'utf8')) ?? ''
-  const form = Object.fromEntries(new URLSearchParams(raw))
+  const posted = Object.fromEntries(new URLSearchParams(raw))
+
+  let form: Record<string, unknown>
+  let jwe: { header: Record<string, unknown>; bytes: number; decrypt_ms: number } | undefined
+  if (typeof posted.response === 'string') {
+    const t0 = performance.now()
+    try {
+      const header = decodeProtectedHeader(posted.response)
+      if (header.alg !== RESPONSE_ALG || header.enc !== RESPONSE_ENC) throw new Error(`alg ${String(header.alg)}, enc ${String(header.enc)}`)
+      if (header.kid !== undefined && header.kid !== s.responseKey.jwk.kid) throw new Error('kid is not the session key')
+      const { plaintext } = await compactDecrypt(posted.response, s.responseKey.privateKey, { keyManagementAlgorithms: [RESPONSE_ALG], contentEncryptionAlgorithms: [RESPONSE_ENC] })
+      const payload = JSON.parse(new TextDecoder().decode(plaintext)) as unknown
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('the payload is not a JSON object')
+      form = payload as Record<string, unknown>
+      jwe = { header: header as Record<string, unknown>, bytes: posted.response.length, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+    } catch (e) {
+      console.warn(`[vp] ${s.id}: refused a response that does not decrypt: ${(e as Error).message}`)
+      throw refusal(400, 'invalid_response', 'response is not a JWE to this session\'s key.')
+    }
+  } else {
+    form = posted
+  }
 
   if (form.state !== s.state) throw refusal(400, 'state_mismatch', 'state does not match this session.')
+  if (!jwe && form.error === undefined) {
+    console.warn(`[vp] ${s.id}: refused an unencrypted response`)
+    addTrace(s, 'refused', 'Unencrypted response refused', { code: 'unencrypted', bytes: raw.length })
+    throw refusal(400, 'unencrypted', 'The response must be encrypted (direct_post.jwt).')
+  }
   const ended = endedReason(s)
   if (ended) throw goneRefusal(ended)
   if (s.status === 'waiting' || !s.request) throw refusal(400, 'not_requested', 'This session is not waiting for a response.')
@@ -28,6 +60,10 @@ export default defineEventHandler(async (event) => {
     throw refusal(400, 'already_answered', 'This session has already received a response.')
   }
   s.status = 'responded'
+  if (jwe) {
+    s.response = { jwe: { header: jwe.header, bytes: jwe.bytes } }
+    addTrace(s, 'decrypt', 'Response decrypted', { header: jwe.header, bytes: jwe.bytes, decrypt_ms: jwe.decrypt_ms })
+  }
 
   const fail = (reason: FailReason, detail?: string) => {
     s.status = 'failed'
@@ -42,25 +78,22 @@ export default defineEventHandler(async (event) => {
     return fail('invalid', `${code}: ${reason}`)
   }
 
-  if (form.error) {
-    addTrace(s, 'response', 'Error response received', { error: form.error, bytes: raw.length })
-    return fail(form.error === 'access_denied' ? 'denied' : 'invalid_request', form.error)
+  if (form.error !== undefined) {
+    const error = String(form.error)
+    addTrace(s, 'response', 'Error response received', { error, encrypted: !!jwe, bytes: raw.length })
+    return fail(error === 'access_denied' ? 'denied' : 'invalid_request', error)
   }
 
-  let vpToken: unknown
-  try {
-    vpToken = JSON.parse(form.vp_token ?? '')
-  } catch {
-    addTrace(s, 'response', 'Presentation received', { bytes: raw.length, presentations: 0 })
-    return reject('vp_token', 'vp_token is not JSON')
-  }
+  const vpToken = form.vp_token
   // Exactly one of the request's credential queries is answered (credential_sets: one option).
   const token = vpToken && typeof vpToken === 'object' && !Array.isArray(vpToken) ? (vpToken as Record<string, unknown>) : {}
   const answeredIds = Object.keys(token)
   const query = answeredIds.length === 1 ? s.dcql.credentials.find((q) => q.id === answeredIds[0]) : undefined
   const list = query ? token[query.id] : undefined
+  if (query && Array.isArray(list) && typeof list[0] === 'string') s.response!.presentation = list[0]
   addTrace(s, 'response', 'Presentation received', {
     bytes: raw.length,
+    encrypted: true,
     ...(query && { query: query.id, format: query.meta.source_format }),
     presentations: Array.isArray(list) ? list.map((p) => (typeof p === 'string' ? p.length : 0)) : 0,
   })

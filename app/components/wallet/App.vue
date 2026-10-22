@@ -6,7 +6,8 @@ import type { CredentialView } from '~/wallet/holder'
 import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
 import { analyzeRequest, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
-import { TransportError, httpTransport } from '~/wallet/transport'
+import { TransportError, encryptResponse, httpTransport } from '~/wallet/transport'
+import { report } from '~/wallet/report'
 import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
 import { ProverError, prove, proveBbs, unlockAndSign } from '~/wallet/prover'
 import { findSystem } from '#shared/registry/circuits'
@@ -31,8 +32,10 @@ const props = withDefaults(
     /** The phone this wallet runs on: its credentials, its history, its selected card. */
     phone: PhoneDef
     transport?: WalletTransport
+    /** Start scanning the code on screen at once (the developer view's Simulate scan). */
+    autoScan?: boolean
   }>(),
-  { transport: () => httpTransport },
+  { transport: () => httpTransport, autoScan: false },
 )
 /** Close on the success screen: the person is done on the phone and goes back to the site. */
 const emit = defineEmits<{ finished: [] }>()
@@ -116,7 +119,9 @@ async function prepare(): Promise<boolean> {
     return false
   }
 }
-onMounted(prepare)
+onMounted(async () => {
+  if ((await prepare()) && props.autoScan && props.url && screen.value === 'home') startScan()
+})
 
 /** The systems this wallet can run for the source formats of the credentials on this phone. */
 function phoneSystems(): string[] {
@@ -130,8 +135,9 @@ function phoneSystems(): string[] {
 /** wallet_metadata: those systems and their proof systems, in zkp_req. */
 function walletMetadata(): WalletMetadata {
   const ids = phoneSystems()
-  if (!ids.length) return { vp_formats_supported: {} }
-  return { vp_formats_supported: { zkp_req: { proof_system_values: [...new Set(ids.map((id) => findSystem(id)!.proof_system))], system_id_values: ids } } }
+  const encryption = { authorization_encryption_alg_values_supported: ['ECDH-ES'], authorization_encryption_enc_values_supported: ['A128GCM', 'A256GCM'] }
+  if (!ids.length) return { vp_formats_supported: {}, ...encryption }
+  return { vp_formats_supported: { zkp_req: { proof_system_values: [...new Set(ids.map((id) => findSystem(id)!.proof_system))], system_id_values: ids } }, ...encryption }
 }
 
 function fail(e: WalletError, cause?: string) {
@@ -177,6 +183,11 @@ async function onScanned() {
     })
     request.value = verified.request
     verifierSubject.value = verified.signer.subject
+    await report(verified.request.state, 'authenticate', 'Verifier authenticated', {
+      client_id: verified.request.client_id,
+      certificate: verified.signer.subject,
+      checks: ['ES256 signature by the x5c leaf', 'dNSName SAN equals the client_id host', 'client_id matches the QR code'],
+    })
     // Every credential that fits one of the request's queries (format and document type or
     // schema) matches; the one selected on the home screen is used, else the first in the
     // request's order of preference, and the request screen offers the others ("Switch credential").
@@ -199,6 +210,15 @@ async function analyze() {
   view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { systemIds: [] })
   consent.value = view.value.satisfiable ? await consentFor(view.value, cred, verifierSubject.value) : null
   screen.value = view.value.satisfiable ? 'request' : 'unmet'
+  const v = view.value
+  await report(request.value!.state, 'match', v.satisfiable ? 'nym_auth attestation matched' : v.problem === 'age' ? 'Attestation does not meet the age range' : 'Request not supported', {
+    credential: cred.docType,
+    format: cred.format,
+    ...(v.query && { query: v.query.id }),
+    ...(v.system && { system_id: v.system.system_id, proof_system: v.system.proof_system }),
+    ...(v.reason && { reason: v.reason }),
+    response_mode: request.value!.response_mode,
+  })
 }
 
 /** "Switch credential": the request is checked again against the chosen credential, which the
@@ -210,10 +230,16 @@ async function choose(index: number) {
   await analyze()
 }
 
-/** Posts to response_uri; a refusal there ends on the matching error screen (410: Request Expired). */
+/** Encrypts the response (direct_post.jwt) and posts it to response_uri; a refusal there ends on
+ *  the matching error screen (410: Request Expired). */
 async function send(body: AuthorizationResponse): Promise<boolean> {
   try {
-    await props.transport.postResponse(request.value!.response_uri, body)
+    const req = request.value!
+    const encrypted = await encryptResponse(req, body)
+    if (encrypted) {
+      await report(req.state, 'encrypt', 'Response encrypted', { header: encrypted.header, bytes: encrypted.jwe.length, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
+    }
+    await props.transport.postResponse(req, body, encrypted)
     return true
   } catch (e) {
     if (e instanceof TransportError) fail(e.status === 410 ? ERRORS.expired : ERRORS.response, e.message)
@@ -229,6 +255,7 @@ async function send(body: AuthorizationResponse): Promise<boolean> {
 async function refuse(next: WalletScreen, at: 'request' | 'pin' | null = null) {
   const independent = view.value?.problem === 'unsupported' || view.value?.problem === 'no_circuit'
   const code = independent ? 'invalid_request' : 'access_denied'
+  if (at) await report(request.value!.state, 'decline', 'Holder declined', { at })
   if (!(await send({ state: request.value!.state, error: code }))) return
   sentError.value = code
   declinedAt.value = at
@@ -236,6 +263,7 @@ async function refuse(next: WalletScreen, at: 'request' | 'pin' | null = null) {
 }
 
 function toPin() {
+  void report(request.value?.state, 'consent', 'Holder approved', { fields: consent.value?.fields.map((f) => f.name) })
   screen.value = 'pin'
 }
 

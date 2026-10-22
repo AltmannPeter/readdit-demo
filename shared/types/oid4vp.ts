@@ -80,6 +80,9 @@ export interface VpFormats {
 /** `wallet_metadata` posted to request_uri when request_uri_method=post. */
 export interface WalletMetadata {
   vp_formats_supported: VpFormats
+  /** The response encryption the wallet supports (direct_post.jwt). */
+  authorization_encryption_alg_values_supported?: string[]
+  authorization_encryption_enc_values_supported?: string[]
 }
 
 /** Decoded payload of the Request Object fetched from `request_uri`. */
@@ -98,7 +101,22 @@ export interface RequestObject {
   client_metadata: {
     client_name?: string
     vp_formats_supported: VpFormats
+    /** direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
+    jwks?: { keys: EncryptionJwk[] }
+    /** Absent: A128GCM only (OpenID4VP 1.0). */
+    encrypted_response_enc_values_supported?: string[]
   }
+}
+
+/** A public key in client_metadata.jwks. */
+export interface EncryptionJwk {
+  kty: string
+  crv?: string
+  x?: string
+  y?: string
+  kid?: string
+  use?: string
+  alg?: string
 }
 
 /** Decoded `results`: pseudonyms as hex (CBOR bstr on the wire: 32 bytes for sha-256, 48 for
@@ -111,7 +129,8 @@ export type Results = Record<string, string | true>
  */
 export type VpToken = Record<string, string[]>
 
-/** Body posted to `response_uri` (form-encoded on the wire; vp_token as JSON). */
+/** The response parameters. direct_post.jwt: the payload of the JWE posted as `response`
+ *  (vp_token as a JSON object). Unencrypted direct_post: form fields, vp_token as JSON text. */
 export type AuthorizationResponse =
   | { state: string; vp_token: VpToken }
   | { state: string; error: 'access_denied' | 'invalid_request'; error_description?: string }

@@ -1,8 +1,8 @@
 // Builds the proof backends' Node addons (Rust) and copies each where the site's server loads it
 // (server/utils/services.ts):
-//   native/vega/node       -> native/vega/readdit-vega.node              (mso_mdoc: Vega)
-//   native/longfellow/node -> native/longfellow/readdit-longfellow.node  (mso_mdoc: Longfellow)
-//   native/bbs/node        -> native/bbs/readdit-bbs.node                (bbs_cd: BBS committed disclosures)
+//   native/vega/node       -> native/vega/community-vega.node              (mso_mdoc: Vega)
+//   native/longfellow/node -> native/longfellow/community-longfellow.node  (mso_mdoc: Longfellow)
+//   native/bbs/node        -> native/bbs/community-bbs.node                (bbs_cd: BBS committed disclosures)
 // Needs Rust (https://rustup.rs). Longfellow's target features (carry-less multiply) are in
 // native/longfellow/.cargo/config.toml.
 // Usage: npm run build:native [-- vega|longfellow|bbs]   (default: all three)
@@ -12,9 +12,9 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
 const ADDONS = {
-  vega: { dir: '../native/vega/', crate: 'readdit-vega-node', lib: 'readdit_vega_node', out: 'readdit-vega.node' },
-  longfellow: { dir: '../native/longfellow/', crate: 'readdit-longfellow-node', lib: 'readdit_longfellow_node', out: 'readdit-longfellow.node' },
-  bbs: { dir: '../native/bbs/', crate: 'readdit-bbs-node', lib: 'readdit_bbs_node', out: 'readdit-bbs.node' },
+  vega: { dir: '../native/vega/', crate: 'community-vega-node', lib: 'community_vega_node', out: 'community-vega.node' },
+  longfellow: { dir: '../native/longfellow/', crate: 'community-longfellow-node', lib: 'community_longfellow_node', out: 'community-longfellow.node' },
+  bbs: { dir: '../native/bbs/', crate: 'community-bbs-node', lib: 'community_bbs_node', out: 'community-bbs.node' },
 }
 const only = process.argv[2]
 if (only && !ADDONS[only]) {

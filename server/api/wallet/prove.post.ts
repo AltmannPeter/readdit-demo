@@ -36,7 +36,7 @@ export default defineEventHandler(async (event) => {
     throw refusal(400, 'bad_request', proverMessage('bad_request'))
   }
 
-  // Session for the tech trace, if this request came from Readdit.
+  // Session for the tech trace, if this request came from Community.
   const sid = typeof request.state === 'string' ? store().byState.get(request.state) : undefined
   const s = sid ? store().sessions.get(sid) : undefined
 
@@ -46,7 +46,7 @@ export default defineEventHandler(async (event) => {
       system_id,
       credential_query_id: query.id,
       request,
-      handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
+      handover: await handoverOf(request),
       credential: credential as WalletCredential,
       secret_seed,
       device_signature,
@@ -90,7 +90,7 @@ async function proveBbs(request: RequestObject, queryId: string | undefined, cre
     const result = await bbsProver.prove({
       request,
       credential_query_id: queryId,
-      handover: { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: null },
+      handover: await handoverOf(request),
       credential,
       device_key: deviceKey,
     })

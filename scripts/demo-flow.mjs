@@ -1,6 +1,6 @@
 // Runs the presentation order headlessly against the running site and saves a screenshot of each
 // step, in flow order, to ./demo-shots (or the directory given as the second argument). Every
-// screenshot is the browser viewport as the person sees it: Readdit, the phone in the wallet
+// screenshot is the browser viewport as the person sees it: Community, the phone in the wallet
 // dialog, and the guide panel.
 // Needs the site with its proof backend (npm run build:native, then npm run dev).
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
@@ -39,15 +39,27 @@ const watch = (p) => {
 }
 watch(page)
 
-// What the phone sends: the prover routes' statuses and what it posts to response_uri.
+// What the phone sends: the prover routes' statuses and what it posts to response_uri. The response
+// is a JWE; the phone's "Response encrypted" report, sent just before it, says what it holds.
 const net = []
+let lastEncrypted = 'vp_token'
+page.on('request', (r) => {
+  if (!r.url().includes('/api/wallet/trace')) return
+  try {
+    const b = r.postDataJSON()
+    if (b?.step === 'encrypt') lastEncrypted = b.data?.error ? `error=${b.data.error}` : 'vp_token'
+  } catch {
+    /* not JSON */
+  }
+})
 page.on('response', (r) => {
   const u = new URL(r.url())
   const req = r.request()
   if (u.pathname.startsWith('/api/wallet/sign') || u.pathname.startsWith('/api/wallet/prove')) net.push(`${u.pathname} ${r.status()}`)
   if (u.pathname.startsWith('/api/vp/response/')) {
     const form = new URLSearchParams(req.postData() ?? '')
-    net.push(`response_uri ${form.get('error') ? `error=${form.get('error')}` : 'vp_token'} ${r.status()}`)
+    const sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'unencrypted vp_token'
+    net.push(`response_uri ${sent} ${r.status()}`)
   }
 })
 
@@ -199,7 +211,7 @@ try {
   await shot('afterdark-not-completed')
 
   // 3b. Borrowing the adult's phone: swapped in at the QR code, it proves 18+, but its pseudonym
-  // is not the logged-in account's, so Readdit rejects the presentation.
+  // is not the logged-in account's, so Community rejects the presentation.
   step('3b. c/afterdark with the adult\'s phone')
   await page.getByRole('button', { name: 'Try again' }).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
@@ -247,7 +259,7 @@ try {
   await page.getByText("You can't enter").waitFor()
   await guide('age-refused')
   await openDetails()
-  await shot('afterdark-refused-by-readdit')
+  await shot('afterdark-refused-by-the-site')
 
   // 5b. c/france: its own pseudonym, one account per person, linked to the logged-in account.
   step('5b. c/france')
@@ -298,7 +310,7 @@ try {
   await mod.getByText('Banned', { exact: true }).first().waitFor()
 
   await page.bringToFront()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await guide('banned')
   await openDetails()
   await shot('user-banned')
@@ -326,7 +338,7 @@ try {
   await tech.getByRole('button', { name: /Age check, c\/teenspace/ }).click()
   await tech.getByText('Proof verified').first().waitFor()
 
-  // 9. BBS: the operator resets the demo and has Readdit accept only BBS (bbs_cd) in /tech. The
+  // 9. BBS: the operator resets the demo and has Community accept only BBS (bbs_cd) in /tech. The
   // teen's BBS phone answers: a new pseudonym and account (the same seed as the teen's mdoc, another
   // PRF), an age range with the date-range plugin, and c/afterdark refused by the site.
   step('9. BBS only')
@@ -367,7 +379,7 @@ try {
   await shot('bbs-age-granted')
   await phone.getByRole('button', { name: 'Close', exact: true }).click()
 
-  // 10. Longfellow: reset, and Readdit accepts only Longfellow, the other circuit over the mdoc. The
+  // 10. Longfellow: reset, and Community accepts only Longfellow, the other circuit over the mdoc. The
   // teen's phone answers with its mdoc, as for Vega: the same pseudonym function, so a new account
   // only because the demo was reset. c/afterdark first (refused by the wallet), then c/teenspace.
   step('10. Longfellow only')
@@ -435,6 +447,7 @@ const expect = [
   ["c/afterdark on the teen's phone: the wallet answers access_denied, with Vega and with Longfellow", count('response_uri error=access_denied 200') === 2],
   ["nine presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, with BBS sign-up and c/teenspace, and with Longfellow sign-up and c/teenspace", count('/api/wallet/prove 200') === 9],
   ['nine vp_token responses', count('response_uri vp_token 200') === 9],
+  ['every response encrypted (direct_post.jwt)', !net.some((l) => l.includes('unencrypted'))],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)

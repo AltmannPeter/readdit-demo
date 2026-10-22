@@ -2,7 +2,7 @@
 name = "bbs-issuer"
 version = "0.1.0"
 edition = "2021"
-description = "Issues Readdit's demo BBS credential (bbs_cd) and writes the issuer parameters"
+description = "Issues Community's demo BBS credential (bbs_cd) and writes the issuer parameters"
 publish = false
 
 [dependencies]

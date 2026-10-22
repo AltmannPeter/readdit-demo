@@ -4,6 +4,7 @@ import {
   NYM_BBS_SCHEMA,
   NYM_DOCTYPE,
   type DcqlQuery,
+  type EncryptionJwk,
   type ReqItem,
   type RequestObject,
   type SourceFormat,
@@ -74,13 +75,15 @@ export function buildRequestObject(o: {
   dcql: DcqlQuery
   formats: VpFormats
   walletNonce?: string
+  /** The session's response encryption key: direct_post.jwt with this key in client_metadata.jwks. */
+  encryptionJwk: EncryptionJwk
 }): RequestObject {
   return {
     aud: 'https://self-issued.me/v2',
     iat: Math.floor(Date.now() / 1000),
     ...(o.walletNonce && { wallet_nonce: o.walletNonce }),
     response_type: 'vp_token',
-    response_mode: 'direct_post',
+    response_mode: 'direct_post.jwt',
     response_uri: responseUriFor(o.origin, o.sessionId),
     client_id: clientIdFor(o.host),
     nonce: o.nonce,
@@ -89,6 +92,7 @@ export function buildRequestObject(o: {
     client_metadata: {
       client_name: o.siteName,
       vp_formats_supported: o.formats,
+      jwks: { keys: [o.encryptionJwk] },
     },
   }
 }

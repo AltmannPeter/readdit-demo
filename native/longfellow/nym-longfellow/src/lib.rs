@@ -1,5 +1,5 @@
 //! Prover and verifier of the nym_auth statement (age range and the `pseudonym` function with `prf` `sha-256`,
-//! configuration `known-offender-matching-ssc`) with Longfellow, as the Readdit demo runs them.
+//! configuration `known-offender-matching-ssc`) with Longfellow, as the Community demo runs them.
 //!
 //! The circuits are the nym-auth-circuits archive's LFC2 pair for mdoc (`circuits/mdoc`), run on
 //! Google's longfellow-zk Rust runtime, vendored unchanged. The witness follows SPEC.md L3 to L5
@@ -24,7 +24,7 @@
 //! | [`verifier`] | Verification of a presentation against the verifier's own values |
 //!
 //! The SessionTranscript differs from the archive's fixtures, which use the Digital Credentials
-//! API handover (`OpenID4VPDCAPIHandover`). Readdit's wallet is invoked by a QR code, so B.2.6.1
+//! API handover (`OpenID4VPDCAPIHandover`). Community's wallet is invoked by a QR code, so B.2.6.1
 //! applies. The circuits do not see the transcript: they take e2, its digest under
 //! DeviceAuthentication, as a public input, and the transcript seeds Fiat–Shamir on both sides.
 //!

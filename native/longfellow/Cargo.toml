@@ -1,4 +1,4 @@
-# Readdit's Longfellow backend: the nym_auth Longfellow circuits of the nym-auth-circuits archive on
+# Community's Longfellow backend: the nym_auth Longfellow circuits of the nym-auth-circuits archive on
 # Google's longfellow-zk Rust runtime, compiled into a Node addon that the site's server calls in
 # process. It proves the same statement over the same mdoc credential as native/vega.
 #

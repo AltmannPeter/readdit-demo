@@ -1,6 +1,10 @@
 <script setup lang="ts">
 const { account, refresh } = useAccount()
 const guide = useGuidePanel()
+// The view switch's way back from /dev.
+const route = useRoute()
+const lastSitePath = useState('last-site-path', () => '/')
+watch(() => route.fullPath, (p) => (lastSitePath.value = p), { immediate: true })
 
 // Pick up moderator actions (bans) while someone is logged in.
 let timer: ReturnType<typeof setInterval> | undefined

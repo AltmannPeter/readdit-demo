@@ -39,7 +39,7 @@ export const STAGES = ['QR', 'Scan', 'Consent', 'PIN', 'Proof', 'Result'] as con
 export interface GuideStep {
   /** Stable id of the step (data-guide-step). */
   id: string
-  /** What the step belongs to: "Sign-up", "Age check · c/teenspace", "Readdit"… */
+  /** What the step belongs to: "Sign-up", "Age check · c/teenspace", "Community"… */
   context: string
   title: string
   summary: string
@@ -195,6 +195,8 @@ function verificationSection(v: VerificationMetrics | null | undefined, site: st
   return { heading: 'Verification', rows }
 }
 
+const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.jwt) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
+
 function checksSection(view: RequestView | null | undefined, site: string): GuideSection | null {
   if (view?.scheme) return schemeChecksSection(view.scheme, site)
   const circuit: CircuitEntry | undefined = view?.circuit
@@ -204,13 +206,13 @@ function checksSection(view: RequestView | null | undefined, site: string): Guid
     code: true,
     value: `${p.source === 'presentation' ? 'From the presentation' : `Computed by ${site}`}: ${p.derivation}`,
   }))
-  const items = circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : []
+  const items = [ENCRYPTED_NOTE, ...(circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : [])]
   if (circuit.proof_system === 'longfellow-libzk-v1') {
     items.push(
       'Two circuits: the hash circuit (GF(2^128)) reads the credential, the dates and the pseudonym; the signature circuit (P-256) checks the issuer and device signatures. The MAC tags tie the two to the same message and device key.',
     )
   }
-  return { heading: `What ${site} checks`, rows, items: items.length ? items : undefined, stacked: true }
+  return { heading: `What ${site} checks`, rows, items, stacked: true }
 }
 
 /** bbs_cd: what the BBS verifier derives itself, and what each plugin proves (the registry entry). */
@@ -222,7 +224,7 @@ function schemeChecksSection(scheme: SchemeEntry, site: string): GuideSection {
       { label: 'BBS proof', code: true, value: 'The signed credential behind the commitments, under the issuer key; nothing disclosed' },
       ...scheme.plugins.map((p) => ({ label: p.id, code: true, value: `On ${p.attribute}: ${p.proves}` })),
     ],
-    items: ['Every plugin proof is bound to the request and to the BBS proof\'s commitments, so none can be moved to another presentation. The credential has no expiry for the proof to check.'],
+    items: [ENCRYPTED_NOTE, 'Every plugin proof is bound to the request and to the BBS proof\'s commitments, so none can be moved to another presentation. The credential has no expiry for the proof to check.'],
     stacked: true,
   }
 }
@@ -304,7 +306,7 @@ function lastContext(p: WalletPurpose): string {
   return p.intent === 'login' ? 'Log-in' : 'Sign-up'
 }
 
-/** The verifier identity of a request: Readdit's, or a community's own (Community.nymHost). */
+/** The verifier identity of a request: Community's, or a community's own (Community.nymHost). */
 function hostOf(i: GuideInput): string {
   return i.wallet.consent?.verifier.host ?? (i.page.kind === 'community' && i.dialog.purpose?.kind === 'community' ? (i.page.community.nymHost ?? i.siteHost) : i.siteHost)
 }
@@ -379,7 +381,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 3,
             title: 'Cancelled at the PIN',
             summary: 'The person cancelled at the PIN screen. The device key did not sign, no proof was made, and the wallet answers access_denied, as for a declined request.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
           }
         : {
             id: 'declined',
@@ -387,7 +389,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 2,
             title: 'Declined',
             summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
           }
     case 'error':
       return walletErrorStep(i, context)
@@ -514,7 +516,7 @@ function consentStep(i: GuideInput, context: string): GuideStep {
   const signinAge = !!c?.age && i.dialog.purpose?.kind === 'signin'
   let summary: string
   if (i.dialog.purpose?.kind === 'community') {
-    summary = `${communityName(i.dialog.purpose.community)} asks for a pseudonym for ${host}, its own name. The wallet derives it from the same secret seed as for ${i.siteHost}, but the different verifier_id gives a pseudonym that cannot be linked to the Readdit one.`
+    summary = `${communityName(i.dialog.purpose.community)} asks for a pseudonym for ${host}, its own name. The wallet derives it from the same secret seed as for ${i.siteHost}, but the different verifier_id gives a pseudonym that cannot be linked to the Community one.`
   } else if (signinAge) {
     summary = `${i.siteName} asks for a pseudonym and proof that the holder is ${c!.age!.text}, in one presentation. The pseudonym logs in to the account, or creates it; the birth date stays on the phone.`
   } else if (c?.age) {
@@ -650,7 +652,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
       title: kind === 'created' ? `Joined ${name}` : `Back in ${name}`,
       summary:
         (kind === 'created'
-          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is for ${host} only; nothing in it connects to the person's Readdit pseudonym.`
+          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is for ${host} only; nothing in it connects to the person's Community pseudonym.`
           : `The pseudonym for ${host} belongs to an existing ${name} account, u/${handle}.`) + linkNote,
       details: [
         {
@@ -658,7 +660,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
           rows: [
             { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
             { label: 'Handle', value: `u/${handle}` },
-            { label: 'Linked to a Readdit account', value: done.linked || i.membership?.linked ? 'Yes, by the person logging in to both' : 'No' },
+            { label: 'Linked to a Community account', value: done.linked || i.membership?.linked ? 'Yes, by the person logging in to both' : 'No' },
           ],
           stacked: true,
         },
@@ -742,7 +744,7 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         ...base,
         id: 'community-linked-elsewhere',
         title: 'Linked to another account',
-        summary: `This wallet's ${name} account is already linked to another Readdit account. ${i.siteName} links each ${name} account to one Readdit account at most.`,
+        summary: `This wallet's ${name} account is already linked to another Community account. ${i.siteName} links each ${name} account to one Community account at most.`,
         details: [],
       }
     }
@@ -779,7 +781,7 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         ...base,
         id: 'none-accepted',
         title: 'No proof system accepted',
-        summary: `${i.siteName} accepts none of its proof systems, so it has nothing to ask a wallet for and shows no QR code. The demo starts this way. Tick Vega, Longfellow or BBS under "Readdit accepts" in the technical view, then try again.`,
+        summary: `${i.siteName} accepts none of its proof systems, so it has nothing to ask a wallet for and shows no QR code. The demo starts this way. Tick Vega, Longfellow or BBS under "Community accepts" in the technical view, then try again.`,
         details: [],
       }
     case 'expired':
@@ -1047,7 +1049,7 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
   }
 }
 
-/** A community with its own pseudonym (Community.nymHost): one account per person, unlinkable to Readdit's. */
+/** A community with its own pseudonym (Community.nymHost): one account per person, unlinkable to Community's. */
 function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
   const name = communityName(c)
   const host = c.nymHost!
@@ -1055,14 +1057,14 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
     heading: 'Own pseudonym',
     rows: [
       { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
-      { label: "Readdit's", value: `x509_san_dns:${i.siteHost}`, mono: true },
+      { label: "Community's", value: `x509_san_dns:${i.siteHost}`, mono: true },
       { label: 'Pseudonym', value: 'pseudonym, known-offender-matching-ssc', mono: true },
     ],
     items: [
-      `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Readdit account, if any, a ${name} account belongs to, unless the person chooses to link them.`,
+      `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Community account, if any, a ${name} account belongs to, unless the person chooses to link them.`,
       `Known-offender matching still holds for ${host}: one wallet, one ${name} account, and a ban sticks.`,
-      `A ban of the Readdit account also bans the ${name} account linked to it; a ban in ${name} leaves the Readdit account alone.`,
-      `Linking moves no age: age checks always use the logged-in Readdit account's own proven range, so a ${name} account from another phone opens nothing else.`,
+      `A ban of the Community account also bans the ${name} account linked to it; a ban in ${name} leaves the Community account alone.`,
+      `Linking moves no age: age checks always use the logged-in Community account's own proven range, so a ${name} account from another phone opens nothing else.`,
       'The issuer can still link the pseudonym to the person, because it knows the secret seed. A private seed (psc) would prevent that; it needs a new circuit.',
     ],
     stacked: true,
@@ -1070,8 +1072,8 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
   const m = i.membership
   if (i.access === 'member-banned' && m) {
     return { id: 'community-banned', context: name, title: 'Account banned', summary: m.bannedWith
-        ? `A moderator banned the Readdit account u/${m.bannedWith}, and with it u/${m.handle}, the ${name} account linked to it. Unbanning u/${m.bannedWith} lifts both.`
-        : `A moderator banned u/${m.handle} in ${name}. The ban is stored against the ${name} pseudonym; the person's Readdit account is not affected.`, details: [identity] }
+        ? `A moderator banned the Community account u/${m.bannedWith}, and with it u/${m.handle}, the ${name} account linked to it. Unbanning u/${m.bannedWith} lifts both.`
+        : `A moderator banned u/${m.handle} in ${name}. The ban is stored against the ${name} pseudonym; the person's Community account is not affected.`, details: [identity] }
   }
   if (i.access === 'join' || !m) {
     return {
@@ -1081,7 +1083,7 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
       summary: `${name} wants proof of a real person and no bots. It asks the wallet for a pseudonym for ${host}, its own name, so a person gets one ${name} account, not linked to their other accounts unless they choose to.${
         i.account
           ? ` Logged in as u/${i.account.handle}, the person chooses: join and link the two, or log out and join separately.`
-          : ' No Readdit account is needed.'
+          : ' No Community account is needed.'
       }`,
       details: [identity],
     }

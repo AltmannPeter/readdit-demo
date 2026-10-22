@@ -54,7 +54,7 @@ const VEGA_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'E = req params as sent; 0000-00-00 when absent' },
   { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'C = req params as sent; 9999-12-31 when absent' },
   { name: 'proof_time', source: 'presentation', values: 1, derivation: 'T, checked against the verifier clock within tolerance' },
-  { name: 'session_transcript', source: 'verifier', values: 2, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure), SessionTranscript [null, null, OpenID4VPHandover] from client_id, nonce, jwk_thumbprint (null), response_uri' },
+  { name: 'session_transcript', source: 'verifier', values: 2, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure), SessionTranscript [null, null, OpenID4VPHandover] from client_id, nonce, jwk_thumbprint (the thumbprint of the response encryption key), response_uri' },
   { name: 'doctype', source: 'verifier', values: 3, derivation: 'pattern of the docType eu.europa.ec.eudi.nym_auth.1' },
   { name: 'birth_date.identifier', source: 'verifier', values: 3, derivation: 'pattern of the element identifier birth_date' },
   { name: 'pseudonym.verifier_input', source: 'verifier', values: 3, derivation: 'SHA-256(verifier_id); the trust framework fixes the x509_san_dns form, so verifier_id = client_id' },
@@ -158,7 +158,7 @@ export const SCHEME_REGISTRY: SchemeEntry[] = [
     },
     issuer_key_set: 'bbs-issuer-pk',
     statement: [
-      { name: 'audience', derivation: 'SHA-256(OpenID4VPHandoverInfo): client_id, nonce, jwk_thumbprint (null), response_uri' },
+      { name: 'audience', derivation: 'SHA-256(OpenID4VPHandoverInfo): client_id, nonce, jwk_thumbprint (the thumbprint of the response encryption key), response_uri' },
       { name: 'nonce', derivation: 'the request nonce' },
       { name: 'credential', derivation: "the issuer's BBS public key and the schema digest, nothing disclosed" },
       { name: 'pseudonym.verifier_input', derivation: 'UTF-8(verifier_id), verifier_id = client_id (x509_san_dns form)' },

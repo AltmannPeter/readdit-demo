@@ -3,7 +3,7 @@ import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import type { ModAccountRow } from '~/components/ModAccount.vue'
 
 definePageMeta({ layout: false })
-useHead({ title: 'Moderation · Readdit' })
+useHead({ title: 'Moderation · Community' })
 
 interface Overview {
   accounts: ModAccountRow[]
@@ -12,7 +12,7 @@ interface Overview {
 
 const data = ref<Overview>({ accounts: [], comments: [] })
 const confirmReset = ref(false)
-/** Readdit accounts with their linked community accounts under them; unlinked community accounts on their own. */
+/** Community accounts with their linked community accounts under them; unlinked community accounts on their own. */
 const groups = computed(() => {
   const mains = new Set(data.value.accounts.filter((a) => !a.community).map((a) => a.handle))
   const nested = (a: ModAccountRow) => !!a.community && !!a.linkedTo && mains.has(a.linkedTo)
@@ -60,7 +60,7 @@ const time = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-d
     <header class="border-b border-line bg-surface">
       <div class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-6">
         <AppLogo class="size-7" />
-        <span class="font-bold">readdit</span>
+        <span class="font-bold">community</span>
         <span class="text-muted">·</span>
         <span class="font-semibold">Moderation</span>
         <button class="ml-auto text-xs font-semibold text-muted hover:text-adult" @click="reset">

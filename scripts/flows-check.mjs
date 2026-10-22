@@ -18,11 +18,11 @@
 //
 // The server is started for this run with two settings; the run checks them first:
 //   NUXT_VP_SESSION_TTL_S=40        requests expire after 40 s, so the expiry paths take a minute
-//   READDIT_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
+//   COMMUNITY_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
 // and a scratch measurements file, since every verified presentation of the run is measured and
 // group P clears it (NUXT_MEASUREMENTS_FILE; the default is the demo's own .data/measurements.jsonl).
 // For example:
-//   NUXT_MEASUREMENTS_FILE=/tmp/readdit-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 \
+//   NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
 //     node .output/server/index.mjs > /tmp/server.log 2>&1 &
 //   node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log \
 //     [--startup .output/server/index.mjs] [--shots demo-shots]
@@ -39,6 +39,7 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, request as httpRequest } from 'playwright'
+import { CompactEncrypt, importJWK } from 'jose'
 
 const argv = process.argv.slice(2)
 const opt = (name) => {
@@ -48,7 +49,7 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
-// --only K,M: run only these groups that need no earlier state (E F H I J K L M P G), after the preconditions.
+// --only K,M: run only these groups that need no earlier state (E F H I J K L M P V G), after the preconditions.
 const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
@@ -143,7 +144,26 @@ const accept = async (proofSystem, yes) => {
   await ctx.dispose()
   return r
 }
-const respond = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
+/** direct_post.jwt, as the wallet does it: the form's parameters as the payload of a JWE to the
+ *  request's key (vp_token as a JSON object, when it parses). `to`: the request whose key to use. */
+async function encryptForm(request, form, to = request) {
+  const jwk = to.client_metadata.jwks.keys[0]
+  const payload = { state: form.state }
+  if (form.error !== undefined) payload.error = form.error
+  if (form.vp_token !== undefined) {
+    try {
+      payload.vp_token = JSON.parse(form.vp_token)
+    } catch {
+      payload.vp_token = form.vp_token
+    }
+  }
+  const key = await importJWK(jwk, jwk.alg)
+  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(payload))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
+  return { response: jwe }
+}
+const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, form) })
+/** Unencrypted direct_post form fields. */
+const respondPlain = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
 const vpForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [request.dcql_query.credentials[0].id]: [presentation] }) })
 const poll = (ctx, id) => call(ctx, 'GET', `/api/vp/session/${id}`)
 const complete = (ctx, id) => call(ctx, 'POST', `/api/vp/session/${id}/complete`)
@@ -234,6 +254,7 @@ const consoleErrors = []
 const allowedSeen = new Set()
 /** Sign calls the server refused with 401 over the whole run: none, since any PIN unlocks. */
 let signRefused = 0
+let lastEncrypted = 'vp_token'
 let ctxBrowser
 let page
 let net = []
@@ -259,6 +280,17 @@ async function openPage() {
     else consoleErrors.push(`[${flow}] ${m.text()} at ${path || m.location().url}`)
   })
   page.on('pageerror', (e) => consoleErrors.push(`[${flow}] page error: ${e.message}`))
+  // The response is a JWE; the phone's "Response encrypted" report, sent just before it, says
+  // whether it holds a vp_token or an error.
+  page.on('request', (r) => {
+    if (!r.url().includes('/api/wallet/trace')) return
+    try {
+      const b = r.postDataJSON()
+      if (b?.step === 'encrypt') lastEncrypted = b.data?.error ? `error=${b.data.error}` : 'vp_token'
+    } catch {
+      /* not JSON */
+    }
+  })
   page.on('response', async (r) => {
     const u = new URL(r.url())
     if (!u.pathname.startsWith('/api/')) return
@@ -266,7 +298,8 @@ async function openPage() {
     if (entry.path === '/api/wallet/sign' && entry.status === 401) signRefused++
     if (u.pathname.startsWith('/api/vp/response/')) {
       const form = new URLSearchParams(r.request().postData() ?? '')
-      entry.sent = form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.encrypted = !!form.get('response')
     }
     net.push(entry)
     if (entry.method === 'POST' && entry.path === '/api/vp/session' && entry.status === 200) {
@@ -454,10 +487,10 @@ function startServer(env, until) {
 
 async function startupWithoutAddon() {
   begin('S16', 'the server refuses to start without any proof backend')
-  const none = { NUXT_VEGA_ADDON: '/nonexistent/readdit-vega.node', NUXT_LONGFELLOW_ADDON: '/nonexistent/readdit-longfellow.node', NUXT_BBS_ADDON: '/nonexistent/readdit-bbs.node' }
+  const none = { NUXT_VEGA_ADDON: '/nonexistent/community-vega.node', NUXT_LONGFELLOW_ADDON: '/nonexistent/community-longfellow.node', NUXT_BBS_ADDON: '/nonexistent/community-bbs.node' }
   let r = await startServer(none)
   eq('exit code', r.code, 1)
-  check('says why and what to run', r.out.includes('Readdit cannot start without a proof backend') && r.out.includes('npm run build:native'), r.out.trim().split('\n').slice(-2).join(' | '))
+  check('says why and what to run', r.out.includes('Community cannot start without a proof backend') && r.out.includes('npm run build:native'), r.out.trim().split('\n').slice(-2).join(' | '))
   begin('S16b', 'the server starts with one backend')
   for (const [name, env] of [['vega', 'NUXT_VEGA_ADDON'], ['longfellow', 'NUXT_LONGFELLOW_ADDON'], ['bbs', 'NUXT_BBS_ADDON']]) {
     const only = { ...none }
@@ -479,7 +512,7 @@ async function preconditions() {
   await ctx.dispose()
   const ok = [
     check('requests expire within a minute (NUXT_VP_SESSION_TTL_S)', s.expiresIn <= 60, `expiresIn ${s.expiresIn}`),
-    check('the test fault hook is on (READDIT_TEST_FAULTS=1)', fault.status === 400, answer(fault)),
+    check('the test fault hook is on (COMMUNITY_TEST_FAULTS=1)', fault.status === 400, answer(fault)),
   ]
   if (ok.includes(false)) throw new Error('start the server as the header of scripts/flows-check.mjs says')
   return s.expiresIn
@@ -505,7 +538,7 @@ async function groupA() {
   await goto('/')
   m = mark()
   await open(page.getByRole('main').getByRole('button', { name: 'Log in', exact: true }))
-  await visible('dialog: "Log in to Readdit"', site().getByRole('heading', { name: 'Log in to Readdit' }))
+  await visible('dialog: "Log in to Community"', site().getByRole('heading', { name: 'Log in to Community' }))
   await guideIs('signin-qr')
   await guideSays('Log-in')
   const voteSession = await newSessionId(undefined)
@@ -519,7 +552,7 @@ async function groupA() {
   m = mark()
   await goto('/c/teenspace')
   await pageShows('c/teenspace is for ages 13 to 17')
-  await pageShows('The same step logs you in to Readdit with a pseudonym.')
+  await pageShows('The same step logs you in to Community with a pseudonym.')
   check('no "Log in to view"', !(await page.getByText(/Log in to view/).count()))
   check('one button: Verify age with wallet', (await page.getByRole('button', { name: 'Verify age with wallet' }).count()) === 1)
   await guideIs('age-signin')
@@ -540,7 +573,7 @@ async function groupA() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('No account', 30_000)
-  await dialogShows('There is no Readdit account for this wallet. Sign up to create one.')
+  await dialogShows('There is no Community account for this wallet. Sign up to create one.')
   await phoneShows('Success!')
   await guideIs('no-account')
   check('the presentation was verified (vp_token 200)', has(m, 'POST', '/api/vp/response/:id', 200, 'vp_token'))
@@ -563,7 +596,7 @@ async function groupA() {
   await phoneShows('Sharing Cancelled')
   await phoneShows('You cancelled sharing your credentials.')
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('declined')
   check('the wallet answered access_denied (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=access_denied'))
   check('no native step ran', count(m, 'POST', '/api/wallet/sign') === 0 && count(m, 'POST', '/api/wallet/prove') === 0)
@@ -597,7 +630,7 @@ async function groupA() {
   await phone().getByRole('button', { name: 'Cancel' }).click()
   await phoneShows('Sharing Cancelled')
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('pin-cancelled')
   check('the wallet answered access_denied (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=access_denied'))
   check('the device key did not sign', count(m, 'POST', '/api/wallet/sign') === 0)
@@ -829,7 +862,7 @@ async function groupC(created) {
   await mod.getByRole('button', { name: 'Ban user' }).first().click()
   await mod.getByText('Banned', { exact: true }).first().waitFor()
   await page.bringToFront()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await guideIs('banned')
   check('the login ended', (await me()).account === null)
   const comments = (await call(page.request, 'GET', '/api/comments?postId=p10')).body
@@ -924,7 +957,7 @@ async function groupD(ttl) {
   await readRequest()
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: (await accounts())[0].pseudonym } })
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Account banned', 30_000)
@@ -1049,7 +1082,7 @@ async function groupE() {
   await shot('21-unsupported-request')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('not-completed')
   await guideSays('invalid_request')
   check('the wallet answered invalid_request (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=invalid_request'))
@@ -1058,8 +1091,8 @@ async function groupE() {
   await page.unroute('**/api/wallet/capabilities')
 
   // A verifier at the same host asking for a pseudonym configuration the wallet does not support:
-  // the real request, changed and signed again by a certificate for readdit.example.
-  const signer = await testSigner('readdit.example')
+  // the real request, changed and signed again by a certificate for community.example.
+  const signer = await testSigner('community.example')
   const variants = [
     ['pseudonym ver 2', (r) => ({ ...r, params: { ...r.params, ver: 2 } }), 'pseudonym ver 2: the rulebook defines 1'],
     ['the BBS prf over the mdoc', (r) => ({ ...r, params: { ...r.params, prf: 'hashdh-bls12381g1' } }), 'prf hashdh-bls12381g1 is not defined for mso_mdoc'],
@@ -1117,7 +1150,7 @@ async function groupE() {
   const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   const request = await fetchRequest(ctx, s)
   const q = request.dcql_query.credentials[0]
-  q._req[0].params = { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256', verifier_context: 'readdit' }
+  q._req[0].params = { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256', verifier_context: 'community' }
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
     data: { request, system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) },
   })
@@ -1191,6 +1224,22 @@ async function groupF() {
   expectAnswer('response_uri: no body', await call(ctx, 'POST', request.response_uri), 400, 'state_mismatch')
   expectAnswer('response_uri: JSON instead of a form', await call(ctx, 'POST', request.response_uri, { data: { state: request.state } }), 400, 'state_mismatch')
   expectAnswer('complete before an answer', await complete(ctx, s.id), 409, 'not_verified')
+  begin('S21', 'an unencrypted or undecryptable response (direct_post.jwt)')
+  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.jwt', 1, 'ECDH-ES'])
+  {
+    const p0 = await present(ctx, request, teen)
+    expectAnswer('response_uri: an unencrypted vp_token', await respondPlain(ctx, request, vpForm(request, p0.presentation)), 400, 'unencrypted')
+    expectAnswer('response_uri: response is not a JWE', await respondPlain(ctx, request, { response: 'not.a.jwe' }), 400, 'invalid_response')
+    const o = await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'signup' }))
+    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, vpForm(request, p0.presentation), o) }), 400, 'invalid_response')
+    eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
+    check('the server log names the unencrypted response', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused an unencrypted response`))
+    const d = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const rd = await fetchRequest(ctx, d)
+    expectAnswer('response_uri: an unencrypted error response is accepted', await respondPlain(ctx, rd, { state: rd.state, error: 'access_denied' }), 200)
+    eq('it ends the session as declined', (await sessionView(d.id)).outcome?.reason, 'denied')
+  }
+  begin('S14', 'malformed bodies at each route (continued)')
   expectAnswer('response_uri: vp_token null', await respond(ctx, request, { state: request.state, vp_token: 'null' }), 200)
   const nullView = await sessionView(s.id)
   eq('response_uri: vp_token null is refused, not a crash', [nullView.status, rejectedTrace(nullView)?.code], ['failed', 'vp_token'])
@@ -1382,7 +1431,7 @@ async function groupI() {
   await guideIs('unmet')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('not-completed')
   await guideSays('No account was created or logged in, and c/afterdark stays closed')
   check('access_denied, once', since(m).filter((e) => e.path === '/api/vp/response/:id' && e.sent === 'error=access_denied').length === 1)
@@ -1441,7 +1490,7 @@ async function groupI() {
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: account.pseudonym } })
   await ctx.dispose()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await goto('/c/teenspace')
   await guideIs('age-signin')
@@ -1583,7 +1632,7 @@ async function groupJ() {
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: adultAccount.pseudonym } })
   await ctx.dispose()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await goto('/')
   await signIn('Log in', `Logged in as u/${teenAccount.handle}`, TEEN)
@@ -1633,20 +1682,20 @@ async function groupK() {
   await resetDemo()
   await openPage()
 
-  begin('K1', 'c/france logged out: join with its own pseudonym, without a Readdit account')
+  begin('K1', 'c/france logged out: join with its own pseudonym, without a Community account')
   await goto('/c/france')
   await pageShows('c/france asks for proof of human')
   await guideIs('community-join')
-  await guideSays('No Readdit account is needed')
+  await guideSays('No Community account is needed')
   check('no c/france posts before joining', !(await page.locator('a[href^="/c/france/p"]').count()))
   let m = mark()
   await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
   await guideIs('community-qr')
-  await guideSays('x509_san_dns:france.readdit.example')
+  await guideSays('x509_san_dns:france.community.example')
   await scan()
   await readRequest()
-  await phoneShows('france.readdit.example')
-  await phoneShows('Specific to france.readdit.example')
+  await phoneShows('france.community.example')
+  await phoneShows('Specific to france.community.example')
   await guideIs('community-consent')
   await shot('31-france-consent')
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1660,7 +1709,7 @@ async function groupK() {
   await closeFromPhone()
   check('c/france posts shown', (await page.locator('a[href^="/c/france/p"]').count()) > 0)
   await guideIs('community-member')
-  check('no Readdit account', (await me()).account === null)
+  check('no Community account', (await me()).account === null)
   const frTeen = (await me()).communities.france
   eq('the c/france account', frTeen?.handle, done.handle)
   await visible('header: the c/france account', page.getByRole('banner').getByText(`u/${frTeen.handle}`))
@@ -1678,7 +1727,7 @@ async function groupK() {
   check('stored as a c/france account, not linked', frRecord?.community === 'france' && frRecord.linkedTo === null, JSON.stringify(frRecord))
   expectAnswer('server: a comment in c/france without a c/france account', await call(await client(), 'POST', '/api/comments', { data: { postId: 'p22', body: 'hi' } }), 403, 'registration_required')
 
-  begin('K3', 'logged in to Readdit, joining c/france is a choice: link, or log out first')
+  begin('K3', 'logged in to Community, joining c/france is a choice: link, or log out first')
   await goto('/')
   // The home page's Sign up: the header shows the c/france account instead of the buttons.
   await open(page.getByRole('main').getByRole('button', { name: 'Sign up', exact: true }), TEEN)
@@ -1690,7 +1739,7 @@ async function groupK() {
   await closeFromPhone()
   const teenMain = (await me()).account
   check('logged in: no c/france membership until linked', !(await me()).communities.france)
-  check('the Readdit pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
+  check('the Community pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
   await goto('/c/france')
   await guideIs('community-join')
   await guideSays('join and link the two, or log out and join separately')
@@ -1705,7 +1754,7 @@ async function groupK() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows(`In c/france as u/${frTeen.handle}`, 30_000)
-  await dialogShows('Linked to your Readdit account.')
+  await dialogShows('Linked to your Community account.')
   await guideIs('community-linked')
   done = (await complete(page.request, lastSession())).body
   check('server: logged in and linked', done.ok === true && done.kind === 'logged_in' && done.linked === true, JSON.stringify(done))
@@ -1713,51 +1762,51 @@ async function groupK() {
   check('linked', (await me()).communities.france?.linked === true)
   await guideIs('community-member')
 
-  begin('K4', 'one c/france account per Readdit account, one Readdit account per c/france account')
+  begin('K4', 'one c/france account per Community account, one Community account per c/france account')
   const ctx = await client()
   {
-    // Log in with the teen's Readdit account, linked in K3.
+    // Log in with the teen's Community account, linked in K3.
     const s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
     const request = await fetchRequest(ctx, s)
     const p = await present(ctx, request, teen)
     await respond(ctx, request, vpForm(request, p.presentation))
-    eq("the teen's Readdit account logs in", (await complete(ctx, s.id)).body.kind, 'logged_in')
+    eq("the teen's Community account logs in", (await complete(ctx, s.id)).body.kind, 'logged_in')
   }
   expectAnswer('server: logged in, a join must choose to link', await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'france' } }), 400, 'link_required')
   let r = await joinOverHttp(ctx, adult)
-  eq("the request's client_id", r.request.client_id, 'x509_san_dns:france.readdit.example')
+  eq("the request's client_id", r.request.client_id, 'x509_san_dns:france.community.example')
   eq("the adult's wallet for the teen's account", r.completion, { ok: false, kind: 'other_pseudonym', handle: frTeen.handle, community: 'france' })
   const ctx2 = await client()
   await signInOverHttp(ctx2, adult)
   r = await joinOverHttp(ctx2, teen)
-  check("the teen's c/france account for the adult's Readdit account: refused", r.completion.ok === false && r.completion.kind === 'linked_elsewhere', JSON.stringify(r.completion))
+  check("the teen's c/france account for the adult's Community account: refused", r.completion.ok === false && r.completion.kind === 'linked_elsewhere', JSON.stringify(r.completion))
   r = await joinOverHttp(ctx2, adult)
   check("the adult's own c/france account: created and linked", r.completion.ok === true && r.completion.kind === 'created' && r.completion.linked === true, JSON.stringify(r.completion))
   expectAnswer('server: a community without its own pseudonym', await call(ctx2, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'photography' } }), 400, 'bad_request')
   await ctx.dispose()
   await ctx2.dispose()
   list = await accounts()
-  eq('four accounts: two Readdit, two c/france', list.map((a) => (a.community ? 'c' : 'r')).sort().join(''), 'ccrr')
+  eq('four accounts: two Community, two c/france', list.map((a) => (a.community ? 'c' : 'r')).sort().join(''), 'ccrr')
   {
-    // /mod groups each c/france account under the Readdit account it is linked to.
+    // /mod groups each c/france account under the Community account it is linked to.
     const mod = await ctxBrowser.newPage()
     await mod.goto('/mod')
     const groups = mod.locator('section').filter({ has: mod.getByRole('heading', { name: 'Accounts' }) }).locator(':scope > ul > li')
     await groups.filter({ hasText: `u/${frTeen.handle}` }).waitFor()
     eq('/mod: two groups', await groups.count(), 2)
     const teenGroup = groups.filter({ hasText: `u/${teenMain.handle}` })
-    check("/mod: the teen's c/france account under the teen's Readdit account", (await teenGroup.count()) === 1 && (await teenGroup.getByText(`u/${frTeen.handle}`).count()) === 1)
+    check("/mod: the teen's c/france account under the teen's Community account", (await teenGroup.count()) === 1 && (await teenGroup.getByText(`u/${frTeen.handle}`).count()) === 1)
     await mod.close()
   }
 
-  begin('K5', 'a ban in c/france leaves the Readdit account')
+  begin('K5', 'a ban in c/france leaves the Community account')
   const mod = await client()
   await call(mod, 'POST', '/api/mod/ban', { data: { pseudonym: frRecord.pseudonym } })
   await mod.dispose()
   await goto('/c/france')
   await pageShows('Your c/france account is banned')
   await guideIs('community-banned')
-  eq('the Readdit account is still logged in', (await me()).account?.handle, teenMain.handle)
+  eq('the Community account is still logged in', (await me()).account?.handle, teenMain.handle)
   await goto('/c/france/p22')
   check('the banned account’s comment is hidden', !(await page.getByText('Same in our town.').count()))
   await page.getByRole('banner').getByText(`u/${teenMain.handle}`).click()
@@ -1775,7 +1824,7 @@ async function groupK() {
   const mod2 = await client()
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: frRecord.pseudonym } })
 
-  begin('K6', 'a ban of the Readdit account bans its linked c/france account; unbanning lifts both')
+  begin('K6', 'a ban of the Community account bans its linked c/france account; unbanning lifts both')
   list = await accounts()
   const adultMain = list.find((a) => !a.community && a.handle !== teenMain.handle)
   const adultFr = list.find((a) => a.community === 'france' && a.linkedTo === adultMain?.handle)
@@ -1783,15 +1832,15 @@ async function groupK() {
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: teenMain.pseudonym } })
   list = await accounts()
   const frBanned = list.find((a) => a.pseudonym === frRecord.pseudonym).banned
-  check('the linked c/france account is banned with it', frBanned?.cascade === true && frBanned.reason === `Readdit account u/${teenMain.handle} banned`, JSON.stringify(frBanned))
+  check('the linked c/france account is banned with it', frBanned?.cascade === true && frBanned.reason === `Community account u/${teenMain.handle} banned`, JSON.stringify(frBanned))
   check("the adult's accounts are untouched", !list.find((a) => a.handle === adultMain.handle).banned && !list.find((a) => a.handle === adultFr.handle).banned)
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultFr.pseudonym } })
-  check("a c/france ban leaves the adult's Readdit account", !(await accounts()).find((a) => a.handle === adultMain.handle).banned)
+  check("a c/france ban leaves the adult's Community account", !(await accounts()).find((a) => a.handle === adultMain.handle).banned)
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: teenMain.pseudonym } })
   list = await accounts()
-  check('unbanning the Readdit account lifts the cascaded ban', !list.find((a) => a.handle === teenMain.handle).banned && !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
+  check('unbanning the Community account lifts the cascaded ban', !list.find((a) => a.handle === teenMain.handle).banned && !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
   check("but not a c/france account's own ban", !!list.find((a) => a.handle === adultFr.handle).banned)
-  // A banned c/france account stays banned when its Readdit account is banned and unbanned.
+  // A banned c/france account stays banned when its Community account is banned and unbanned.
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultMain.pseudonym } })
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: adultMain.pseudonym } })
   check("the c/france account's own ban survives", (await accounts()).find((a) => a.handle === adultFr.handle).banned?.reason === 'Community rules')
@@ -1806,7 +1855,7 @@ async function groupK() {
   await goto('/c/france')
   await guideIs('community-join')
   await open(page.getByRole('button', { name: 'Log out and join separately' }), TEEN)
-  check('logged out of Readdit', (await me()).account === null)
+  check('logged out of Community', (await me()).account === null)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1817,9 +1866,9 @@ async function groupK() {
   check('server: created, not linked', done.ok === true && done.kind === 'created' && !done.linked, JSON.stringify(done))
   await closeFromPhone()
   const sep = await me()
-  check('a c/france member, not linked, not logged in to Readdit', sep.account === null && sep.communities.france?.linked === false, JSON.stringify(sep))
+  check('a c/france member, not linked, not logged in to Community', sep.account === null && sep.communities.france?.linked === false, JSON.stringify(sep))
   check('stored unlinked', (await accounts()).find((a) => a.handle === done.handle)?.linkedTo === null)
-  check('the Readdit account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
+  check('the Community account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
 }
 
 // ---- M. BBS: zkp_req over bbs_cd next to mso_mdoc (rulebook v0.4; docs/bbs_cd.md) ----
@@ -1869,7 +1918,7 @@ async function groupM() {
   eq('sent: tailored to the BBS scheme', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } })
   check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
   await phoneShows('Request to Share Data')
-  await phoneShows('Specific to readdit.example')
+  await phoneShows('Specific to community.example')
   await guideIs('consent')
   await openDetails()
   await guideSays('hashdh-bls12381g1')
@@ -1964,7 +2013,7 @@ async function groupM() {
   await open(page.getByRole('button', { name: `Join and link to u/${bbsAccount.handle}` }), TEEN_BBS)
   await scan()
   await readRequest()
-  await phoneShows('Specific to france.readdit.example')
+  await phoneShows('Specific to france.community.example')
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await visible('dialog: "Joined c/france as u/…"', site().getByText(/^Joined c\/france as u\//), 30_000)
@@ -2098,7 +2147,7 @@ async function groupL() {
   let m = mark()
   await headerButton('Sign up').click()
   await dialogShows('No proof accepted')
-  await dialogShows('Readdit does not accept any proof yet. Switch one on in the technical view, then try again.')
+  await dialogShows('Community does not accept any proof yet. Switch one on in the technical view, then try again.')
   await guideIs('none-accepted')
   check('session: 503', has(m, 'POST', '/api/vp/session', 503))
   await closeDialog('escape')
@@ -2340,6 +2389,127 @@ async function groupP() {
   await ctx.dispose()
 }
 
+/** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
+ *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
+async function groupV() {
+  await resetDemo()
+  await openPage()
+  const dev = () => page.locator('.vd.page')
+  const popup = () => page.locator('.vd.backdrop [role=dialog]')
+  const devPhone = () => popup().locator('.phone')
+  const rows = async () => (await dev().locator('.rows li').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+  const latest = async () => (await call(page.request, 'GET', '/api/dev/latest')).body
+  const until = async (what, test, timeout = 30_000) => {
+    const end = Date.now() + timeout
+    let l = await latest()
+    while (!test(l) && Date.now() < end) {
+      await page.waitForTimeout(200)
+      l = await latest()
+    }
+    return check(what, test(l), JSON.stringify({ status: l.session?.status, outcome: l.session?.outcome, completion: l.session?.completion }))
+  }
+
+  // /dev polls its session, so the network never goes idle: wait for the app instead.
+  const devReady = async () => {
+    await page.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
+    await dev().waitFor()
+    await page.waitForTimeout(500)
+  }
+
+  begin('V1', '/dev: the view switch, what /tech accepts, no guide')
+  await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Developer' }).click()
+  await page.waitForURL('**/dev')
+  await devReady()
+  check('no guide panel', !(await guidePanel().count()))
+  eq('the info window: Vega on, the others off', await dev().locator('.info li.on .name').allTextContents(), ['Vega (mdoc circuit)'])
+  check('no proof system switch here', !(await dev().locator('input[type=checkbox]').count()))
+  check('an empty diagram', await dev().getByText('Choose an age proof and press Request').isVisible())
+
+  begin('V2', "18+ on the teen's phone: Requirement Not Met, access_denied, encrypted; nothing applied")
+  let m = mark()
+  await dev().getByRole('radio', { name: '18+' }).click()
+  await dev().getByRole('button', { name: 'Request' }).click()
+  await popup().getByText('Scan with the SIROS ID wallet').waitFor()
+  check('the popup shows the real request as a QR code', (await popup().locator('svg').count()) > 0 && (await popup().getByRole('link', { name: 'Open wallet on this device' }).getAttribute('href')).startsWith('openid4vp://?client_id=x509_san_dns%3Acommunity.example'))
+  let l = await latest()
+  eq('the session: the dev purpose with 18+', l.session?.purpose, { kind: 'dev', age: 'over18' })
+  await popup().getByRole('button', { name: 'Simulate scan' }).click()
+  const pick = popup().getByRole('radiogroup', { name: 'Phone' })
+  eq('Simulate scan lists the three phones', (await pick.getByRole('radio').allTextContents()).map((t) => t.split(' · ')[0].trim()), [TEEN, ADULT, TEEN_BBS])
+  const inGroup = async (cls) => (await pick.locator(`.group.${cls} [role=radio]`).allTextContents()).map((t) => t.split(' · ')[0].trim())
+  eq('grouped by encoding: the circuits\' mdoc phones, then BBS', [await inGroup('mso_mdoc'), await inGroup('bbs_cd')], [[TEEN, ADULT], [TEEN_BBS]])
+  check("the list says which phones' credentials the site accepts", (await pick.getByRole('radio', { name: new RegExp(TEEN_BBS) }).textContent()).includes('not accepted now') && (await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).textContent()).includes('accepted: Vega'))
+  await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).click()
+  await popup().getByRole('button', { name: 'Scan', exact: true }).click()
+  eq("the teen's phone beside the code", (await devPhone().locator('[data-phone-label]').textContent()).trim(), TEEN)
+  await devPhone().getByText('Requirement Not Met').waitFor({ timeout: 20_000 })
+  l = await latest()
+  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.jwt', l.session.responseKey.kid])
+  await devPhone().getByRole('button', { name: 'Close' }).click()
+  await until('the session ends declined', (x) => x.session?.outcome?.reason === 'denied')
+  check('the answer was encrypted (response=JWE)', since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied'))
+  await dev().locator('.rows li', { hasText: 'Not completed: access_denied' }).waitFor()
+  const r2 = await rows()
+  for (const t of ['Create presentation request', 'Build DCQL query (zkp_req)', 'Make response encryption key', 'Fetch request + wallet_metadata', 'Authenticate verifier', 'Attestation does not meet the age range', 'Encrypt response', 'Send error response', 'Decrypt response']) {
+    check(`the diagram: ${t}`, r2.some((x) => x.includes(t)))
+  }
+  eq('no account', (await me()).account, null)
+
+  begin('V3', 'keys 3 and S, then Scan: 13–17 on the same phone, shared; the account is created with the age range')
+  await popup().getByRole('button', { name: 'Close' }).click()
+  await page.keyboard.press('3')
+  await popup().getByText('Scan with the SIROS ID wallet').waitFor()
+  await page.keyboard.press('s')
+  check('S opens the phone list, the teen\'s phone picked', (await popup().getByRole('radio', { checked: true }).textContent()).startsWith(TEEN))
+  await popup().getByRole('button', { name: 'Scan', exact: true }).click()
+  await devPhone().getByRole('button', { name: 'Share' }).click({ timeout: 20_000 })
+  await devPhone().getByText('Enter the Pin').waitFor()
+  for (const d of anyPin()) await devPhone().getByRole('button', { name: d, exact: true }).click()
+  await devPhone().getByRole('button', { name: 'Submit' }).click()
+  await devPhone().getByText('Success!').waitFor({ timeout: 60_000 })
+  await until('completed: account created, age recorded', (x) => x.session?.completion?.ok && x.session.completion.kind === 'created' && x.session.completion.age === true)
+  await devPhone().getByRole('button', { name: 'Close' }).click()
+  check('Close on the phone closes the popup', await popup().waitFor({ state: 'detached', timeout: 5_000 }).then(() => true, () => false))
+  const r3 = await rows()
+  for (const t of ['Holder approved', 'Device key signs', 'Build witness', 'Generate ZK proof (Vega)', 'Send response (ZkpPresentation)', 'Verify ZK proof (Vega)', 'Result delivered']) {
+    check(`the diagram: ${t}`, r3.some((x) => x.includes(t)))
+  }
+  l = await latest()
+  check('the handover carries the key thumbprint: the proof verified', l.session.outcome?.ok === true)
+  check('the decoded ZkpPresentation', l.session.response?.presentation?.decoded?.system_id === VEGA && !!l.session.response.presentation.decoded.results)
+  await page.keyboard.press('i')
+  await dev().getByRole('tab', { name: /Checks/ }).click()
+  eq('the inspector: every check passed', await dev().locator('.checks li .st').allTextContents(), Array(9).fill('pass'))
+  const acct = (await me()).account
+  eq('the account: 13–17 proven', acct?.ageProofs?.map((p) => p.label), ['13–17'])
+  await dev().locator('.acct', { hasText: `u/${acct.handle}` }).waitFor()
+  await dev().locator('.rows li .hit').first().click()
+  await page.locator('.vd.backdrop [role=dialog]', { hasText: 'Create presentation request' }).waitFor()
+  check('a step opens its details', true)
+  await page.keyboard.press('Escape')
+
+  begin('V4', 'back on Community: logged in; c/teenspace open, c/afterdark refused, without a new request')
+  m = mark()
+  await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Community' }).click()
+  await page.waitForURL((u) => !u.pathname.startsWith('/dev'))
+  await ready()
+  check('logged in: no Sign up in the header', !(await page.locator('header').getByRole('button', { name: 'Sign up' }).count()))
+  await page.click('a[href="/c/afterdark"]')
+  await visible('c/afterdark: "You can\'t enter c/afterdark"', page.getByText("You can't enter c/afterdark"))
+  await page.click('a[href="/c/teenspace"]')
+  await page.waitForURL('**/c/teenspace')
+  await ready()
+  check('c/teenspace: no age request', !(await page.getByRole('button', { name: 'Verify age with wallet' }).count()))
+  check('no wallet request on Community', count(m, 'POST', '/api/vp/session') === 0)
+
+  begin('V5', 'Clear (R) empties the diagram')
+  await page.goto('/dev')
+  await devReady()
+  await dev().locator('.rows li').first().waitFor()
+  await page.keyboard.press('r')
+  check('empty after R', await dev().getByText('Choose an age proof and press Request').isVisible())
+}
+
 // ---------------------------------------------------------------------------------------------
 
 let crashed = null
@@ -2347,7 +2517,7 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, P: groupP, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, P: groupP, V: groupV, G: groupG }
     for (const g of ONLY) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2363,6 +2533,7 @@ try {
   await groupM()
   await groupL()
   await groupP()
+  await groupV()
   await groupK()
   await groupG()
 } catch (e) {

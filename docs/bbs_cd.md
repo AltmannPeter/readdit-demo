@@ -1,4 +1,4 @@
-# `bbs_cd` in Readdit: nym_auth over BBS committed disclosures
+# `bbs_cd` in Community: nym_auth over BBS committed disclosures
 
 Status: how the demo implements the `bbs_cd` encoding of rulebook v0.4 (`docs/nym_auth_rulebook.md`,
 "BBS committed-disclosure encoding", `zkp_req`, PRF `hashdh-bls12381g1`). The rulebook is
@@ -84,7 +84,7 @@ Object, the query and the handover; the presentation does not carry it.
 
 | Field | Value |
 | --- | --- |
-| `audience` | SHA-256(OpenID4VPHandoverInfoBytes), OpenID4VPHandoverInfo = [client_id, nonce, jwk_thumbprint / null, response_uri] (OpenID4VP 1.0 B.2.6.1) |
+| `audience` | SHA-256(OpenID4VPHandoverInfoBytes), OpenID4VPHandoverInfo = [client_id, nonce, jwk_thumbprint, response_uri] (OpenID4VP 1.0 B.2.6.1); jwk_thumbprint is the RFC 7638 thumbprint of the session's response encryption key |
 | `nonce` | the Request Object's `nonce`, UTF-8 (16 to 64 bytes) |
 | `credentials` | one: the issuer public key and the schema digest; `disclose` empty |
 | `plugins` | 0: `ecdsa-pop/0.1` on `device_key`, hashed mode, 96-bit limbs<br>1: `pseudonym/0.1` on `secret_seed`, config as requested, `verifier_input` = UTF-8(client_id)<br>2: `date-range/0.1` on `birth_date`, ge and le, only when `age_check` is asked |
@@ -94,7 +94,8 @@ plugin proof is bound to env, which contains every commitment.
 
 ## 4. Response
 
-`vp_token = { "nym_attestation_bbs": ["<base64url(CBOR(ZkpPresentation))>"] }`:
+`vp_token = { "nym_attestation_bbs": ["<base64url(CBOR(ZkpPresentation))>"] }`, sent with `state` as
+the payload of a JWE (`direct_post.jwt`, ECDH-ES, A128GCM) to the key in `client_metadata.jwks`:
 
 ```cbor-diag
 {
@@ -120,8 +121,8 @@ Refusal codes (`[vp] … presentation refused: <code>`): `presentation` (not bas
 a ZkpPresentation, or the envelope does not parse), `scheme` (another system, or not offered),
 `issuer_key_set`, `request`, `results`, `proof_invalid` (the BBS proof or a plugin proof fails).
 
-Readdit stores the pseudonym as 96 hex digits. It differs from the mso_mdoc pseudonym of the same
-person (another PRF, even over the same seed), so the teen has one Readdit account per encoding.
+Community stores the pseudonym as 96 hex digits. It differs from the mso_mdoc pseudonym of the same
+person (another PRF, even over the same seed), so the teen has one Community account per encoding.
 Known-offender matching holds within an encoding. A site that accepts both lets a person banned
 under one come back under the other; the site decides by what it accepts.
 

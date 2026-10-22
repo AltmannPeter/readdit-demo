@@ -58,7 +58,7 @@ fn prove_verify_and_refusals() {
 
   // Teen, 13 to 17 on 2026-10-19.
   let teen = json!({ "ge": "2008-10-20", "le": "2013-10-19" });
-  let req = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(teen.clone()));
+  let req = request("community.example", "0123456789abcdef0123456789abcdef", Some(teen.clone()));
   let out = prove(&prover, &req).expect("prove");
   let pres = out["presentation"].as_str().unwrap();
   let v = verify(&verifier, &req, pres);
@@ -79,13 +79,13 @@ fn prove_verify_and_refusals() {
     let config = b"known-offender-matching-ssc";
     let mut msg = vec![config.len() as u8];
     msg.extend(config);
-    msg.extend(b"x509_san_dns:readdit.example");
+    msg.extend(b"x509_san_dns:community.example");
     let op = hash_to_curve_g1(Ciphersuite::Sha256, &msg, b"BBS-CD-PLUGINS/0.1/PSEUDONYM/OP").unwrap();
     assert_eq!(hex::encode(point_to_octets_E1(&(op * scalar_from_octets(&seed).unwrap()))), nym);
   }
 
   // The same pseudonym in a new request to the same site, without age.
-  let req2 = request("readdit.example", "fedcba9876543210fedcba9876543210", None);
+  let req2 = request("community.example", "fedcba9876543210fedcba9876543210", None);
   let out2 = prove(&prover, &req2).expect("prove");
   let v2 = verify(&verifier, &req2, out2["presentation"].as_str().unwrap());
   assert_eq!(v2["ok"], true, "{v2}");
@@ -93,14 +93,14 @@ fn prove_verify_and_refusals() {
   assert!(v2["results"].get("age").is_none());
 
   // Another verifier identity, another pseudonym.
-  let req3 = request("france.readdit.example", "fedcba9876543210fedcba9876543210", None);
+  let req3 = request("france.community.example", "fedcba9876543210fedcba9876543210", None);
   let out3 = prove(&prover, &req3).expect("prove");
   let v3 = verify(&verifier, &req3, out3["presentation"].as_str().unwrap());
   assert_eq!(v3["ok"], true, "{v3}");
   assert_ne!(v3["results"]["nym"].as_str().unwrap(), nym);
 
   // 18+: the teen cannot.
-  let adult = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(json!({ "le": "2008-10-19" })));
+  let adult = request("community.example", "0123456789abcdef0123456789abcdef", Some(json!({ "le": "2008-10-19" })));
   assert_eq!(prove(&prover, &adult).unwrap_err().error, "unsatisfiable");
 
   // The presentation against another nonce, another response_uri, another site: refused.
@@ -108,12 +108,12 @@ fn prove_verify_and_refusals() {
   other["nonce"] = json!("ffffffffffffffffffffffffffffffff");
   assert_eq!(verify(&verifier, &other, pres)["code"], "proof_invalid");
   let mut other = req.clone();
-  other["response_uri"] = json!("https://readdit.example/api/vp/response/s2");
+  other["response_uri"] = json!("https://community.example/api/vp/response/s2");
   assert_eq!(verify(&verifier, &other, pres)["code"], "proof_invalid");
-  let other = request("france.readdit.example", "0123456789abcdef0123456789abcdef", Some(teen.clone()));
+  let other = request("france.community.example", "0123456789abcdef0123456789abcdef", Some(teen.clone()));
   assert_eq!(verify(&verifier, &other, pres)["code"], "proof_invalid");
   // Against the same request without the age check (fewer plugins): refused.
-  let fewer = request("readdit.example", "0123456789abcdef0123456789abcdef", None);
+  let fewer = request("community.example", "0123456789abcdef0123456789abcdef", None);
   assert_ne!(verify(&verifier, &fewer, pres)["ok"], true);
 
   // A flipped byte anywhere in the envelope.
@@ -178,7 +178,7 @@ fn prove_verify_and_refusals() {
 fn parallel_and_sequential_agree() {
   let prover = Prover::load();
   let verifier = Verifier::load(&std::fs::read(root("native/bbs/demo/issuer-params.bin")).unwrap()).unwrap();
-  let req = request("readdit.example", "0123456789abcdef0123456789abcdef", Some(json!({ "ge": "2008-10-20", "le": "2013-10-19" })));
+  let req = request("community.example", "0123456789abcdef0123456789abcdef", Some(json!({ "ge": "2008-10-20", "le": "2013-10-19" })));
   let w = wallet();
   let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
   for (prove_parallel, verify_parallel) in [(true, false), (false, true)] {

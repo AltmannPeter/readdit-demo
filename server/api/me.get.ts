@@ -4,7 +4,7 @@ import type { CommunityMembership } from '#shared/types'
 /**
  * Current account of this browser. A ban ends the login and leaves a notice once.
  * `communities`: for each community with its own pseudonym, the community account this browser acts
- * as there (memberAccount): with a Readdit account logged in, the one linked to it; otherwise the
+ * as there (memberAccount): with a Community account logged in, the one linked to it; otherwise the
  * one it logged in to. A banned one is reported as banned, and its own login ends.
  */
 export default defineEventHandler(async (event) => {

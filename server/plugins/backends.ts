@@ -13,7 +13,7 @@ export default defineNitroPlugin(() => {
       else console.warn(`[${name}] not loaded: ${error}`)
     }
     if (Object.values(errors).every(Boolean)) {
-      console.error('[backends] Readdit cannot start without a proof backend. Build the addons with `npm run build:native`, then start the site again.')
+      console.error('[backends] Community cannot start without a proof backend. Build the addons with `npm run build:native`, then start the site again.')
       if (!import.meta.dev) process.exit(1)
     }
   })

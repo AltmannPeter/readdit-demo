@@ -2,7 +2,7 @@
 name = "nym-bbs"
 version = "0.1.0"
 edition = "2021"
-description = "Readdit: the nym_auth attestation in its bbs_cd encoding, presented as zkp_req (prover and verifier)"
+description = "Community: the nym_auth attestation in its bbs_cd encoding, presented as zkp_req (prover and verifier)"
 publish = false
 
 [dependencies]

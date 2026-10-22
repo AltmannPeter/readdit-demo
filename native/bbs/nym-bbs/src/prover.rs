@@ -22,7 +22,7 @@ use serde_json::{json, Map, Value as Json};
 
 use crate::credential::CredentialJson;
 use crate::error::Refusal;
-use crate::measure::{ms, Peak};
+use crate::measure::{mb, ms, Heap, Peak};
 use crate::presentation::{Presentation, ResultValue};
 use crate::profile::{self, Handover, RequestObject, BIRTH_DATE, DEVICE_KEY, LIMB_BITS, PROOF_SYSTEM, SYSTEM_ID};
 use crate::{b64url, hex, unb64url};
@@ -81,6 +81,7 @@ impl Prover {
   pub fn prove(&self, input: &ProveInput) -> Result<Json, Refusal> {
     let t_all = Instant::now();
     let peak = Peak::start();
+    let heap = Heap::start();
     let cred = input.credential.decode().map_err(Refusal::bad_credential)?;
     let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, &cred.issuer)?;
 
@@ -163,6 +164,7 @@ impl Prover {
       "online_ms": online_ms,
       "prove_ms": offline_ms + online_ms,
       "total_ms": ms(t_all),
+      "heap_mb": mb(heap.high() - heap.base()),
       "peak_memory_mb": peak.read(),
       "proof_bytes": presentation.len(),
       "presentation_bytes": zkp.len(),

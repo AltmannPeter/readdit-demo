@@ -1,4 +1,4 @@
-/** Unban an account. Unbanning a Readdit account also lifts the bans its own ban put on linked accounts. */
+/** Unban an account. Unbanning a Community account also lifts the bans its own ban put on linked accounts. */
 export default defineEventHandler(async (event) => {
   const { pseudonym } = await readObject<{ pseudonym: unknown }>(event)
   if (typeof pseudonym !== 'string') throw refusal(400, 'bad_request', 'pseudonym is required.')

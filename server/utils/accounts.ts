@@ -13,7 +13,7 @@ export function publicAccount(a: AccountRecord) {
   }
 }
 
-/** The Readdit account of a pseudonym; never a community account. */
+/** The Community account of a pseudonym; never a community account. */
 export function mainAccount(pseudonym: string | undefined): AccountRecord | undefined {
   const a = pseudonym ? store().accounts.get(pseudonym) : undefined
   return a && !a.community ? a : undefined
@@ -25,14 +25,14 @@ export function communityAccount(community: string, pseudonym: string | undefine
   return a?.community === community ? a : undefined
 }
 
-/** The community account in `community` linked to the Readdit account `main`. */
+/** The community account in `community` linked to the Community account `main`. */
 export function linkedCommunityAccount(community: string, main: string): AccountRecord | undefined {
   for (const a of store().accounts.values()) if (a.community === community && a.linkedTo === main) return a
   return undefined
 }
 
 /**
- * The community account a browser acts as in `community`. With a Readdit account logged in, only
+ * The community account a browser acts as in `community`. With a Community account logged in, only
  * the community account linked to it: an unlinked one needs a new presentation, which links it.
  * Otherwise the community account the browser logged in to. Banned accounts included; the caller
  * decides.
@@ -45,7 +45,7 @@ export function memberAccount(community: string, data: { pseudonym?: string; com
 
 /**
  * The account of a pseudonym, created when new. Pseudonyms of different verifier identities never
- * coincide, so Readdit and community accounts share one map; `community` marks the latter.
+ * coincide, so Community and community accounts share one map; `community` marks the latter.
  */
 export function getOrCreateAccount(pseudonym: string, community?: string, format?: AccountRecord['format']): { account: AccountRecord; created: boolean } {
   const accounts = store().accounts

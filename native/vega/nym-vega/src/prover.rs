@@ -28,7 +28,7 @@ use vega_age::table::sha256;
 use crate::circuit::{BIRTH_DATE, CIRCUIT_ID, DOC_TYPE, PROOF_SYSTEM, PUBLIC_INPUTS, SSC};
 use crate::error::Refusal;
 use crate::handover::{self, Handover};
-use crate::measure::{Peak, ms};
+use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, Statement, statement};
 use crate::{dates, hex, keys, mdoc, threads, unb64url, unhex, x509};
@@ -90,6 +90,9 @@ pub struct WitnessData {
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
+  /// The heap held before the witness step, and the most it held during it (measure::Heap).
+  heap_base: usize,
+  witness_high: usize,
   parallel: bool,
   /// What the witness step reports: its time, sizes and the public values it claims.
   pub summary: Json,
@@ -183,6 +186,7 @@ impl Prover {
   /// Step 2: takes the credential apart, makes every holder-side check, and computes the witness.
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
+    let heap = Heap::start();
     if input.system_id != CIRCUIT_ID {
       return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
@@ -280,7 +284,7 @@ impl Prover {
       "results": results,
       "public_inputs": public_inputs(&assignment.core.public_values.iter().map(|v| hex(&to_be(v))).collect::<Vec<_>>()),
       "counts": { "shared": shared, "precommitted": precommitted, "rest": rest, "public": public_count },
-      "metrics": { "witness_ms": witness_ms, "threads": threads::pool(input.parallel).current_num_threads() },
+      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads::pool(input.parallel).current_num_threads() },
     });
     Ok(WitnessData {
       presentation: Presentation {
@@ -293,6 +297,8 @@ impl Prover {
       assignment,
       results,
       witness_ms,
+      heap_base: heap.base(),
+      witness_high: heap.high(),
       parallel: input.parallel,
       summary,
     })
@@ -301,6 +307,7 @@ impl Prover {
   /// Step 3: prepares and proves from the witness, and encodes the presentation.
   pub fn prove(&self, w: WitnessData) -> Result<Json, String> {
     let peak = Peak::start();
+    let heap = Heap::start();
     let t = Instant::now();
     let (steps, core) = (w.assignment.steps(), w.assignment.core());
     let pool = threads::pool(w.parallel);
@@ -310,6 +317,9 @@ impl Prover {
     })?;
     let prove_ms = ms(t);
     let peak_mb = peak.read();
+    // The proof's working memory: the most the witness and prove steps held at once, above what
+    // was held before the witness step (the witness itself stays held between the two).
+    let heap_mb = mb(heap.high().max(w.witness_high).saturating_sub(w.heap_base));
     let proof = bincode::serialize(&proof).map_err(|e| format!("serializing the proof: {e}"))?;
     let proof_bytes = proof.len();
     let presentation = Presentation { proof, ..w.presentation }.encode()?;
@@ -322,6 +332,7 @@ impl Prover {
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
+        "heap_mb": heap_mb,
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
         "presentation_bytes": presentation.len(),

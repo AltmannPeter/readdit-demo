@@ -4,21 +4,21 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-10-01',
   devtools: { enabled: false },
   telemetry: false,
-  css: ['~/assets/css/main.css'],
+  css: ['~/assets/css/main.css', '~/assets/css/dev.css'],
   vite: { plugins: [tailwindcss()] },
   runtimeConfig: {
     // Vega backend: the Rust Node addon (npm run build:native), the circuits as data and the
     // verifier's trust anchors. Paths are relative to the working directory.
-    vegaAddon: 'native/vega/readdit-vega.node',
+    vegaAddon: 'native/vega/community-vega.node',
     vegaShapes: 'native/vega/circuits/mdoc/shapes.zst',
     vegaTrustAnchors: 'native/vega/demo/document-signer.pem',
     // Longfellow backend: the Rust Node addon, the directory of circuits.zst, params.tsv and
     // hash-semantic.tsv, and the verifier's trust anchors (the same demo issuer as Vega's).
-    longfellowAddon: 'native/longfellow/readdit-longfellow.node',
+    longfellowAddon: 'native/longfellow/community-longfellow.node',
     longfellowCircuits: 'native/longfellow/circuits/mdoc',
     longfellowTrustAnchors: 'native/vega/demo/document-signer.pem',
     // BBS backend (bbs_cd): the Rust Node addon and the issuer parameters the verifier trusts.
-    bbsAddon: 'native/bbs/readdit-bbs.node',
+    bbsAddon: 'native/bbs/community-bbs.node',
     bbsIssuerParams: 'native/bbs/demo/issuer-params.bin',
     // How far proof_time may lie from the verifier's clock, in seconds.
     proofTimeToleranceS: 300,
@@ -39,18 +39,18 @@ export default defineNuxtConfig({
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',
-    sessionPassword: 'readdit-demo-only-session-password-0123456789abcdef',
+    sessionPassword: 'community-demo-only-session-password-0123456789abcdef',
     // How long a wallet request (its QR code) stays valid, in seconds.
     vpSessionTtlS: 600,
     public: {
-      siteName: 'Readdit',
+      siteName: 'Community',
       // DNS name in the access certificate. client_id = x509_san_dns:<siteHost>
-      siteHost: 'readdit.example',
+      siteHost: 'community.example',
     },
   },
   app: {
     head: {
-      title: 'Readdit',
+      title: 'Community',
       htmlAttrs: { lang: 'en' },
       meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
       link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],

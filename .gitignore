@@ -6,11 +6,11 @@ node_modules
 demo-shots
 .DS_Store
 native/vega/target
-native/vega/readdit-vega.node
-native/vega/readdit-vega.node.tmp
+native/vega/community-vega.node
+native/vega/community-vega.node.tmp
 native/bbs/target
-native/bbs/readdit-bbs.node
-native/bbs/readdit-bbs.node.tmp
+native/bbs/community-bbs.node
+native/bbs/community-bbs.node.tmp
 native/longfellow/target
-native/longfellow/readdit-longfellow.node
-native/longfellow/readdit-longfellow.node.tmp
+native/longfellow/community-longfellow.node
+native/longfellow/community-longfellow.node.tmp

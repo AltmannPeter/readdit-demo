@@ -27,7 +27,7 @@ use cd_pseudonym::PseudonymVerifier;
 use serde::Deserialize;
 use serde_json::{json, Map, Value as Json};
 
-use crate::measure::{ms, Peak};
+use crate::measure::{mb, ms, Heap, Peak};
 use crate::presentation::{Presentation, ResultValue};
 use crate::profile::{self, Handover, RequestObject, PROOF_SYSTEM, SYSTEM_ID};
 use crate::prover::scheme_json;
@@ -97,10 +97,12 @@ impl Verifier {
   pub fn verify(&self, input: &VerifyInput) -> Json {
     let t = Instant::now();
     let peak = Peak::start();
+    let heap = Heap::start();
     let mut metrics = Map::new();
     metrics.insert("load_ms".into(), json!(self.load_ms));
     let outcome = self.check(input, &mut metrics);
     metrics.insert("total_ms".into(), json!(ms(t)));
+    metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
       Ok(results) => json!({ "ok": true, "system_id": SYSTEM_ID, "results": results, "metrics": metrics }),

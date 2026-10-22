@@ -1,0 +1,93 @@
+/* The developer view (/dev): tokens and base rules, all under .vd so the Community site keeps its
+   own. Teleported popups carry .vd on their backdrop. In the base layer, so the Tailwind utilities
+   of the demo phone inside the popup still apply. */
+@layer base {
+  .vd {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+
+    --ink: #111111;
+    --ink-2: #3f3f46;
+    --muted: #71717a;
+    --faint: #a1a1aa;
+    --line: #e4e4e7;
+    --line-2: #f0f0f2;
+    --surface: #fafafa;
+    --bg: #ffffff;
+
+    --actor-browser: #2563eb;
+    --actor-backend: #b45309;
+    --actor-wallet: #047857;
+
+    --ok: #15803d;
+    --ok-soft: #f0fdf4;
+    --bad: #b91c1c;
+    --bad-soft: #fef2f2;
+
+    --radius: 10px;
+
+    --sel: #52525b;
+    --sel-hover: #3f3f46;
+
+    --hl-ext: #c0262d;
+    --hl-ext-band: #fdeceb;
+    --hl-zkp: #1f55c8;
+    --hl-zkp-band: #e9f0fd;
+
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .vd *,
+  .vd *::before,
+  .vd *::after {
+    box-sizing: border-box;
+  }
+
+  .vd button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .vd code,
+  .vd pre,
+  .vd .mono {
+    font-family: var(--font-mono);
+  }
+
+  .vd :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  .vd .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .vd *,
+    .vd *::before,
+    .vd *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@keyframes vd-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes vd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

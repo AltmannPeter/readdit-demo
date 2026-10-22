@@ -7,7 +7,7 @@ export interface PseudonymInputs {
   config: PseudonymConfig
   /** Opening of `ssc` (secret_seed) or `psc` (private_seed), 16 bytes. */
   seed: Uint8Array
-  /** e.g. "x509_san_dns:readdit.example" */
+  /** e.g. "x509_san_dns:community.example" */
   verifierId?: string
   verifierContext?: string
   /** Only for user-managed-pseudonym-xsite-ssc. */

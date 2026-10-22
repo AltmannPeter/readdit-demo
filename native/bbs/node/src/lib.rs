@@ -1,5 +1,5 @@
 //! Node addon: the BBS (`bbs_cd`, committed disclosures) prover and verifier, called in process by
-//! Readdit's server (`server/utils/services.ts`).
+//! Community's server (`server/utils/services.ts`).
 //!
 //! - [`load_prover`] builds the date-range tables and resolves to a [`Prover`];
 //!   [`load_verifier`] reads the trusted issuer parameters and resolves to a [`Verifier`].
@@ -8,6 +8,8 @@
 //!
 //! Inputs and outputs are JSON text shaped as `docs/backend-api.md` describes. Every computation
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
+
+mod alloc;
 
 use std::sync::Arc;
 

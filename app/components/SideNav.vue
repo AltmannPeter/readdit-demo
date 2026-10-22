@@ -28,7 +28,6 @@ const isActive = (slug: string) => route.params.slug === slug
             <CommunityAvatar :community="c" size="sm" />
             <span class="truncate">{{ COMMUNITY_PREFIX }}{{ c.slug }}</span>
             <AgeBadge v-if="c.gate" :gate="c.gate" class="ml-auto" />
-            <HumanBadge v-else-if="c.nymHost" class="ml-auto" />
           </NuxtLink>
         </li>
       </ul>

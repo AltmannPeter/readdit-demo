@@ -130,7 +130,8 @@ export async function getOwnedVpSession(event: H3Event, id: string) {
   return { s, b }
 }
 
-export function handoverFor(s: { request?: { client_id: string; nonce: string; response_uri: string } }) {
+/** The handover the verifier checks the proof against: from the session's own request and key. */
+export function handoverFor(s: VpSessionRecord) {
   const r = s.request!
-  return { client_id: r.client_id, nonce: r.nonce, response_uri: r.response_uri, jwk_thumbprint: null }
+  return { client_id: r.client_id, nonce: r.nonce, response_uri: r.response_uri, jwk_thumbprint: s.responseKey.thumbprint }
 }

@@ -281,7 +281,7 @@ mod tests {
         params.insert("le".into(), Json::String(le.into()));
       }
       let request: RequestObject = serde_json::from_value(serde_json::json!({
-        "client_id": "x509_san_dns:readdit.example", "nonce": "n", "response_uri": "https://r/x",
+        "client_id": "x509_san_dns:community.example", "nonce": "n", "response_uri": "https://r/x",
         "dcql_query": { "credentials": [{ "id": "q", "format": "zkp_req",
           "meta": { "source_format": "mso_mdoc", "doctype_value": DOC_TYPE },
           "_req": [

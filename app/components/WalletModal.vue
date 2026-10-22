@@ -17,7 +17,7 @@ interface Completion {
   handle?: string
   /** The age proof was recorded too (a sign-in at an age-restricted community). */
   age?: boolean
-  /** A community account: its community, and whether it was just linked to the Readdit account. */
+  /** A community account: its community, and whether it was just linked to the Community account. */
   community?: string
   linked?: boolean
 }
@@ -123,8 +123,8 @@ const FAILURES: Record<string, string> = {
   gone: 'This code is no longer valid. Try again.',
   banned: `This wallet's ${siteName} account has been banned.`,
   community_banned: 'This wallet\'s account in this community has been banned.',
-  other_pseudonym: 'Your Readdit account is linked to another account in this community, from another wallet. Nothing was changed.',
-  linked_elsewhere: 'This account in the community is linked to another Readdit account. Nothing was changed.',
+  other_pseudonym: 'Your Community account is linked to another account in this community, from another wallet. Nothing was changed.',
+  linked_elsewhere: 'This account in the community is linked to another Community account. Nothing was changed.',
   mismatch: 'The pseudonym in this proof does not match your account. The age proof was not applied.',
   no_account: `There is no ${siteName} account for this wallet. Sign up to create one.`,
   account_exists: 'There is already an account associated with this user. Log in instead.',
@@ -260,7 +260,7 @@ async function complete(id: string, mine: number) {
   const account = c.kind === 'created' ? `Account created: u/${c.handle}` : c.kind === 'logged_in' ? `Logged in as u/${c.handle}` : ''
   if (c.community) {
     message.value = c.kind === 'created' ? `Joined ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}` : `In ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}`
-    note.value = c.linked ? 'Linked to your Readdit account.' : ''
+    note.value = c.linked ? 'Linked to your Community account.' : ''
   } else if (c.age) {
     message.value = 'Age verified'
     note.value = account

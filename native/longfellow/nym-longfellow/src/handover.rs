@@ -2,7 +2,7 @@
 //! challenge digest e2 that the device key signs. The same as `native/vega` (nym-vega
 //! `handover`).
 //!
-//! Readdit invokes the wallet with a QR code holding `request_uri` (not the Digital Credentials
+//! Community invokes the wallet with a QR code holding `request_uri` (not the Digital Credentials
 //! API), so OpenID4VP 1.0 Appendix B.2.6.1 ("Invocation via Redirects") applies:
 //!
 //! ```text

@@ -1,3 +1,4 @@
+import { DEV_GATES } from '../../../../utils/store'
 import { findCommunity } from '#shared/data/communities'
 
 /**
@@ -9,12 +10,13 @@ import { findCommunity } from '#shared/data/communities'
  * the pseudonym has no account. A banned account is refused either way. A sign-in for an
  * age-restricted community creates the account or logs in to the existing one, and also records the proven age range
  * for the account it logs in to: the pseudonym and the age result come from one presentation.
+ * Developer view: creates the account or logs in, and records the proven age range, if any.
  * Age check: the proven pseudonym must be the logged-in account's.
  * Community (a community with its own pseudonym): creates the community account or logs in to it.
- * With a Readdit account logged in, it also links the two, at most one community account per
- * Readdit account and one Readdit account per community account: `other_pseudonym` when the
- * Readdit account is linked to another pseudonym of the community (another person's wallet),
- * `linked_elsewhere` when the community account is linked to another Readdit account.
+ * With a Community account logged in, it also links the two, at most one community account per
+ * Community account and one Community account per community account: `other_pseudonym` when the
+ * Community account is linked to another pseudonym of the community (another person's wallet),
+ * `linked_elsewhere` when the community account is linked to another Community account.
  */
 export default defineEventHandler(async (event) => {
   const { s, b } = await getOwnedVpSession(event, getRouterParam(event, 'id')!)
@@ -47,7 +49,19 @@ export default defineEventHandler(async (event) => {
     addTrace(s, 'completed', s.completion.ok ? 'Applied to the community account' : 'Not applied', { ...s.completion })
     return s.completion
   }
-  if (s.purpose.kind === 'signin') {
+  if (s.purpose.kind === 'dev') {
+    // The developer view: create the account or log in, and record the age range if one was proven.
+    const existing = mainAccount(pseudonym)
+    if (existing?.banned) {
+      s.completion = { ok: false, kind: 'banned', handle: existing.handle }
+    } else {
+      const { account, created } = getOrCreateAccount(pseudonym, undefined, s.outcome.format)
+      const gate = DEV_GATES[s.purpose.age]
+      if (gate && s.outcome.age) recordAgeProof(account, gate)
+      await b.update({ pseudonym })
+      s.completion = { ok: true, kind: created ? 'created' : 'logged_in', handle: account.handle, ...(gate && s.outcome.age && { age: true as const }) }
+    }
+  } else if (s.purpose.kind === 'signin') {
     const existing = mainAccount(pseudonym)
     if (existing?.banned) {
       s.completion = { ok: false, kind: 'banned', handle: existing.handle }

@@ -1,5 +1,6 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
 import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import type { ResponseKey } from './response-key'
 
 /**
  * signin: `signup` creates the account; `login` only logs in. With `community` (a logged-out
@@ -7,13 +8,20 @@ import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata 
  * and the completion records it (and creates the account or logs in to it).
  * community: the pseudonym of a community with its own pseudonym (Community.nymHost): creates the
  * community account or logs in to it. With `link` (the person chose "Join and link" while logged
- * in), it also links it to the logged-in Readdit account; logged in, `link` is required (the other
+ * in), it also links it to the logged-in Community account; logged in, `link` is required (the other
  * choice logs out first).
  */
 export type VpPurpose =
   | { kind: 'signin'; intent: 'signup' | 'login'; community?: string }
+  /** The developer view's request: the pseudonym, and the age range when one is chosen. Creates
+   *  the account or logs in to it, and records the age range. */
+  | { kind: 'dev'; age: DevAge }
   | { kind: 'age'; community: string }
   | { kind: 'community'; community: string; link: boolean }
+
+/** The developer view's age options: none, 18 or older, 13 to 17. */
+export type DevAge = 'none' | 'over18' | 'range13to17'
+export const DEV_GATES: Record<DevAge, AgeGate | undefined> = { none: undefined, over18: { minAge: 18 }, range13to17: { minAge: 13, maxAge: 17 } }
 
 export type VpStatus = 'waiting' | 'scanned' | 'responded' | 'verified' | 'failed' | 'completed'
 
@@ -32,7 +40,7 @@ export type CompletionKind =
   | 'logged_out'
   /** community: the logged-in account is linked to another pseudonym of this community. */
   | 'other_pseudonym'
-  /** community: this community account is linked to another Readdit account. */
+  /** community: this community account is linked to another Community account. */
   | 'linked_elsewhere'
   | FailReason
 
@@ -57,6 +65,8 @@ export interface VpSessionRecord {
   origin: string
   nonce: string
   state: string
+  /** The key the wallet encrypts its response to (direct_post.jwt). Not in any trace or API answer. */
+  responseKey: ResponseKey
   /** The age range the request asks for, if any (from the community's gate, when the session starts). */
   age?: BirthDateRange
   /** The DCQL query: one zkp_req credential query per source format the accepted systems cover,
@@ -72,6 +82,8 @@ export interface VpSessionRecord {
   /** The verifier's own timings of this session's presentation, and the time of the call around
    *  it as the response route measures it (round_trip_ms); accepted or refused. */
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
+  /** The decrypted response, for the developer view: its JWE header and size, and the presentation. */
+  response?: { jwe: { header: Record<string, unknown>; bytes: number }; presentation?: string }
   /** The query the wallet answered, once a response arrived. */
   answered?: string
   /** `format`: the source format of the answered query; `proofId`: the system (circuit or scheme)
@@ -83,11 +95,11 @@ export interface VpSessionRecord {
 }
 
 export interface AccountRecord extends Account {
-  /** `cascade`: set by the ban of the Readdit account this community account is linked to. */
+  /** `cascade`: set by the ban of the Community account this community account is linked to. */
   banned?: { at: string; reason: string; cascade?: true }
-  /** A community account: the community with its own pseudonym. Absent: a Readdit account. */
+  /** A community account: the community with its own pseudonym. Absent: a Community account. */
   community?: string
-  /** A community account linked to this Readdit account's pseudonym. */
+  /** A community account linked to this Community account's pseudonym. */
   linkedTo?: string
   /** The source format of the presentation that created the account: mso_mdoc or bbs_cd (BBS). */
   format?: SourceFormat
@@ -117,7 +129,7 @@ interface Store {
   multithreading: boolean
 }
 
-const g = globalThis as unknown as { __readditStore?: Store }
+const g = globalThis as unknown as { __communityStore?: Store }
 
 /** The proof systems accepted at start (runtime config acceptedProofSystems). */
 export function configuredProofSystems(): string[] {
@@ -147,12 +159,12 @@ function fresh(): Store {
 
 /** In-memory demo state. Survives hot reload, not restarts. */
 export function store(): Store {
-  g.__readditStore ??= fresh()
-  return g.__readditStore
+  g.__communityStore ??= fresh()
+  return g.__communityStore
 }
 
 export function resetStore() {
-  g.__readditStore = fresh()
+  g.__communityStore = fresh()
 }
 
 export function addTrace(s: VpSessionRecord, step: string, label: string, data?: Record<string, unknown>) {

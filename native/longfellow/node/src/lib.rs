@@ -1,4 +1,4 @@
-//! Node addon: the nym_auth Longfellow prover and verifier, called in process by Readdit's server
+//! Node addon: the nym_auth Longfellow prover and verifier, called in process by Community's server
 //! (`server/utils/services.ts`).
 //!
 //! - [`load_prover`] and [`load_verifier`] read the circuits (`circuits/mdoc`) once, on a worker
@@ -14,6 +14,8 @@
 //!
 //! Inputs and outputs are JSON text shaped as `docs/backend-api.md` describes. Every computation
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
+
+mod alloc;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

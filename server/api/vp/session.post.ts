@@ -2,12 +2,13 @@ import { findCommunity } from '#shared/data/communities'
 import { buildDcqlQuery, authorizationUrl, clientIdFor, requestUriFor } from '#shared/utils/dcql'
 import { decideGate, gateRange, todayISO } from '#shared/utils/age'
 import { randomHex } from '#shared/utils/bytes'
-import type { VpPurpose, VpSessionRecord } from '../../utils/store'
+import { DEV_GATES, type DevAge, type VpPurpose, type VpSessionRecord } from '../../utils/store'
 
 /**
  * Site: start a cross-device OpenID4VP session.
  * Body: { purpose: 'signin', intent: 'signup' | 'login', community? } | { purpose: 'age', community }
- * | { purpose: 'community', community }, and optionally `origin`, the page's address, for
+ * | { purpose: 'community', community } | { purpose: 'dev', age: 'none' | 'over18' | 'range13to17' } (the
+ * developer view: the pseudonym and the chosen age range), and optionally `origin`, the page's address, for
  * request_uri and response_uri (see publicOrigin), and `phone`, the demo phone on screen.
  * community: the pseudonym of a community with its own verifier identity (Community.nymHost); the
  * request's client_id is x509_san_dns:<nymHost>, so the pseudonym is specific to that community.
@@ -17,7 +18,7 @@ import type { VpPurpose, VpSessionRecord } from '../../utils/store'
  * already proven (shared/utils/age.ts, decideGate): a settled gate gets no wallet request.
  */
 export default defineEventHandler(async (event) => {
-  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown; origin: unknown; phone: unknown; link: unknown }>(event)
+  const body = await readObject<{ purpose: unknown; intent: unknown; community: unknown; origin: unknown; phone: unknown; link: unknown; age: unknown }>(event)
   const b = await browserSession(event)
   const cfg = useRuntimeConfig(event)
   let host = String(cfg.public.siteHost)
@@ -35,6 +36,11 @@ export default defineEventHandler(async (event) => {
     } else {
       purpose = { kind: 'signin', intent }
     }
+  } else if (body.purpose === 'dev') {
+    const age = body.age ?? 'none'
+    if (typeof age !== 'string' || !(age in DEV_GATES)) throw refusal(400, 'bad_request', 'age must be none, over18 or range13to17.')
+    purpose = { kind: 'dev', age: age as DevAge }
+    gate = DEV_GATES[age as DevAge]
   } else if (body.purpose === 'age' && typeof body.community === 'string') {
     const c = findCommunity(body.community)
     if (!c?.gate) throw refusal(400, 'bad_request', 'This community has no age requirement.')
@@ -62,7 +68,7 @@ export default defineEventHandler(async (event) => {
   try {
     offer = await verifierOffer()
   } catch (e) {
-    if (e instanceof NothingAccepted) throw refusal(503, 'none_accepted', 'Readdit accepts no proof system. Switch one on in /tech.')
+    if (e instanceof NothingAccepted) throw refusal(503, 'none_accepted', 'Community accepts no proof system. Switch one on in /tech.')
     console.error(`[vp] no offer: ${(e as Error).message}`)
     throw refusal(503, 'unavailable', 'The verifier is not available.')
   }
@@ -84,6 +90,7 @@ export default defineEventHandler(async (event) => {
     origin,
     nonce: randomHex(16),
     state: randomHex(16),
+    responseKey: await newResponseKey(),
     ...(age && { age }),
     dcql,
     offer,
@@ -97,6 +104,7 @@ export default defineEventHandler(async (event) => {
     client_id: clientIdFor(host),
     queries: dcql.credentials.map((q) => ({ id: q.id, format: q.format, source_format: q.meta.source_format, _req: q._req })),
     offer,
+    response_key: s.responseKey.jwk,
     ...(s.phone && { phone: s.phone }),
   })
 
