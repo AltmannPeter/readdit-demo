@@ -109,17 +109,34 @@ export default defineEventHandler(async (event) => {
   }
 
   // An unknown mdoc issuer, with "Trust new issuers" on: trusted for this verification, and added
-  // to the trusted issuers once the presentation is accepted (server/utils/issuers.ts).
-  const presented = source === 'mso_mdoc' ? presentedIssuer(list[0]) : null
-  const newIssuer = presented && store().trustNewIssuers && !(await isTrusted(presented)) ? presented : null
+  // to the trusted issuers once the presentation is accepted (server/utils/issuers.ts). The site
+  // reads the certificate from the presentation; when it cannot, or reads another one than the
+  // verifier, the verifier's refusal names the certificate and the presentation is verified once
+  // more with that one trusted.
+  const presented = source === 'mso_mdoc' && !takeFault('issuer.read') ? presentedIssuer(list[0]) : null
+  let newIssuer = presented && store().trustNewIssuers && !(await isTrusted(presented)) ? presented : null
+  if (source === 'mso_mdoc' && !presented) console.warn(`[issuers] ${s.id}: cannot read issuer_key_set from the presentation; the verifier checks it`)
   const t0 = Date.now()
-  let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; metrics?: VerifyMetrics }
+  let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; certificate?: string | null; metrics?: VerifyMetrics }
   try {
     const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
     if (source === 'mso_mdoc') {
+      const verify = async (learned: string[]) => {
+        const { profile, ...r } = await verifier.verify({ ...call, now: new Date().toISOString(), learned_issuers: learned })
+        keepProfile(s, 'verify', profile)
+        return r
+      }
       const learned = [...(await learnedDers()), ...(newIssuer ? [newIssuer] : [])]
-      const { profile, ...r } = await verifier.verify({ ...call, now: new Date().toISOString(), learned_issuers: learned })
-      keepProfile(s, 'verify', profile)
+      if (newIssuer) console.log(`[issuers] ${s.id}: new Document Signer ${issuerName(newIssuer)}, trusted for this verification`)
+      let r = await verify(learned)
+      const unknown = !r.ok && r.code === 'issuer_key_set' ? r.certificate : null
+      if (unknown && store().trustNewIssuers && !learned.includes(unknown)) {
+        console.log(`[issuers] ${s.id}: the verifier does not know Document Signer ${issuerName(unknown)}; verifying again with it trusted`)
+        newIssuer = unknown
+        r = await verify([...learned, unknown])
+      } else if (unknown) {
+        console.warn(`[issuers] ${s.id}: Document Signer ${issuerName(unknown)} is not trusted${store().trustNewIssuers ? '' : ' (Trust new issuers is off)'}`)
+      }
       result = r.ok ? { ok: true, proofId: r.system_id, results: r.results, metrics: r.metrics } : r
     } else {
       const { profile, ...r } = await bbsVerifier.verify(call)
@@ -138,7 +155,10 @@ export default defineEventHandler(async (event) => {
   const m = result.metrics
   s.verification = { decode_ms: m?.decode_ms, verify_ms: m?.verify_ms, total_ms: m?.total_ms, round_trip_ms: roundTripMs }
 
-  if (!result.ok) return reject(result.code ?? 'refused', result.reason, { input: result.input, metrics: result.metrics, round_trip_ms: roundTripMs })
+  if (!result.ok) {
+    const issuer = result.certificate ? { issuer: issuerName(result.certificate), trust_new_issuers: store().trustNewIssuers } : {}
+    return reject(result.code ?? 'refused', result.reason, { input: result.input, ...issuer, metrics: result.metrics, round_trip_ms: roundTripMs })
+  }
 
   // Defence in depth on top of the verifier services.
   const offered = s.request.client_metadata.vp_formats_supported.zkp_req?.system_id_values

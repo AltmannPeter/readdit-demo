@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // A Benchmark row's time: the prover's and the verifier's steps as stacked bars (medians), then,
-// once the row has profiled runs (Profiling on), where the time goes inside: a flame graph of the
-// sampled stacks, and for Vega its own phases.
+// once the row has profiled runs (Profiling on), where the time goes inside, in views to switch
+// between: the samples grouped by stage, by stage and field, by operation, by library or by
+// function (app/tech/grouping.ts), the call tree as a flame graph, and for Vega its own phases.
+import { group, hasStages, type View } from '~/tech/grouping'
 interface StepTime {
   name: string
   ms: number
@@ -43,7 +45,23 @@ interface Profile {
 }
 const profile = ref<Profile | null>(null)
 const side = ref<'prove' | 'verify'>('prove')
-const view = ref<'samples' | 'phases'>('samples')
+type Shown = View | 'call' | 'phases'
+const view = ref<Shown>(hasStages(props.row.proof_system) ? 'stages' : 'call')
+const VIEWS = computed(() =>
+  [
+    ...(hasStages(props.row.proof_system)
+      ? ([
+          ['stages', 'Stages'],
+          ['field', props.row.proof_system === 'longfellow-libzk-v1' ? 'Stages × circuit' : 'Stages × field'],
+        ] as const)
+      : []),
+    ['operations', 'Operations'],
+    ['libraries', 'Libraries'],
+    ['functions', 'Functions'],
+    ['call', 'Call tree'],
+    ...(shown.value?.phases?.length ? ([['phases', 'Phases']] as const) : []),
+  ] as Array<readonly [Shown, string]>,
+)
 async function load() {
   if (!props.row.profiled_runs) return
   try {
@@ -56,8 +74,13 @@ onMounted(load)
 watch(() => props.row.profiled_runs, load)
 const shown = computed(() => profile.value?.[side.value] ?? null)
 watch(shown, (s) => {
-  if (!s?.phases?.length) view.value = 'samples'
+  if (view.value === 'phases' && !s?.phases?.length) view.value = hasStages(props.row.proof_system) ? 'stages' : 'call'
 })
+/** The side's measured time (the medians of its steps), which the groups' shares divide. */
+const sideMs = computed(() => bars.value[side.value === 'prove' ? 0 : 1]!.total)
+const groups = computed(() =>
+  shown.value && view.value !== 'call' && view.value !== 'phases' ? group(shown.value.stacks, view.value, props.row.proof_system, side.value) : [],
+)
 </script>
 
 <template>
@@ -99,17 +122,27 @@ watch(shown, (s) => {
               {{ s === 'prove' ? 'Prover' : 'Verifier' }}
             </button>
           </div>
-          <div v-if="shown.phases?.length" class="flex overflow-hidden rounded border border-line">
-            <button type="button" class="px-2 py-0.5" :class="view === 'samples' ? 'bg-ink text-surface' : 'bg-surface'" data-profile-view="samples" @click="view = 'samples'">Samples</button>
-            <button type="button" class="px-2 py-0.5" :class="view === 'phases' ? 'bg-ink text-surface' : 'bg-surface'" data-profile-view="phases" @click="view = 'phases'">Phases</button>
+          <div class="flex flex-wrap overflow-hidden rounded border border-line">
+            <button
+              v-for="[id, label] in VIEWS"
+              :key="id"
+              type="button"
+              class="px-2 py-0.5"
+              :class="view === id ? 'bg-ink text-surface' : 'bg-surface'"
+              :data-profile-view="id"
+              @click="view = id"
+            >
+              {{ label }}
+            </button>
           </div>
           <span class="text-muted tabular-nums" data-profile-count>
             {{ shown.samples.toLocaleString('en-GB') }} samples, {{ profile.runs }} run{{ profile.runs === 1 ? '' : 's' }}<template v-if="shown.lost"> · {{ shown.lost }} not traced</template>
           </span>
         </div>
         <TechPhaseTree v-if="view === 'phases' && shown.phases?.length" :phases="shown.phases" />
-        <TechFlameGraph v-else-if="shown.samples" :stacks="shown.stacks" />
-        <p v-else class="text-[11px] text-muted">No samples: the step was shorter than the sampling interval.</p>
+        <p v-else-if="!shown.samples" class="text-[11px] text-muted">No samples: the step was shorter than the sampling interval.</p>
+        <TechFlameGraph v-else-if="view === 'call'" :stacks="shown.stacks" />
+        <TechGroupedBreakdown v-else :key="`${view}|${side}`" :groups="groups" :total="shown.samples" :ms="sideMs" />
       </template>
     </div>
   </div>

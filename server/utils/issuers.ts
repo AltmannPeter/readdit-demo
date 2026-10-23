@@ -10,7 +10,7 @@
 // presentation on. A demo verifier: in production the trust list comes from the trust framework.
 // /tech lists the added issuers and removes one on request. mso_mdoc only; the BBS verifier trusts
 // its one configured issuer.
-import { createHash } from 'node:crypto'
+import { X509Certificate, createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -84,6 +84,17 @@ export function presentedIssuer(presentation: string): string | null {
     return first instanceof Uint8Array ? Buffer.from(first).toString('base64') : null
   } catch {
     return null
+  }
+}
+
+/** A certificate (base64 DER) for the log and the trace: its subject and the start of its SHA-256. */
+export function issuerName(der: string): string {
+  const bytes = Buffer.from(der, 'base64')
+  const fp = createHash('sha256').update(bytes).digest('hex').slice(0, 16)
+  try {
+    return `${new X509Certificate(bytes).subject.replace(/\n/g, ', ')} (sha-256 ${fp}…)`
+  } catch {
+    return `sha-256 ${fp}…`
   }
 }
 

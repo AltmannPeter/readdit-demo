@@ -197,7 +197,7 @@ export interface VerifyMetrics {
 
 export type VerifyResult =
   | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
-  | { ok: false; reason: string; code?: string; input?: string | null; metrics?: VerifyMetrics }
+  | { ok: false; reason: string; code?: string; input?: string | null; certificate?: string | null; metrics?: VerifyMetrics }
 
 /** The HTTP status text for a prover refusal code (docs/backend-api.md, "Prover refusals"). The code
  *  itself travels in the error body as `data.error`. */
@@ -440,7 +440,8 @@ export const verifier = {
 
   /** By the addon of the circuit the presentation names. */
   /** `learned_issuers`: Document Signer certificates (base64 DER) trusted besides the configured
-   *  trust anchors (server/utils/issuers.ts). */
+   *  trust anchors (server/utils/issuers.ts). An `issuer_key_set` refusal for a certificate that is
+   *  not trusted carries it as `certificate` (base64 DER). */
   async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
     const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult), b.name)

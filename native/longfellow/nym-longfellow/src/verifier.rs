@@ -58,10 +58,14 @@ pub struct Refused {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub input: Option<&'static str>,
   pub reason: String,
+  /// For `issuer_key_set` when the certificate is not trusted: the certificate presented, as
+  /// base64 DER, so the site can trust it on the next try (`/tech`'s Trust new issuers).
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub certificate: Option<String>,
 }
 
 fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
-  Refused { code, input: None, reason: reason.into() }
+  Refused { code, input: None, reason: reason.into(), certificate: None }
 }
 
 pub struct Verifier {
@@ -118,7 +122,7 @@ impl Verifier {
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
       Ok((results, system_id)) => json!({ "ok": true, "system_id": system_id, "results": results, "metrics": metrics }),
-      Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "metrics": metrics }),
+      Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "certificate": r.certificate, "metrics": metrics }),
     }
   }
 
@@ -150,7 +154,13 @@ impl Verifier {
       use base64::Engine;
       input.learned_issuers.iter().filter_map(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).collect()
     };
-    let signer = self.anchors.validate(certificate, now, &learned).map_err(|e| refuse("issuer_key_set", e))?;
+    let signer = self.anchors.validate(certificate, now, &learned).map_err(|e| {
+      use base64::Engine;
+      // An unknown certificate goes back with the refusal (not one that is known but out of date).
+      let unknown = e.contains("not a trust anchor");
+      let certificate = unknown.then(|| base64::engine::general_purpose::STANDARD.encode(certificate));
+      Refused { certificate, ..refuse("issuer_key_set", e) }
+    })?;
 
     // 3. proof_time.
     let proof_time = dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?;
@@ -203,6 +213,7 @@ impl Verifier {
         return Err(Refused {
           code: "proof_invalid",
           input: Some(circuit),
+          certificate: None,
           reason: format!("the {circuit} circuit's proof does not verify with the verifier's public inputs"),
         });
       }

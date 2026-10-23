@@ -4,7 +4,9 @@
 // services.ts fails that call as if the addon had thrown. Without the variable the route answers
 // 404 and no call is ever failed.
 
-export const FAULT_STEPS = ['prover.info', 'prover.sign', 'prover.prove', 'verifier.info', 'verifier.verify'] as const
+// `issuer.read`: the site cannot read the Document Signer certificate from the next presentation
+// (server/utils/issuers.ts), so only the verifier's refusal names an unknown issuer.
+export const FAULT_STEPS = ['prover.info', 'prover.sign', 'prover.prove', 'verifier.info', 'verifier.verify', 'issuer.read'] as const
 export type FaultStep = (typeof FAULT_STEPS)[number]
 
 const g = globalThis as unknown as { __communityFaults?: Partial<Record<FaultStep, number>> }

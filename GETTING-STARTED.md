@@ -213,10 +213,15 @@ screen.
   slower. **Clear** (click twice) empties the file and the profiles. Click a figure for its
   breakdown:
   - **Prove or Verify:** the time by step (device signature, witness, proof; BBS: the commitments,
-    the BBS proof and each plugin) as stacked bars. Once the row has a profiled run: a flame graph
-    of the samples (click a box to zoom in; Rust's core, alloc and std frames are hidden unless
-    ticked) with the functions that were running, and for Vega its phases with their time and,
-    on one thread, their heap.
+    the BBS proof and each plugin) as stacked bars. Once the row has a profiled run, the samples in
+    views you switch between: **Stages** (the protocol's steps, such as Longfellow's Ligero
+    commitment, sumcheck and Ligero proof, each with its parts), **Stages × circuit** (Longfellow:
+    hash or signature circuit; **Stages × field** for the others), **Operations** (field
+    arithmetic, FFT and Reed–Solomon, hashing, curve operations, memory), **Libraries**,
+    **Functions**, **Call tree** (a flame graph; click a box to zoom in; Rust's core, alloc and std
+    frames are hidden unless ticked) and, for Vega, **Phases** (its own phases with their time and,
+    on one thread, their heap). Each group shows its share and about how many ms that is; click it
+    for its parts, down to the functions. Samples that fit no stage are under "Other".
   - **Proof or Presentation:** the bytes by part. The presentation by field (the proof, the issuer
     key set, the proof time, the results); the proof by part: Vega by the fields of its proof type,
     Longfellow by circuit (commitment, sumcheck, Ligero rows, opened columns, Merkle path), BBS the

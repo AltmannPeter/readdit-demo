@@ -23,6 +23,13 @@ use serde_json::{Value as Json, json};
 /// one per scheduler tick); the profile reports the samples it got.
 pub const HZ: i32 = 997;
 
+/// Code the sampler does not walk a stack from: the unwinder itself, the dynamic loader and the
+/// vDSO. The C library is walked: memcpy, memset and malloc take real time in a proof (copying and
+/// zeroing large vectors), and a sampler that skipped them would hand their time to the rest.
+/// glibc's loader lock, the one lock a stack walk takes, is recursive, so a walk from inside the C
+/// library cannot deadlock its own thread.
+const BLOCKLIST: &[&str] = &["libgcc", "vdso", "ld-linux", "ld-musl", "libunwind", "dyld"];
+
 /// A sampler in progress, or none (profiling off, or another one running).
 pub struct Sampler {
   guard: Option<pprof::ProfilerGuard<'static>>,
@@ -34,16 +41,13 @@ impl Sampler {
   /// Starts sampling when `on`. `roots`: the path prefixes of the addon's own code
   /// (`["nym_vega::", "vega_age::", …]`).
   pub fn start(on: bool, roots: &'static [&'static str]) -> Self {
-    let guard = on.then(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(&["libc", "libgcc", "pthread", "vdso", "libsystem"]).build().ok()).flatten();
+    let guard = on.then(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(BLOCKLIST).build().ok()).flatten();
     Sampler { guard, started: Instant::now(), roots }
   }
 
   /// Stops sampling: the folded stacks (`stacks`), the samples kept (`samples`), the samples of
   /// other threads (`other`) and those whose stack could not be walked (`lost`), the wall time
   /// sampled in ms (`ms`) and the requested rate (`hz`). None when the sampler did not run.
-  /// Samples taken inside the system's C library (memcpy, malloc, …) are not taken at all: pprof
-  /// does not walk a stack from there (`blocklist`), as unwinding inside it from a signal handler
-  /// is not safe everywhere.
   pub fn finish(self) -> Option<Json> {
     let guard = self.guard?;
     let ms = (self.started.elapsed().as_secs_f64() * 1e6).round() / 1e3;

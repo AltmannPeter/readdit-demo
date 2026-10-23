@@ -35,16 +35,18 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   `profile`: `{ hz, ms, samples, other, lost, stacks }` from the sampling profiler
   (`native/nym-profile`, pprof): `stacks` maps folded stacks (`entry;…;leaf`, the step's own code
   down to the function that was running, Rust names without generics) to samples; `other` counts
-  samples of other threads, `lost` samples whose stack could not be walked; samples inside the C
-  library are not taken. Vega's witness, prove and verify add `phases`, vega-prover's own tracing
+  samples of other threads, `lost` samples whose stack could not be walked. Vega's witness, prove and verify add `phases`, vega-prover's own tracing
   spans as a tree (`{ name, n, ms, mb, children }`, siblings of one name merged; `mb` on one thread
-  only). `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
+  only), each phase ending at the library's own `elapsed_ms` event for it. `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
   one addon step at a time while Profiling is on (the sampler is process-wide).
 - **Learned issuers.** The verify input takes `"learned_issuers": [<base64 DER>, …]` (absent:
   none): Document Signer certificates trusted besides the configured trust anchors, any P-256
   certificate, self-signed or not, valid at `now`. `server/utils/issuers.ts` passes the issuers
   `/tech` added, plus, with "Trust new issuers" on, an unknown one the presentation carries; the
-  server adds that one only once the presentation is accepted.
+  server adds that one only once the presentation is accepted. An `issuer_key_set` refusal for a
+  certificate that is not trusted carries it: `"certificate": <base64 DER>` (null otherwise). When
+  the site could not read the certificate itself, or read another one, it verifies once more with
+  that certificate in `learned_issuers` (log: `[issuers] … verifying again with it trusted`).
 - **Proof parts.** The prove metrics carry `proof_parts`, the proof's bytes by part
   (`[{ name, bytes, code?, children }]`, adding up to `proof_bytes`): Vega by the fields of
   vega-prover's proof type, two levels, as bincode writes them (`nym-vega/src/sizes.rs`);
