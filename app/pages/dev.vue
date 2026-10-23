@@ -88,12 +88,15 @@ watch(
   <div class="vd page">
     <header class="top">
       <DevAppBrand />
-      <ViewSwitch />
+      <div class="top-right">
+        <QuickNav />
+        <ViewSwitch />
+      </div>
     </header>
 
     <aside class="side">
       <section>
-        <h2 class="section-label">Accepted proof systems</h2>
+        <h2 class="section-label">Proof systems</h2>
         <DevAcceptedInfo />
       </section>
       <section>
@@ -106,10 +109,6 @@ watch(
         </h2>
         <DevPresentationPicker />
         <button v-if="done" type="button" class="link clear" @click="clear">Clear</button>
-      </section>
-      <section>
-        <h2 class="section-label">Community account</h2>
-        <DevAccountInfo />
       </section>
       <p class="keys mono">1 2 3 request · S scan · R clear · E Z highlight · I inspector</p>
     </aside>
@@ -133,6 +132,7 @@ watch(
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas: 'top top' 'side main';
 }
+.top-right { display: flex; align-items: center; gap: 12px; }
 .top {
   grid-area: top;
   display: flex;

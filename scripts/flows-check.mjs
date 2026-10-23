@@ -49,7 +49,8 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
-// --only K,M: run only these groups that need no earlier state (E F H I J K L M P V G), after the preconditions.
+// --only K,M: run only these groups (E F H I J K L M P V G), after the preconditions, in the full run's
+// order whatever the order given. G needs a session from a group before it (P, V or K, say).
 const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
@@ -401,7 +402,22 @@ async function open(button, phoneName = TEEN) {
   await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
   await usePhone(phoneName)
 }
+/** A button in the header (it has no Sign up or Log in since 2026-10-23). */
 const headerButton = (name) => page.getByRole('banner').getByRole('button', { name, exact: true })
+/** The page's Sign up or Log in (the home page's and the open communities' notice). On a page
+ *  without them (a gated community, a post) the logo goes home first, without a reload, so the
+ *  phone on screen stays. */
+async function siteButton(name) {
+  const b = page.getByRole('main').getByRole('button', { name, exact: true }).first()
+  if (!(await b.isVisible().catch(() => false))) {
+    await page.getByRole('banner').locator('a[data-home]').click()
+    await page.waitForURL((u) => u.pathname === '/')
+    await b.waitFor({ timeout: 10_000 })
+  }
+  return b
+}
+/** Logged out: the header shows no account menu. */
+const waitLoggedOut = () => page.waitForFunction(() => !document.querySelector('header [data-user-menu]'), null, { timeout: 10_000 })
 /** The id of the session the dialog created after `before`. */
 async function newSessionId(before) {
   for (let i = 0; i < 100 && lastSession() === before; i++) await page.waitForTimeout(100)
@@ -438,7 +454,7 @@ async function closeDialog(how = 'escape') {
 }
 /** Sign up or log in through the dialog, start to end, without screenshots. */
 async function signIn(name, expectText, phoneName = TEEN) {
-  await open(headerButton(name), phoneName)
+  await open(await siteButton(name), phoneName)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -565,7 +581,7 @@ async function groupA() {
   begin('S1', 'log-in with no account')
   m = mark()
   await goto('/')
-  await open(headerButton('Log in'))
+  await open(await siteButton('Log in'))
   await guideIs('signin-qr')
   await scan()
   await readRequest()
@@ -664,8 +680,9 @@ async function groupA() {
   begin('H2', 'log-out')
   await page.getByRole('banner').getByText(`u/${created.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
-  check('header shows Sign up and Log in', await headerButton('Sign up').isVisible())
+  await waitLoggedOut()
+  check('no Sign up or Log in in the header', !(await headerButton('Sign up').count()) && !(await headerButton('Log in').count()))
+  check('the page offers Sign up and Log in', await (await siteButton('Sign up')).isVisible() && await (await siteButton('Log in')).isVisible())
   check('server: no account for this browser', (await me()).account === null)
   await guideIs('start')
 
@@ -680,8 +697,8 @@ async function groupA() {
   begin('S2', 'sign-up when the pseudonym already has an account')
   await page.getByRole('banner').getByText(`u/${created.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Sign up').waitFor()
-  await open(headerButton('Sign up'))
+  await waitLoggedOut()
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -870,7 +887,7 @@ async function groupC(created) {
   check('the proven age stays with the account', !!(await accounts())[0].birthDateRange?.ge)
 
   begin('S3', 'a banned account at log-in')
-  await open(headerButton('Log in'))
+  await open(await siteButton('Log in'))
   await guideIs('signin-qr')
   await guideSays('Log-in after the ban')
   await scan()
@@ -885,7 +902,7 @@ async function groupC(created) {
   await closeDialog('button')
 
   begin('S4', 'a banned account at sign-up')
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await guideIs('signin-qr')
   await guideSays('Sign-up after the ban')
   await scan()
@@ -1070,7 +1087,7 @@ async function groupE() {
     route.fulfill({ json: { circuits: [{ system_id: LONGFELLOW, proof_system: 'longfellow-libzk-v1' }], schemes: [] } }),
   )
   let m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
@@ -1110,7 +1127,7 @@ async function groupE() {
     })
     m = mark()
     const before = lastSession()
-    await open(headerButton('Sign up'))
+    await open(await siteButton('Sign up'))
     await expectFresh('signin-qr', before)
     await scan()
     await readRequest()
@@ -1132,7 +1149,7 @@ async function groupE() {
     await route.fulfill({ status: 200, contentType: 'application/oauth-authz-req+jwt', body: await stranger.sign(payloadOf((await res.text()).trim())) })
   })
   m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await phoneShows('Verifier is not Trusted')
   await guideIs('wallet-error')
@@ -1326,7 +1343,7 @@ async function groupH() {
   begin('S15a', 'the verifier fails when a request starts')
   await armFault('verifier.info')
   let m = mark()
-  await headerButton('Sign up').click()
+  await (await siteButton('Sign up')).click()
   await dialogShows('Verification is not available right now. Try again later.')
   await dialogShows('Not completed')
   await guideIs('unavailable')
@@ -1348,7 +1365,7 @@ async function groupH() {
   // answers, and $fetch retries a GET that answers 503 once.
   for (let k = 0; k < 4; k++) await armFault('prover.info')
   m = mark()
-  await headerButton('Sign up').click()
+  await (await siteButton('Sign up')).click()
   await phoneShows('Connection Error')
   await guideIs('wallet-error')
   await guideSays('could not reach the provers')
@@ -1364,7 +1381,7 @@ async function groupH() {
     begin(id, `the prover fails at ${step}`)
     await armFault(step)
     m = mark()
-    await open(headerButton('Sign up'))
+    await open(await siteButton('Sign up'))
     await scan()
     await readRequest()
     await phone().getByRole('button', { name: 'Share' }).click()
@@ -1385,7 +1402,7 @@ async function groupH() {
   begin('S15e', 'the verifier fails at verification')
   await armFault('verifier.verify')
   m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1470,7 +1487,7 @@ async function groupI() {
   begin('G3', 'an existing account logs in with the age verified')
   await page.getByRole('banner').getByText(`u/${account.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/teenspace')
   await guideIs('age-signin')
   await open(page.getByRole('button', { name: 'Verify age with wallet' }))
@@ -1515,7 +1532,7 @@ async function groupJ() {
   await openPage()
 
   begin('C0', 'three phones, one credential each')
-  await open(headerButton('Sign up'), TEEN)
+  await open(await siteButton('Sign up'), TEEN)
   check('the dialog names the phone', (await phoneLabel()) === TEEN, await phoneLabel())
   await phone().getByRole('button', { name: 'Change view' }).click()
   let cards = phone().getByRole('button', { name: /^Open Age and pseudonym details, birth date/ })
@@ -1555,11 +1572,11 @@ async function groupJ() {
   const teenAccount = (await me()).account
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Sign up').waitFor()
+  await waitLoggedOut()
 
   begin('C1', "sign-up on the adult's phone")
   let m = mark()
-  await open(headerButton('Sign up'), ADULT)
+  await open(await siteButton('Sign up'), ADULT)
   await scan()
   await readRequest()
   await guideSays('born 20 May 1990')
@@ -1598,7 +1615,7 @@ async function groupJ() {
   // Logged out, the combined request lets the adult's phone try c/teenspace.
   await page.getByRole('banner').getByText(`u/${adultAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/teenspace')
   m = mark()
   await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
@@ -1639,8 +1656,8 @@ async function groupJ() {
   check('the teen account logs in', (await me()).account?.handle === teenAccount.handle)
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
-  await open(headerButton('Log in'), ADULT)
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), ADULT)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1656,11 +1673,21 @@ async function groupJ() {
 
 async function groupG() {
   begin('T', 'the technical view shows the sessions')
+  if (!ctxBrowser) await openPage()
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.waitForLoadState('networkidle')
-  await tech.getByText('Vega, Longfellow and BBS addons, in process').waitFor()
-  check('six service cards: a prover and a verifier per addon', (await tech.getByText(/^(Vega|Longfellow|BBS) (prover|verifier)$/).count()) === 6)
+  await tech.getByRole('heading', { name: 'Proof systems' }).waitFor()
+  check('no addon badge', !(await tech.getByText(/addons?, in process/).count()))
+  const icons = tech.getByRole('button', { name: /^(Vega|Longfellow|BBS) (prover|verifier)$/ })
+  eq('six service icons: a prover and a verifier per addon', await icons.count(), 6)
+  check('every service is up', (await tech.locator('[data-service] .bg-emerald-500').count()) === 6)
+  check('no service detail until an icon is clicked', !(await tech.locator('[data-service-detail]').count()))
+  await tech.getByRole('button', { name: 'Longfellow prover' }).click()
+  await tech.locator('[data-service-detail]', { hasText: 'Circuits read once at start' }).waitFor()
+  check('the Longfellow prover: its circuits and their memory', /Circuits read once at start: \d+ ms, [\d.]+ MB/.test(await tech.locator('[data-service-detail]').textContent()))
+  await tech.getByRole('button', { name: 'Longfellow prover' }).click()
+  check('a second click closes it', !(await tech.locator('[data-service-detail]').count()))
   await tech.getByText('Capability negotiation').waitFor()
   check('the technical view loads', true)
   await tech.close()
@@ -1684,8 +1711,10 @@ async function groupK() {
 
   begin('K1', 'c/france logged out: join with its own pseudonym, without a Community account')
   await goto('/c/france')
-  await pageShows('c/france asks for proof of human')
+  await pageShows('c/france is fully anonymous')
+  await pageShows('Prove that you are a real person. Your pseudonym will be unique to /france. Association to your main account is optional. One account per person.')
   await guideIs('community-join')
+  await guideSays('is fully anonymous. The person proves they are real with a pseudonym for france.community.example')
   await guideSays('No Community account is needed')
   check('no c/france posts before joining', !(await page.locator('a[href^="/c/france/p"]').count()))
   let m = mark()
@@ -1742,13 +1771,13 @@ async function groupK() {
   check('the Community pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
   await goto('/c/france')
   await guideIs('community-join')
-  await guideSays('join and link the two, or log out and join separately')
-  await visible('page: logged in as …', page.getByText(`You are logged in as u/${teenMain.handle}.`))
+  await guideSays('or join separately, which logs out first')
+  await visible(`page: Link to u/${teenMain.handle}`, page.getByRole('button', { name: `Link to u/${teenMain.handle}` }))
   check('no plain Join with wallet while logged in', !(await page.getByRole('button', { name: 'Join with wallet' }).count()))
-  await visible('Log out and join separately', page.getByRole('button', { name: 'Log out and join separately' }))
+  await visible('Join separately', page.getByRole('button', { name: 'Join separately', exact: true }))
   await shot('32-france-link-choice')
   m = mark()
-  await open(page.getByRole('button', { name: `Join and link to u/${teenMain.handle}` }), TEEN)
+  await open(page.getByRole('button', { name: `Link to u/${teenMain.handle}` }), TEEN)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1811,7 +1840,7 @@ async function groupK() {
   check('the banned account’s comment is hidden', !(await page.getByText('Same in our town.').count()))
   await page.getByRole('banner').getByText(`u/${teenMain.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/france')
   await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
   await scan()
@@ -1846,7 +1875,7 @@ async function groupK() {
   check("the c/france account's own ban survives", (await accounts()).find((a) => a.handle === adultFr.handle).banned?.reason === 'Community rules')
   await mod2.dispose()
 
-  begin('K7', 'logged in, "Log out and join separately" joins without linking')
+  begin('K7', 'logged in, "Join separately" logs out and joins without linking')
   await resetDemo()
   await openPage()
   await goto('/')
@@ -1854,7 +1883,7 @@ async function groupK() {
   const teenMain2 = (await me()).account
   await goto('/c/france')
   await guideIs('community-join')
-  await open(page.getByRole('button', { name: 'Log out and join separately' }), TEEN)
+  await open(page.getByRole('button', { name: 'Join separately', exact: true }), TEEN)
   check('logged out of Community', (await me()).account === null)
   await scan()
   await readRequest()
@@ -1903,7 +1932,7 @@ async function groupM() {
 
   begin('M2', "both accepted: the request offers both source formats as alternatives; the teen signs up on the teen's BBS phone")
   let m = mark()
-  await open(headerButton('Sign up'), TEEN_BBS)
+  await open(await siteButton('Sign up'), TEEN_BBS)
   await scan()
   await readRequest()
   const view = await sessionView(lastSession())
@@ -1969,8 +1998,8 @@ async function groupM() {
   begin('M4', "the teen's mdoc gives another account: the same seed, another PRF")
   await page.getByRole('banner').getByText(`u/${bbsAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
-  await open(headerButton('Log in'), TEEN)
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), TEEN)
   await scan()
   await readRequest()
   check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
@@ -1983,7 +2012,7 @@ async function groupM() {
   begin('M5', "BBS only: the mdoc phones cannot answer; the teen's BBS phone logs in to the same BBS account")
   eq('server: Vega off', (await accept('vega-v1', false)).body.acceptedProofSystems, [BBS_SYSTEM])
   m = mark()
-  await open(headerButton('Log in'), ADULT)
+  await open(await siteButton('Log in'), ADULT)
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
@@ -1993,14 +2022,14 @@ async function groupM() {
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
-  await open(headerButton('Log in'), TEEN)
+  await open(await siteButton('Log in'), TEEN)
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
-  await open(headerButton('Log in'), TEEN_BBS)
+  await open(await siteButton('Log in'), TEEN_BBS)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -2010,7 +2039,7 @@ async function groupM() {
 
   begin('M6', 'c/france with BBS: its own pseudonym, linked when chosen')
   await goto('/c/france')
-  await open(page.getByRole('button', { name: `Join and link to u/${bbsAccount.handle}` }), TEEN_BBS)
+  await open(page.getByRole('button', { name: `Link to u/${bbsAccount.handle}` }), TEEN_BBS)
   await scan()
   await readRequest()
   await phoneShows('Specific to france.community.example')
@@ -2026,8 +2055,8 @@ async function groupM() {
   await call(mod, 'POST', '/api/mod/ban', { data: { pseudonym: bbsAccount.pseudonym } })
   await mod.dispose()
   await goto('/')
-  await headerButton('Sign up').waitFor()
-  await open(headerButton('Sign up'), TEEN_BBS)
+  await waitLoggedOut()
+  await open(await siteButton('Sign up'), TEEN_BBS)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -2104,7 +2133,7 @@ async function groupM() {
   begin('M10', "a switch in /tech applies to a QR code already on screen")
   await accept(BBS_SYSTEM, false)
   await goto('/')
-  await open(headerButton('Log in'), ADULT)
+  await open(await siteButton('Log in'), ADULT)
   eq('Vega only when the QR code appears', (await sessionView(lastSession())).offer.zkp_req.system_id_values, [VEGA])
   await accept(BBS_SYSTEM, true)
   await accept('vega-v1', false)
@@ -2145,7 +2174,7 @@ async function groupL() {
 
   begin('L1', 'nothing accepted (the demo\'s start): the dialog stops before the QR code')
   let m = mark()
-  await headerButton('Sign up').click()
+  await (await siteButton('Sign up')).click()
   await dialogShows('No proof accepted')
   await dialogShows('Community does not accept any proof yet. Switch one on in the technical view, then try again.')
   await guideIs('none-accepted')
@@ -2162,7 +2191,7 @@ async function groupL() {
 
   begin('L2', 'Longfellow only: the teen signs up; the request offers the Longfellow circuit')
   m = mark()
-  await open(headerButton('Sign up'), TEEN)
+  await open(await siteButton('Sign up'), TEEN)
   await scan()
   await readRequest()
   let sv = await sessionView(lastSession())
@@ -2218,7 +2247,7 @@ async function groupL() {
   await goto('/')
   await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await signIn('Log in', `Logged in as u/${lf.handle}`)
   eq('with Vega', (await sessionView(lastSession())).circuit?.system_id, VEGA)
 
@@ -2249,7 +2278,7 @@ async function groupL() {
   await goto('/')
   await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Sign up').waitFor()
+  await waitLoggedOut()
   await signIn('Sign up', 'Account created: u/', ADULT)
   await goto('/c/afterdark')
   await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
@@ -2351,11 +2380,11 @@ async function groupP() {
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.locator('[data-threads]').waitFor()
-  check('/tech: the switch says what off means', (await tech.locator('[data-threads-text]').textContent()).includes(`Off: Vega and BBS run on 1 thread. On, they use all ${cores} cores`))
+  eq('/tech: off, 1 thread', (await tech.locator('[data-threads-text]').textContent()).trim(), '1 thread')
   await tech.locator('[data-threads]').check()
   for (let k = 0; k < 30 && !(await overview()).multithreading; k++) await page.waitForTimeout(100)
   eq('server: on', (await overview()).multithreading, true)
-  await tech.locator('[data-threads-text]', { hasText: `On: Vega and BBS run on ${cores} threads` }).waitFor()
+  await tech.locator('[data-threads-text]', { hasText: cores === 1 ? '1 thread' : `${cores} threads` }).waitFor()
   check('/tech: the switch says how many', true)
   eq(`Vega: ${cores} threads`, await signUp(VEGA), { status: 'verified', prove: cores, verify: cores })
   eq(`BBS: ${cores} threads`, await signUp('bbs'), { status: 'verified', prove: cores, verify: cores })
@@ -2373,6 +2402,14 @@ async function groupP() {
   await tech.locator('[data-measured-row]').first().waitFor()
   eq('/tech: one table row per group', await tech.locator('[data-measured-row]').count(), o.measurements.rows.length)
   check('/tech: no estimates', !(await tech.getByText('Estimates per step').count()))
+  const mem = lf?.memory
+  check('Longfellow memory: the circuits, the witness and the proving work, prover and verifier', mem?.prove.keys_mb > 0 && mem.prove.witness_mb > 0 && mem.prove.work_mb > 0 && mem.verify.keys_mb > 0 && mem.verify.work_mb > 0, JSON.stringify(mem))
+  await tech.getByRole('heading', { name: 'Benchmark' }).waitFor()
+  check('/tech: no process peak column', !(await tech.getByText('Process peak').count()))
+  await tech.locator(`[data-measured-row="${LONGFELLOW_SYSTEM}"] [data-measured-memory="prove"]`).click()
+  const breakdown = tech.locator('[data-memory-breakdown]')
+  await breakdown.waitFor()
+  for (const t of ['Prover', 'Verifier', 'Circuits and keys loaded at start', 'Witness, held into the proof', 'Proving', 'Verifying']) check(`memory breakdown: ${t}`, (await breakdown.getByText(t, { exact: false }).count()) > 0)
   if (o.measurements.file.startsWith('/')) eq('the file has a line per run', readFileSync(o.measurements.file, 'utf8').trim().split('\n').length, 5)
 
   begin('P4', 'a demo reset switches multithreading off and keeps the measurements; Clear empties them')
@@ -2421,7 +2458,21 @@ async function groupV() {
   await page.waitForURL('**/dev')
   await devReady()
   check('no guide panel', !(await guidePanel().count()))
-  eq('the info window: Vega on, the others off', await dev().locator('.info li.on .name').allTextContents(), ['Vega (mdoc circuit)'])
+  eq('the proof systems, grouped: VegaMC and Longfellow, then BBS', [await dev().locator('.info .group.mso_mdoc .name').allTextContents(), await dev().locator('.info .group.bbs_cd .name').allTextContents()], [['VegaMC', 'Longfellow'], ['BBS']])
+  eq('VegaMC on, the others off', await dev().locator('.info .sys.on .name').allTextContents(), ['VegaMC'])
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).click()
+  for (let k = 0; k < 30 && !(await overview()).acceptedProofSystems.includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('switched on from /dev: the server accepts Longfellow too', (await overview()).acceptedProofSystems, ['vega-v1', LONGFELLOW_SYSTEM])
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"][aria-checked="true"]`).waitFor()
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).click()
+  for (let k = 0; k < 30 && (await overview()).acceptedProofSystems.includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('and off again', (await overview()).acceptedProofSystems, ['vega-v1'])
+  check('no account panel in /dev', !(await dev().getByText('Community account').count()))
+  eq('the quick links', (await page.getByRole('navigation', { name: 'Quick links' }).getByRole('link').allTextContents()).map((t) => t.trim()), ['c', 'd', 't', 'm'])
+  for (const [short, full] of [['/c', '/'], ['/d', '/dev'], ['/t', '/tech'], ['/m', '/mod']]) {
+    const r = await page.request.get(short, { maxRedirects: 0 })
+    check(`${short} redirects to ${full}`, r.status() >= 300 && r.status() < 400 && new URL(r.headers().location, BASE).pathname === full, `${r.status()} ${r.headers().location}`)
+  }
   check('no proof system switch here', !(await dev().locator('input[type=checkbox]').count()))
   check('an empty diagram', await dev().getByText('Choose an age proof and press Request').isVisible())
 
@@ -2438,7 +2489,7 @@ async function groupV() {
   eq('Simulate scan lists the three phones', (await pick.getByRole('radio').allTextContents()).map((t) => t.split(' · ')[0].trim()), [TEEN, ADULT, TEEN_BBS])
   const inGroup = async (cls) => (await pick.locator(`.group.${cls} [role=radio]`).allTextContents()).map((t) => t.split(' · ')[0].trim())
   eq('grouped by encoding: the circuits\' mdoc phones, then BBS', [await inGroup('mso_mdoc'), await inGroup('bbs_cd')], [[TEEN, ADULT], [TEEN_BBS]])
-  check("the list says which phones' credentials the site accepts", (await pick.getByRole('radio', { name: new RegExp(TEEN_BBS) }).textContent()).includes('not accepted now') && (await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).textContent()).includes('accepted: Vega'))
+  check("the list says which phones' credentials the site accepts", (await pick.getByRole('radio', { name: new RegExp(TEEN_BBS) }).textContent()).includes('not accepted now') && (await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).textContent()).includes('accepted: VegaMC'))
   await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).click()
   await popup().getByRole('button', { name: 'Scan', exact: true }).click()
   eq("the teen's phone beside the code", (await devPhone().locator('[data-phone-label]').textContent()).trim(), TEEN)
@@ -2471,7 +2522,7 @@ async function groupV() {
   await devPhone().getByRole('button', { name: 'Close' }).click()
   check('Close on the phone closes the popup', await popup().waitFor({ state: 'detached', timeout: 5_000 }).then(() => true, () => false))
   const r3 = await rows()
-  for (const t of ['Holder approved', 'Device key signs', 'Build witness', 'Generate ZK proof (Vega)', 'Send response (ZkpPresentation)', 'Verify ZK proof (Vega)', 'Result delivered']) {
+  for (const t of ['Holder approved', 'Device key signs', 'Build witness', 'Generate ZK proof (VegaMC)', 'Send response (ZkpPresentation)', 'Verify ZK proof (VegaMC)', 'Result delivered']) {
     check(`the diagram: ${t}`, r3.some((x) => x.includes(t)))
   }
   l = await latest()
@@ -2482,7 +2533,6 @@ async function groupV() {
   eq('the inspector: every check passed', await dev().locator('.checks li .st').allTextContents(), Array(9).fill('pass'))
   const acct = (await me()).account
   eq('the account: 13–17 proven', acct?.ageProofs?.map((p) => p.label), ['13–17'])
-  await dev().locator('.acct', { hasText: `u/${acct.handle}` }).waitFor()
   await dev().locator('.rows li .hit').first().click()
   await page.locator('.vd.backdrop [role=dialog]', { hasText: 'Create presentation request' }).waitFor()
   check('a step opens its details', true)
@@ -2493,7 +2543,7 @@ async function groupV() {
   await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Community' }).click()
   await page.waitForURL((u) => !u.pathname.startsWith('/dev'))
   await ready()
-  check('logged in: no Sign up in the header', !(await page.locator('header').getByRole('button', { name: 'Sign up' }).count()))
+  check('logged in: the account menu in the header', (await page.locator('header [data-user-menu]').count()) === 1)
   await page.click('a[href="/c/afterdark"]')
   await visible('c/afterdark: "You can\'t enter c/afterdark"', page.getByText("You can't enter c/afterdark"))
   await page.click('a[href="/c/teenspace"]')
@@ -2518,7 +2568,9 @@ try {
   const ttl = await preconditions()
   if (ONLY) {
     const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, P: groupP, V: groupV, G: groupG }
-    for (const g of ONLY) await groups[g]()
+    // In the full run's order: G reads the sessions the groups before it leave.
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'P', 'V', 'K', 'G']
+    for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
   const created = await groupA()

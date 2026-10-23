@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
   if (s.purpose.kind === 'community') {
     const slug = s.purpose.community
     const existing = communityAccount(slug, pseudonym)
-    // Linking only when the person chose "Join and link" (purpose.link) and is still logged in.
+    // Linking only when the person chose "Link to u/…" (purpose.link) and is still logged in.
     const loggedIn = mainAccount(b.data.pseudonym)
     const main = s.purpose.link && loggedIn && !loggedIn.banned ? loggedIn : undefined
     const linked = main ? linkedCommunityAccount(slug, main.pseudonym) : undefined

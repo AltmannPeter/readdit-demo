@@ -8,7 +8,7 @@ real: the site's server proves and verifies with Vega, Longfellow or BBS, each c
 into a Node addon.
 
 **Before you start:** Community accepts no proof system when it starts or after a demo reset. Tick
-one under **Community accepts** in the technical view (section 3) first; until then, sign-up, log-in
+one under **Proof systems** in the technical view (section 3) first; until then, sign-up, log-in
 and age checks stop at "No proof accepted".
 
 The demo has four views, each in its own browser window:
@@ -82,7 +82,7 @@ Log in, sign up and age checks open a dialog with a QR code on the left and a ph
 **Three phones, one credential each.** **Teen's phone** (born 14 March 2011) and **Adult's phone**
 (born 20 May 1990) each hold an "Age and pseudonym" credential (an mdoc). **Teen's BBS phone** holds
 the teen's "Age and pseudonym (BBS)", the same credential as a BBS credential (teal card); it can
-answer only when Community accepts BBS (technical view, "Community accepts"). The dialog shows one
+answer only when Community accepts BBS (technical view, "Proof systems"). The dialog shows one
 phone, named above it with its owner's age, in its own frame colour (grey, red or teal). **Swap
 phone** hands over to the next one (teen, adult, teen's BBS, then the teen's again) while the QR
 code is on screen, for example to show someone borrowing another person's phone. The chosen phone
@@ -136,12 +136,13 @@ Communities:
   nothing is shared. Swap to the adult's phone at the QR code: it makes the proof, but Community rejects
   it when you are logged in with the teen's account ("Pseudonym does not match"). Logged out, or
   logged in with the adult's account, you get in.
-- **c/france** is about French politics and society and wants real people,
-  no bots. It has its own pseudonym: **Join with wallet** asks for a pseudonym for
-  `france.community.example`, so each person gets one c/france account, not linked to their Community
-  account unless they choose to (only the issuer could link it otherwise). No age limit and no Community account needed. Posts and comments
+- **c/france** is about French politics and society and is fully anonymous. It has its own
+  pseudonym: **Join with wallet** asks for a pseudonym for `france.community.example`, unique to
+  /france, so each person gets one c/france account; association to the Community account is
+  optional. (Until the psc-based configuration replaces ssc, the issuer could still link it.) No
+  age limit and no Community account needed. Posts and comments
   there are visible only with a c/france account, and appear under the c/france pseudonym. Logged in
-  to Community, you choose: **Join and link to u/…**, or **Log out and join separately**. A Community
+  to Community, you choose: **Link to u/…**, or **Join separately** (which logs out first). A Community
   account can be linked to one c/france account only, and the other way round. A ban in c/france
   does not touch the Community account; a ban of the Community account also bans the linked c/france
   account, and unbanning lifts both.
@@ -159,32 +160,30 @@ Logged-in users can vote, join communities and comment.
 ## 3. The technical view
 
 **http://localhost:3000/tech** updates live while you use the site. It shows the newest wallet
-session; the chips under the service cards select earlier ones, and name the phone that was on
+session; the chips above the tiles select earlier ones, and name the phone that was on
 screen.
 
-- **Badge (top right).** The addons that are loaded: "Vega, Longfellow and BBS addons, in process".
-- **Community accepts.** Switches for the proof systems Community accepts: Vega and Longfellow (circuits
-  over the mdoc, `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**:
-  tick one before the demo. Vega and Longfellow use the same credential and give the same
-  pseudonym, so the same account; with both ticked the request lists both circuits, Vega first, and
-  the wallet uses Vega. With BBS and an mdoc system on, the request (`zkp_req`) offers both source
-  formats, and the phone on screen answers with its credential: the teen's phone with the mdoc,
-  the teen's BBS phone with the BBS credential. The two give different pseudonyms, so different
-  accounts. Only the ticked ones count, also for a QR code already on screen.
+- **Proof systems.** A switch per proof system: Vega and Longfellow (circuits over the mdoc,
+  `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**: tick one before
+  the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the same
+  account; with both ticked the request lists both circuits, Vega first, and the wallet uses Vega.
+  With BBS and an mdoc system on, the request (`zkp_req`) offers both source formats, and the phone
+  on screen answers with its credential: the teen's phone with the mdoc, the teen's BBS phone with
+  the BBS credential. The two give different pseudonyms, so different accounts. Only the ticked ones
+  count, also for a QR code already on screen.
+  Next to each switch, a small icon for its prover and one for its verifier; the dot is green when
+  it is loaded. Click one for its implementation and version, the time and memory its keys or
+  circuits took to load once at start, the threads it runs on now and the circuit it runs (the
+  verifier: also its trust anchor and the `proof_time` tolerance). The lock icon is **Request
+  signing**, the certificate that signs Community's requests.
 - **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
   one thread. On, they run on one thread per core, and the line next to the switch says how many.
   Longfellow always runs on one thread: Google's runtime has no parallel code.
-- **Prover and verifier cards** (Vega, Longfellow and BBS). Whether they are loaded, their
-  implementation and version, the time they took to load once at start, the threads they run on
-  now, and the circuit they run. The verifier card
-  shows its trust anchor and the `proof_time` tolerance. **Request signing** shows the certificate
-  that signs Community's requests.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
   presentation size, and the size of the signed request.
 - **Flow.** Each step with its time from the start of the session: session created, request
   fetched (with or without wallet metadata), device key signed, witness built (its
-  size and `proof_time`), proof created (witness and prove times, the server process's peak
-  memory), presentation received, proof verified or rejected (with the rule and the public input
+  size and `proof_time`), proof created (witness and prove times, the proof's memory), presentation received, proof verified or rejected (with the rule and the public input
   that failed), result applied to the account, or why not (cancelled, expired, no account,
   banned, a different account).
 - **Request.** What Community asked for (pseudonym, age range). **Raw JSON** shows the full signed
@@ -195,25 +194,26 @@ screen.
   the presentation or Community computes it itself. **Scheme** (BBS): what Community derives from the
   request, and what each plugin proves.
 - **Public outputs.** What Community learned: the pseudonym and, for age checks, `true`.
-- **Measured on this server.** Every presentation proved through the phone and verified, saved to
-  `.data/measurements.jsonl` (it survives restarts and **Reset demo**): per proof system, what was
-  proven (pseudonym, or pseudonym and age) and thread count, the number of runs, prove and verify
-  times (median and range), proof and presentation size, the memory the prover and the verifier
-  needed (their own heap, without Node or the keys loaded at start), and the server process's peak
-  memory (Linux only).
-  Prove is the phone's work, run here on the server's CPU, so a phone would be slower. The line
-  above the table names this machine. **Clear** (click twice) empties the file. Desktop times are measurements on Apple M5 and AMD Ryzen 9 (BBS: a 2-core cloud VM). Phone times are
-  not measured yet: they are desktop times multiplied by 1–5. Sending the proof assumes a 5–50 Mbit/s
-  mobile uplink. The bottom row gives the time per presentation.
+- **Benchmark.** Every presentation proved through the phone and verified, saved to
+  `.data/measurements.jsonl` (it survives restarts and **Reset demo**). The line under the heading
+  names this machine. Per proof system, what was proven (pseudonym, or pseudonym and age) and thread
+  count: runs, prove and verify times, proof and presentation size, and the prover's and the
+  verifier's memory. Click a memory figure for a stacked bar of what the side needs in total: the
+  keys or circuits loaded at start, the witness held into the proof (circuits), and the proving or
+  verifying work. Node and the other addons are not counted. Prove is the phone's work, run here on
+  the server's CPU, so a phone would be slower. **Clear** (click twice) empties the file.
 
 ## 4. The developer view
 
 **http://localhost:3000/dev**, or **Developer** in the site's header (and **Community** to go back).
+Every header also has one-letter links: **c** Community, **d** developer view, **t** technical view,
+**m** moderation; `/d`, `/t` and `/m` work as addresses too.
 It runs the same flow as the site, for developers: the newest wallet session of this browser, from
 either view, as a sequence diagram between the Community website, its backend and the wallet.
 There is no guide panel here.
 
-- **Accepted proof systems.** What the technical view accepts now. Switch them there.
+- **Proof systems.** VegaMC and Longfellow (circuits) and BBS, each with an on/off switch: the same
+  switches as the technical view's.
 - **Pseudonym presentation with age proof.** Choose **None**, **18+** or **13–17**, then
   **Request**. The **nym_auth** button shows the attestation in both encodings, with the demo
   credentials' values.
@@ -228,8 +228,8 @@ There is no guide panel here.
 - **Inspector** (under the diagram). The DCQL query, the request (QR payload, signed Request Object),
   the response (JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
   checks.
-- **Community account.** A request here creates the account or logs in, and records the proven age
-  range, as on the site.
+A request here creates the Community account or logs in, and records the proven age range, as on
+the site.
 
 Keys: **1**, **2**, **3** request with no age proof, 18+ or 13–17; **S** simulate scan (the phone list); **R** clear
 the diagram; **E** and **Z** the highlights; **I** the inspector.
@@ -251,7 +251,7 @@ gives Community the same pseudonym.
 
 ## 6. A full run through the views
 
-0. **Technical:** tick Vega under "Community accepts" (nothing is ticked at start).
+0. **Technical:** tick Vega under "Proof systems" (nothing is ticked at start).
 1. **Site:** sign up on the teen's phone (scan, **Share**, any 6-digit PIN, **Close** on the phone).
    You get a pseudonym such as `u/golden-lynx-8604`.
    **Technical:** the session, the negotiation and the pseudonym appear.
@@ -263,13 +263,13 @@ gives Community the same pseudonym.
 4. **Site:** open c/teenspace and verify on the teen's phone. You get in. **Technical:** the request
    now holds a pseudonym and an age range, and the outputs are the same pseudonym and `true`.
 5. **Site:** open c/afterdark again. Community refuses on its own, without asking the wallet.
-6. **Site:** open c/france and **Join and link to u/…** on the teen's phone. The request's client_id is
+6. **Site:** open c/france and **Link to u/…** on the teen's phone. The request's client_id is
    `x509_san_dns:france.community.example`; you get a second pseudonym, linked to your account.
 7. **Site:** comment on a c/teenspace post. **Moderation:** click **Ban user** on that comment.
    **Site:** the ban notice appears.
 8. **Site:** sign up again with the same wallet. Community shows "Account banned". **Moderation:**
    it is still the same single account.
-9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Community accepts" (the
+9. **BBS.** **Moderation:** **Reset demo**. **Technical:** tick BBS under "Proof systems" (the
    reset unticked Vega; tick it too to offer both formats). **Site:** **Swap phone** to the teen's
    BBS phone and sign up. Then c/teenspace: the age range is proven with BBS. **Technical:** the proof's parts (BBS proof, device binding, pseudonym, age
    range) and sizes.
@@ -334,7 +334,7 @@ The demo person's birth date is in the credential itself (`app/wallet/demo-walle
   `npm run build:native`, then start the site again.
 - **"Connection Error" on the phone** (development server). No addon is loaded. The technical
   view's prover cards say why. Run `npm run build:native` and restart the site.
-- **"No proof accepted" in the dialog.** Nothing is ticked under "Community accepts" (the start
+- **"No proof accepted" in the dialog.** Nothing is ticked under "Proof systems" (the start
   state, and after **Reset demo**): tick a proof system in the technical view.
 - **"Verification is not available".** The addon of every ticked proof system failed to load: tick
   one whose cards are green in the technical view.

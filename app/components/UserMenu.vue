@@ -26,7 +26,7 @@ function logIn() {
 </script>
 
 <template>
-  <div v-if="shown" class="relative">
+  <div v-if="shown" class="relative" data-user-menu>
     <button
       class="flex items-center gap-2 rounded-full py-1 pr-2 pl-1 hover:bg-canvas"
       :aria-expanded="open"

@@ -54,6 +54,8 @@ pub struct Verifier {
   bbs: BbsVerifier,
   bbs_parallel: BbsVerifier,
   pub load_ms: f64,
+  /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
+  pub keys_mb: Option<f64>,
 }
 
 struct Refused {
@@ -68,6 +70,8 @@ fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
 impl Verifier {
   /// `issuer_params`: the trusted issuer's `IssuerParams::encode` (its public key and schema).
   pub fn load(issuer_params: &[u8]) -> Result<Self, String> {
+    let _one = crate::measure::exclusive()?;
+    let heap = Heap::start();
     let t = Instant::now();
     let issuer = IssuerParams::decode(issuer_params).map_err(|e| format!("issuer parameters: {e}"))?;
     if issuer.schema.digest() != profile::schema().map_err(|e| e.to_string())?.digest() {
@@ -79,7 +83,8 @@ impl Verifier {
       pop.parallelism = par;
       BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
     };
-    Ok(Verifier { issuer, bbs: with(Parallelism::Off), bbs_parallel: with(Parallelism::Max), load_ms: ms(t) })
+    let (bbs, bbs_parallel) = (with(Parallelism::Off), with(Parallelism::Max));
+    Ok(Verifier { issuer, bbs, bbs_parallel, load_ms: ms(t), keys_mb: mb(heap.held()) })
   }
 
   pub fn info(&self) -> Json {
@@ -90,6 +95,7 @@ impl Verifier {
       "schemes": [scheme_json()],
       "issuers": [{ "issuer_pk": hex(&self.issuer.pk), "schema_id": self.issuer.schema.id(), "schema_digest": hex(&self.issuer.schema.digest()) }],
       "load_ms": self.load_ms,
+      "keys_mb": self.keys_mb,
       "max_threads": Parallelism::Max.threads(),
     })
   }
@@ -100,6 +106,7 @@ impl Verifier {
     let heap = Heap::start();
     let mut metrics = Map::new();
     metrics.insert("load_ms".into(), json!(self.load_ms));
+    metrics.insert("keys_mb".into(), json!(self.keys_mb));
     let outcome = self.check(input, &mut metrics);
     metrics.insert("total_ms".into(), json!(ms(t)));
     metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));

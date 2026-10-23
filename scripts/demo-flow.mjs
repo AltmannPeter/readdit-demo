@@ -63,6 +63,17 @@ page.on('response', (r) => {
   }
 })
 
+/** The page's Sign up (the header has none since 2026-10-23). Where the page has none (a gated
+ *  community, a post), the logo goes home first, without a reload, so the phone on screen stays. */
+async function signUpButton() {
+  const b = page.getByRole('main').getByRole('button', { name: 'Sign up', exact: true }).first()
+  if (!(await b.isVisible().catch(() => false))) {
+    await page.getByRole('banner').locator('a[data-home]').click()
+    await page.waitForURL((u) => u.pathname === '/')
+    await b.waitFor({ timeout: 10_000 })
+  }
+  return b
+}
 const phone = page.locator('[role=dialog] section').nth(1)
 const guidePanel = page.getByRole('complementary', { name: 'Guide' })
 let n = 0
@@ -141,7 +152,7 @@ try {
   await page.goto(BASE)
   await ready(page)
   await guide('start')
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's phone")
   await phone.getByText('Age and pseudonym').first().waitFor()
@@ -264,7 +275,7 @@ try {
   // 5b. c/france: its own pseudonym, one account per person, linked to the logged-in account.
   step('5b. c/france')
   await page.click('a[href="/c/france"]')
-  const joinAndLink = page.getByRole('button', { name: /^Join and link to u\// })
+  const joinAndLink = page.getByRole('button', { name: /^Link to u\// })
   await joinAndLink.waitFor()
   await guide('community-join')
   await openDetails()
@@ -317,7 +328,7 @@ try {
 
   // 7. The same wallet signs up again: the same pseudonym, so "Account banned".
   step('7. second sign-up')
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's phone")
   await guide('signin-qr')
@@ -350,7 +361,7 @@ try {
   await page.bringToFront()
   await page.goto(BASE)
   await ready(page)
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's BBS phone")
   await scan()
@@ -391,7 +402,7 @@ try {
   await page.bringToFront()
   await page.goto(BASE)
   await ready(page)
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's phone")
   await scan()

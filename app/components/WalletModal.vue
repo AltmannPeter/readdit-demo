@@ -106,7 +106,7 @@ const subtitle = computed(() => {
   if (!community.value) return ''
   const p = state.value.purpose
   if (p?.kind === 'community') {
-    return `${communityName.value} asks for proof of human: one account per person, not linked to your other accounts unless you choose to.${p.link && account.value ? ` You chose to link it to u/${account.value.handle}.` : ''}`
+    return `${communityName.value} is fully anonymous. Your pseudonym will be unique to /${community.value.slug}. One account per person.${p.link && account.value ? ` You chose to link it to u/${account.value.handle}.` : ''}`
   }
   const gated = `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
   return state.value.purpose?.kind === 'signin' ? `${gated} The same step logs you in with a pseudonym.` : gated

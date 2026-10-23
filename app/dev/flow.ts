@@ -85,10 +85,20 @@ export function stepDelta(at: number, prevAt: number | undefined) {
   return `+${((prevAt === undefined ? 0 : at - prevAt) / 1000).toFixed(2)}s`
 }
 
-/** "Vega", "Longfellow", "BBS": the system's short name. */
+/** The proof systems' names in the developer view (Peter, 2026-10-23: VegaMC, Longfellow, BBS);
+ *  the rest of the site says Vega. */
+export const DEV_NAMES: Record<string, string> = { 'vega-v1': 'VegaMC', 'longfellow-libzk-v1': 'Longfellow', 'bbs-cd-plugins-v0.1': 'BBS' }
+
+/** The developer view's groups of proof systems, by the encoding they prove from. */
+export const DEV_GROUPS = [
+  { format: 'mso_mdoc', title: 'Circuits', systems: ['vega-v1', 'longfellow-libzk-v1'] },
+  { format: 'bbs_cd', title: 'BBS', systems: ['bbs-cd-plugins-v0.1'] },
+] as const
+
+/** "VegaMC", "Longfellow", "BBS": a system's (circuit's or scheme's) short name. */
 export function systemShort(id?: string): string {
   const e = id ? findSystem(id) : undefined
-  return e ? e.label.split(' ')[0]! : (id ?? '')
+  return e ? (DEV_NAMES[e.proof_system] ?? e.label.split(' ')[0]!) : (id ?? '')
 }
 
 export function purposeText(p: DevSession['purpose']): string {

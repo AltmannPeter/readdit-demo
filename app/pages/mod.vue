@@ -63,6 +63,7 @@ const time = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-d
         <span class="font-bold">community</span>
         <span class="text-muted">·</span>
         <span class="font-semibold">Moderation</span>
+        <QuickNav class="ml-2" />
         <button class="ml-auto text-xs font-semibold text-muted hover:text-adult" @click="reset">
           {{ confirmReset ? 'Click again to reset the demo' : 'Reset demo' }}
         </button>

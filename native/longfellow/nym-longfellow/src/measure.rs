@@ -85,6 +85,11 @@ impl Heap {
     self.base
   }
 
+  /// The bytes held now above what was held when the measurement began: what a load kept.
+  pub fn held(&self) -> usize {
+    CURRENT.load(Relaxed).saturating_sub(self.base)
+  }
+
   /// The most bytes held at once since [`Heap::start`].
   pub fn high(&self) -> usize {
     HIGH.load(Relaxed).max(self.base)

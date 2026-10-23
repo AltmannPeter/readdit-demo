@@ -102,6 +102,8 @@ pub struct Prover {
   pk: ProverKey,
   pub shapes_sha256: [u8; 32],
   pub load_ms: f64,
+  /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
+  pub keys_mb: Option<f64>,
 }
 
 fn bad(e: impl std::fmt::Display) -> Refusal {
@@ -134,8 +136,10 @@ fn public_inputs(values: &[String]) -> Json {
 impl Prover {
   /// Builds the prover key from `shapes.zst`.
   pub fn load(shapes: &Path) -> Result<Self, String> {
+    let _one = crate::measure::exclusive()?;
+    let heap = Heap::start();
     let loaded = keys::prover_key(shapes)?;
-    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms })
+    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, keys_mb: mb(heap.held()) })
   }
 
   pub fn info(&self) -> Json {
@@ -151,6 +155,7 @@ impl Prover {
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
       }],
       "load_ms": self.load_ms,
+      "keys_mb": self.keys_mb,
       "max_threads": threads::cores(),
     })
   }
@@ -329,10 +334,14 @@ impl Prover {
       "results": w.results,
       "metrics": {
         "load_ms": self.load_ms,
+        "keys_mb": self.keys_mb,
+      "keys_mb": self.keys_mb,
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
         "heap_mb": heap_mb,
+        // The witness held from the witness step into the prove step (part of heap_mb).
+        "witness_mb": mb(heap.base().saturating_sub(w.heap_base)),
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
         "presentation_bytes": presentation.len(),

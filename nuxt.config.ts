@@ -6,6 +6,13 @@ export default defineNuxtConfig({
   telemetry: false,
   css: ['~/assets/css/main.css', '~/assets/css/dev.css'],
   vite: { plugins: [tailwindcss()] },
+  // One-letter routes to the views (the quick links in every header, components/QuickNav.vue).
+  routeRules: {
+    '/c': { redirect: '/' },
+    '/d': { redirect: '/dev' },
+    '/t': { redirect: '/tech' },
+    '/m': { redirect: '/mod' },
+  },
   runtimeConfig: {
     // Vega backend: the Rust Node addon (npm run build:native), the circuits as data and the
     // verifier's trust anchors. Paths are relative to the working directory.

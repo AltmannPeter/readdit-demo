@@ -64,6 +64,8 @@ pub struct Verifier {
   pair: ZkVerifierPair,
   pub circuits_sha256: [u8; 32],
   pub load_ms: f64,
+  /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
+  pub keys_mb: Option<f64>,
   anchors: TrustAnchors,
   tolerance_s: i64,
 }
@@ -74,10 +76,13 @@ impl Verifier {
     if tolerance_s <= 0 {
       return Err("the proof_time tolerance must be positive".into());
     }
+    let _one = crate::measure::exclusive()?;
+    let heap = Heap::start();
     let anchors = TrustAnchors::from_pem(trust_anchors_pem)?;
     let c = Circuits::load(dir)?;
     let (circuits_sha256, load_ms) = (c.sha256, c.load_ms);
-    Ok(Verifier { pair: ZkVerifierPair::new(c), circuits_sha256, load_ms, anchors, tolerance_s })
+    let pair = ZkVerifierPair::new(c);
+    Ok(Verifier { pair, circuits_sha256, load_ms, keys_mb: mb(heap.held()), anchors, tolerance_s })
   }
 
   pub fn info(&self) -> Json {
@@ -90,6 +95,7 @@ impl Verifier {
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
+      "keys_mb": self.keys_mb,
       "threads": 1,
     })
   }
@@ -101,6 +107,7 @@ impl Verifier {
     let heap = Heap::start();
     let mut metrics = Map::new();
     metrics.insert("load_ms".into(), json!(self.load_ms));
+    metrics.insert("keys_mb".into(), json!(self.keys_mb));
     let outcome = self.check(input, &mut metrics);
     metrics.insert("total_ms".into(), json!(ms(t)));
     metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));

@@ -6,7 +6,7 @@
 // Before the scan, a click outside, Esc or Cancel request cancels the request. Once the code has
 // been scanned the request is with the wallet, so closing only hides the popup.
 import { PROOF_SYSTEMS } from '#shared/registry/circuits'
-import { purposeText } from '~/dev/flow'
+import { DEV_NAMES, purposeText } from '~/dev/flow'
 import { PHONES, ageOn, loadCredentials, type CredentialView, type PhoneDef } from '~/wallet/holder'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -80,13 +80,13 @@ onMounted(async () => {
 const phones = computed(() =>
   PHONES.map((p) => {
     const c = credentials.value.find((x) => p.credentials.includes(x.index))
-    const systems = PROOF_SYSTEMS.filter((s) => s.source_format === c?.format && state.value.accepted.includes(s.id)).map((s) => s.label.split(' ')[0])
+    const systems = PROOF_SYSTEMS.filter((s) => s.source_format === c?.format && state.value.accepted.includes(s.id)).map((s) => DEV_NAMES[s.id] ?? s.label)
     return { ...p, format: c?.format, age: c ? ageOn(c.attributes.birth_date, today.value) : undefined, systems }
   }),
 )
 /** The phones by their credential's encoding: the circuits' mdoc phones, then the BBS phone. */
 const GROUPS = [
-  { format: 'mso_mdoc', title: 'Circuits', detail: 'mso_mdoc: Vega, Longfellow' },
+  { format: 'mso_mdoc', title: 'Circuits', detail: 'mso_mdoc: VegaMC, Longfellow' },
   { format: 'bbs_cd', title: 'BBS', detail: 'bbs_cd: committed disclosures' },
 ] as const
 const groups = computed(() => GROUPS.map((g) => ({ ...g, phones: phones.value.filter((p) => (p.format ?? 'mso_mdoc') === g.format) })).filter((g) => g.phones.length))

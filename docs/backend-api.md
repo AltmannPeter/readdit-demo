@@ -149,12 +149,13 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
     "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "birth_date.identifier", "pseudonym.verifier_input", "results.nym"]
   }],
   "load_ms": 276.1,
+  "keys_mb": 44.4,
   "max_threads": 32
 }
 ```
 
 The verifier's adds `trust_anchors` (subject, not_after) and `proof_time_tolerance_s`. `load_ms` is
-the one-time key build at start. The mocked phone sends `circuits` as `wallet_metadata` and selects from it.
+the one-time key build at start, `keys_mb` the heap it keeps (null without the counting allocator). The mocked phone sends `circuits` as `wallet_metadata` and selects from it.
 
 ### Prover step 1: sign
 
@@ -219,8 +220,8 @@ Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Wit
   "presentation": "<base64url CBOR>",
   "results": { "nym": "<hex32>", "age": true },
   "metrics": {
-    "load_ms": 276.1, "witness_ms": 11.2, "prove_ms": 251.0, "total_ms": 262.2,
-    "heap_mb": 412.3, "peak_memory_mb": 1357, "proof_bytes": 96079, "presentation_bytes": 96708, "threads": 32
+    "load_ms": 276.1, "keys_mb": 44.4, "witness_ms": 11.2, "prove_ms": 251.0, "total_ms": 262.2,
+    "heap_mb": 412.3, "witness_mb": 34.3, "peak_memory_mb": 1357, "proof_bytes": 96079, "presentation_bytes": 96708, "threads": 32
   }
 }
 ```
@@ -232,7 +233,11 @@ addon (`node/src/alloc.rs`, the only `unsafe` code; the library crates forbid it
 allocator and reports to `measure::Heap`, so the figure excludes Node, V8, the other addons and the
 keys or circuits loaded at start, on every platform. The witness summary has the witness step's own
 `heap_mb`; the verifier and the BBS prover report theirs. Without the allocator (the crates' own
-tests) it is null. The example's figure is illustrative. `peak_memory_mb` is the server process's
+tests) it is null. `witness_mb` is the part of `heap_mb` that is the witness, held from the witness
+step into the prove step. `keys_mb` is the heap the keys or circuits loaded at start still hold
+(loads take one at a time, so the figure is the load's own); the whole memory a proof needs is
+`keys_mb + heap_mb`. The BBS date-range tables are shared: whichever side loads first holds them
+(the prover), so the BBS verifier reports 0. The example's figures are illustrative. `peak_memory_mb` is the server process's
 peak resident set during the step (Linux: `VmHWM` after resetting it through `/proc/self/clear_refs`);
 it includes Node, all three addons and both sides' keys, and is absent where it cannot be measured
 (macOS).
@@ -261,7 +266,7 @@ Prover refusals:
 
 ```json
 { "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
-  "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
+  "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "keys_mb": 40.5, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
 ```
 
 ```json

@@ -7,7 +7,7 @@ import type { ResponseKey } from './response-key'
  * visitor at an age-restricted community) the same request also proves the community's age range,
  * and the completion records it (and creates the account or logs in to it).
  * community: the pseudonym of a community with its own pseudonym (Community.nymHost): creates the
- * community account or logs in to it. With `link` (the person chose "Join and link" while logged
+ * community account or logs in to it. With `link` (the person chose "Link to u/…" while logged
  * in), it also links it to the logged-in Community account; logged in, `link` is required (the other
  * choice logs out first).
  */

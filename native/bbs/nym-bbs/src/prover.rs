@@ -56,14 +56,19 @@ pub fn parallelism(parallel: bool) -> Parallelism {
 
 pub struct Prover {
   pub load_ms: f64,
+  /// The heap the date-range tables hold (measure::Heap; one load at a time). The tables are
+  /// shared with the verifier: whichever side loads first holds them.
+  pub keys_mb: Option<f64>,
 }
 
 impl Prover {
   /// Builds the date-range plugin's generator tables once.
   pub fn load() -> Self {
+    let _one = crate::measure::exclusive().ok();
+    let heap = Heap::start();
     let t = Instant::now();
     cd_date_range::precompute();
-    Prover { load_ms: ms(t) }
+    Prover { load_ms: ms(t), keys_mb: mb(heap.held()) }
   }
 
   pub fn info(&self) -> Json {
@@ -73,6 +78,7 @@ impl Prover {
       "version": env!("CARGO_PKG_VERSION"),
       "schemes": [scheme_json()],
       "load_ms": self.load_ms,
+      "keys_mb": self.keys_mb,
       "max_threads": Parallelism::Max.threads(),
     })
   }
@@ -155,6 +161,7 @@ impl Prover {
     let online_ms = ps.total.as_secs_f64() * 1e3;
     let metrics = json!({
       "load_ms": self.load_ms,
+      "keys_mb": self.keys_mb,
       "offline_ms": offline_ms,
       "bbs_ms": ps.bbs.as_secs_f64() * 1e3,
       "ecdsa_pop_ms": plugin_ms(Some(0)),

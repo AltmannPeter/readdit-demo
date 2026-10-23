@@ -36,10 +36,13 @@ export interface Measurement {
     presentation_bytes: number | null
     /** The proof's working memory: the most heap the prover's own code held (absent in older records). */
     heap_mb?: number | null
+    /** The heap the prover's loaded keys or circuits hold, and the witness held into the prove step. */
+    keys_mb?: number | null
+    witness_mb?: number | null
     /** The server process's peak resident set during the step (Linux only). */
     peak_memory_mb: number | null
   }
-  verify: { threads: number | null; total_ms: number | null; verify_ms: number | null; heap_mb?: number | null; peak_memory_mb: number | null }
+  verify: { threads: number | null; total_ms: number | null; verify_ms: number | null; heap_mb?: number | null; keys_mb?: number | null; peak_memory_mb: number | null }
   machine: Machine
 }
 
@@ -112,6 +115,8 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
       proof_bytes: num(pm.proof_bytes),
       presentation_bytes: num(pm.presentation_bytes),
       heap_mb: num(pm.heap_mb),
+      keys_mb: num(pm.keys_mb),
+      witness_mb: num(pm.witness_mb),
       peak_memory_mb: num(pm.peak_memory_mb),
     },
     verify: {
@@ -119,6 +124,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
       total_ms: num(verify?.total_ms),
       verify_ms: num(verify?.verify_ms),
       heap_mb: num(verify?.heap_mb),
+      keys_mb: num(verify?.keys_mb),
       peak_memory_mb: num(verify?.peak_memory_mb),
     },
     machine: machine(),
@@ -167,9 +173,28 @@ export interface MeasurementRow {
   /** The prover's and the verifier's own heap (the step's requirement). */
   prove_heap_mb: Spread | null
   verify_heap_mb: Spread | null
+  /** The memory breakdown, medians: the loaded keys or circuits, the witness held, and the step's work. */
+  memory: {
+    prove: { keys_mb: number | null; witness_mb: number | null; work_mb: number | null }
+    verify: { keys_mb: number | null; work_mb: number | null }
+  }
   /** The server process's peak resident set (Linux only): Node and all addons. */
   peak_memory_mb: number | null
   last: string
+}
+
+const median = (values: Array<number | null | undefined>) => spread(values.map((v) => v ?? null))?.median ?? null
+
+/** The memory a proof needs, medians over the runs: the prover's loaded keys or circuits, the
+ *  witness held into the prove step, and the rest of the prove step's heap; the verifier's keys or
+ *  circuits and its step's heap. Prove total = keys + heap_mb; verify total = keys + heap_mb. */
+function memoryOf(ms: Measurement[]): MeasurementRow['memory'] {
+  const heap = median(ms.map((x) => x.prove.heap_mb))
+  const witness = median(ms.map((x) => x.prove.witness_mb))
+  return {
+    prove: { keys_mb: median(ms.map((x) => x.prove.keys_mb)), witness_mb: witness, work_mb: heap == null ? null : Math.max(0, Math.round((heap - (witness ?? 0)) * 10) / 10) },
+    verify: { keys_mb: median(ms.map((x) => x.verify.keys_mb)), work_mb: median(ms.map((x) => x.verify.heap_mb)) },
+  }
 }
 
 /** The records grouped by proof system, statement, prover threads and machine. */
@@ -197,6 +222,7 @@ export function measurementSummary() {
       presentation_bytes: spread(ms.map((x) => x.prove.presentation_bytes)),
       prove_heap_mb: spread(ms.map((x) => x.prove.heap_mb ?? null)),
       verify_heap_mb: spread(ms.map((x) => x.verify.heap_mb ?? null)),
+      memory: memoryOf(ms),
       peak_memory_mb: peaks.length ? Math.max(...peaks) : null,
       last: ms.at(-1)!.at,
     }

@@ -56,8 +56,8 @@ export default defineEventHandler(async (event) => {
     if (!c?.nymHost) throw refusal(400, 'bad_request', 'This community has no pseudonym of its own.')
     const main = mainAccount(b.data.pseudonym)
     const loggedIn = !!main && !main.banned
-    // Logged in, the person chooses: join and link, or log out first and join separately.
-    if (loggedIn && body.link !== true) throw refusal(400, 'link_required', 'Logged in: join and link, or log out first.')
+    // Logged in, the person chooses: Link to u/…, or Join separately (which logs out first).
+    if (loggedIn && body.link !== true) throw refusal(400, 'link_required', 'Logged in: link to your account, or join separately.')
     purpose = { kind: 'community', community: c.slug, link: loggedIn }
     host = c.nymHost
   } else {

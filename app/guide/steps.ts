@@ -652,7 +652,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
       title: kind === 'created' ? `Joined ${name}` : `Back in ${name}`,
       summary:
         (kind === 'created'
-          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is for ${host} only; nothing in it connects to the person's Community pseudonym.`
+          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is unique to /${done.community}; nothing in it connects to the person's Community pseudonym.`
           : `The pseudonym for ${host} belongs to an existing ${name} account, u/${handle}.`) + linkNote,
       details: [
         {
@@ -1065,7 +1065,7 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
       `Known-offender matching still holds for ${host}: one wallet, one ${name} account, and a ban sticks.`,
       `A ban of the Community account also bans the ${name} account linked to it; a ban in ${name} leaves the Community account alone.`,
       `Linking moves no age: age checks always use the logged-in Community account's own proven range, so a ${name} account from another phone opens nothing else.`,
-      'The issuer can still link the pseudonym to the person, because it knows the secret seed. A private seed (psc) would prevent that; it needs a new circuit.',
+      'Today the request still uses known-offender-matching-ssc, so the issuer, which knows the secret seed, can link the pseudonym to the person. The psc-based configuration that replaces it (config: X in the side nav) prevents that; it needs a new circuit.',
     ],
     stacked: true,
   }
@@ -1079,10 +1079,10 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
     return {
       id: 'community-join',
       context: name,
-      title: 'Proof of human',
-      summary: `${name} wants proof of a real person and no bots. It asks the wallet for a pseudonym for ${host}, its own name, so a person gets one ${name} account, not linked to their other accounts unless they choose to.${
+      title: 'Fully anonymous',
+      summary: `${name} is fully anonymous. The person proves they are real with a pseudonym for ${host}, its own name, so the pseudonym is unique to /${c.slug} and each person gets one ${name} account. Association to the main account is optional.${
         i.account
-          ? ` Logged in as u/${i.account.handle}, the person chooses: join and link the two, or log out and join separately.`
+          ? ` Logged in as u/${i.account.handle}, the person chooses: link the two (Link to u/${i.account.handle}), or join separately, which logs out first.`
           : ' No Community account is needed.'
       }`,
       details: [identity],

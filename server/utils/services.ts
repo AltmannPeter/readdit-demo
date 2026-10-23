@@ -114,6 +114,10 @@ export interface ProveMetrics {
   /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
    *  prove), above what was held before it. */
   heap_mb?: number | null
+  /** The heap the loaded keys or circuits of this side hold (loaded once at start). */
+  keys_mb?: number | null
+  /** Circuit proofs: the witness held from the witness step into the prove step (part of heap_mb). */
+  witness_mb?: number | null
   /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
   proof_bytes?: number
@@ -141,6 +145,10 @@ export interface VerifyMetrics {
   /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
    *  prove), above what was held before it. */
   heap_mb?: number | null
+  /** The heap the loaded keys or circuits of this side hold (loaded once at start). */
+  keys_mb?: number | null
+  /** Circuit proofs: the witness held from the witness step into the prove step (part of heap_mb). */
+  witness_mb?: number | null
   /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
 }
@@ -428,6 +436,10 @@ export interface BbsProveMetrics {
   /** The most heap the step's own Rust code held at once (for a circuit proof: witness and
    *  prove), above what was held before it. */
   heap_mb?: number | null
+  /** The heap the loaded keys or circuits of this side hold (loaded once at start). */
+  keys_mb?: number | null
+  /** Circuit proofs: the witness held from the witness step into the prove step (part of heap_mb). */
+  witness_mb?: number | null
   /** The server process's peak resident set during the step (Linux only): Node and all addons. */
   peak_memory_mb?: number | null
   proof_bytes?: number

@@ -14,6 +14,7 @@ interface Service {
   schemes?: Array<{ system_id: string; proof_system: string; schema_id: string; plugins: string[] }>
   issuers?: Array<{ issuer_pk: string; schema_id: string }>
   load_ms?: number
+  keys_mb?: number | null
   threads?: number
   max_threads?: number
   trust_anchors?: Array<{ subject: string }>
@@ -72,6 +73,10 @@ interface MeasurementRow {
   presentation_bytes: Spread | null
   prove_heap_mb: Spread | null
   verify_heap_mb: Spread | null
+  memory: {
+    prove: { keys_mb: number | null; witness_mb: number | null; work_mb: number | null }
+    verify: { keys_mb: number | null; work_mb: number | null }
+  }
   peak_memory_mb: number | null
   last: string
 }
@@ -157,11 +162,58 @@ const loaded = (id: string) => {
   if (id === 'longfellow-libzk-v1') return s.lfProver.up && s.lfVerifier.up
   return s.bbsProver.up && s.bbsVerifier.up
 }
-const backendsText = computed(() => {
-  const up = PROOF_SYSTEMS.filter((p) => loaded(p.id)).map((p) => p.label.split(' ')[0])
-  const list = up.length > 1 ? `${up.slice(0, -1).join(', ')} and ${up.at(-1)}` : up[0]
-  return up.length ? `${list} addon${up.length > 1 ? 's' : ''}, in process` : 'No backend loaded'
-})
+/** Each proof system's prover and verifier, as small icons that open their details. */
+const SIDES: Record<string, Array<{ name: string; key: keyof Overview['services']; icon: string }>> = {
+  'vega-v1': [
+    { name: 'Vega prover', key: 'prover', icon: 'phone' },
+    { name: 'Vega verifier', key: 'verifier', icon: 'shield' },
+  ],
+  'longfellow-libzk-v1': [
+    { name: 'Longfellow prover', key: 'lfProver', icon: 'phone' },
+    { name: 'Longfellow verifier', key: 'lfVerifier', icon: 'shield' },
+  ],
+  'bbs-cd-plugins-v0.1': [
+    { name: 'BBS prover', key: 'bbsProver', icon: 'phone' },
+    { name: 'BBS verifier', key: 'bbsVerifier', icon: 'shield' },
+  ],
+}
+const shortName = (label: string) => label.split(' ')[0]
+/** The detail open under the proof systems: a service's name, or 'signing'. */
+const openDetail = ref<string | null>(null)
+const toggleDetail = (name: string) => (openDetail.value = openDetail.value === name ? null : name)
+const openService = computed(() => (openDetail.value && openDetail.value !== 'signing' ? services.value[openDetail.value] : undefined))
+
+/** The benchmark row whose memory breakdown is open. */
+const openMemory = ref<string | null>(null)
+const rowKey = (r: MeasurementRow) => `${r.proof_system}|${r.statement}|${r.threads}|${machineText(r.machine)}`
+const MEM_COLOURS = { keys: '#9ca3af', witness: '#93c5fd', prove: '#2563eb', verify: '#0d7a64' }
+/** The parts of the memory a proof needs (medians): the loaded keys or circuits, the witness held
+ *  into the prove step, and the step's own work. */
+const memoryBars = (r: MeasurementRow) => {
+  const m = r.memory
+  const prove = [
+    { label: r.proof_system === 'bbs-cd-plugins-v0.1' ? 'Tables loaded at start' : 'Circuits and keys loaded at start', mb: m.prove.keys_mb, colour: MEM_COLOURS.keys },
+    ...(m.prove.witness_mb != null ? [{ label: 'Witness, held into the proof', mb: m.prove.witness_mb, colour: MEM_COLOURS.witness }] : []),
+    { label: 'Proving', mb: m.prove.work_mb, colour: MEM_COLOURS.prove },
+  ]
+  const verify = [
+    { label: r.proof_system === 'bbs-cd-plugins-v0.1' ? 'Issuer key and tables loaded at start' : 'Circuits and keys loaded at start', mb: m.verify.keys_mb, colour: MEM_COLOURS.keys },
+    { label: 'Verifying', mb: m.verify.work_mb, colour: MEM_COLOURS.verify },
+  ]
+  const total = (parts: Array<{ mb: number | null }>) => parts.reduce((t, p) => t + (p.mb ?? 0), 0)
+  const scale = Math.max(total(prove), total(verify), 0.1)
+  return [
+    { side: 'Prover', parts: prove, total: total(prove), scale },
+    { side: 'Verifier', parts: verify, total: total(verify), scale },
+  ]
+}
+/** A side's total memory (median): the loaded keys or circuits plus the step's heap. */
+const memTotal = (r: MeasurementRow, side: 'prove' | 'verify') => {
+  const m = r.memory?.[side]
+  const work = side === 'prove' ? r.prove_heap_mb?.median : r.verify_heap_mb?.median
+  if (work == null) return '–'
+  return mb((m?.keys_mb ?? 0) + work)
+}
 const acceptError = ref('')
 async function setAccepted(id: string, accept: boolean) {
   acceptError.value = ''
@@ -187,6 +239,7 @@ async function setThreads(parallel: boolean) {
   await load()
 }
 /** The threads a backend runs on now: Vega and BBS follow the switch, Longfellow has one. */
+const threadsNow = computed(() => (data.value?.multithreading ? data.value.measurements.machine.cores : 1))
 const threadText = (svc: Service) => {
   const n = svc.max_threads != null ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
   return `${n} thread${n === 1 ? '' : 's'}`
@@ -221,84 +274,99 @@ const statusTone = (s: string) =>
         <span class="font-bold">community</span>
         <span class="text-muted">·</span>
         <span class="font-semibold">Technical view</span>
-        <span
-          v-if="data"
-          class="ml-auto rounded-full px-2.5 py-1 text-xs font-semibold"
-          :class="PROOF_SYSTEMS.some((p) => loaded(p.id)) ? 'bg-emerald-100 text-emerald-800' : 'bg-adult/10 text-adult'"
-        >
-          {{ backendsText }}
-        </span>
+        <QuickNav class="ml-2" />
       </div>
     </header>
 
     <main v-if="data" class="mx-auto max-w-6xl space-y-6 px-6 py-6">
-      <!-- accepted proof systems -->
+      <!-- proof systems: the switches, and each one's prover and verifier as icons -->
       <section class="card p-4">
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <h2 class="text-sm font-semibold">Community accepts</h2>
-          <label v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
-            <input
-              type="checkbox"
-              :data-accept="p.id"
-              :checked="data.acceptedProofSystems.includes(p.id)"
-              :disabled="!loaded(p.id)"
-              @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
-            />
-            {{ p.label }} <span class="font-mono text-[11px] text-muted">{{ p.source_format }} · {{ p.id }}</span>
-          </label>
+          <h2 class="text-sm font-semibold">Proof systems</h2>
+          <div v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
+            <label class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                :data-accept="p.id"
+                :checked="data.acceptedProofSystems.includes(p.id)"
+                :disabled="!loaded(p.id)"
+                @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
+              />
+              {{ shortName(p.label) }}
+            </label>
+            <button
+              v-for="side in SIDES[p.id]"
+              :key="side.name"
+              type="button"
+              class="relative flex size-6 items-center justify-center rounded-md border hover:bg-canvas"
+              :class="openDetail === side.name ? 'border-ink' : 'border-line'"
+              :title="side.name"
+              :aria-label="side.name"
+              :aria-pressed="openDetail === side.name"
+              :data-service="side.name"
+              @click="toggleDetail(side.name)"
+            >
+              <AppIcon :name="side.icon" class="size-3.5" />
+              <span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full" :class="data.services[side.key].up ? 'bg-emerald-500' : 'bg-adult'" />
+            </button>
+          </div>
+          <button
+            type="button"
+            class="flex size-6 items-center justify-center rounded-md border hover:bg-canvas"
+            :class="openDetail === 'signing' ? 'border-ink' : 'border-line'"
+            title="Request signing"
+            aria-label="Request signing"
+            :aria-pressed="openDetail === 'signing'"
+            @click="toggleDetail('signing')"
+          >
+            <AppIcon name="lock" class="size-3.5" />
+          </button>
         </div>
-        <p class="mt-1 text-xs text-muted">
-          Only the ticked ones: a wallet request offers their systems in zkp_req when the phone fetches it, so a QR code already on screen follows too, and a presentation in a proof system unticked meanwhile is refused. Vega and Longfellow are circuits over the mdoc (mso_mdoc): the request lists both, Vega first. With BBS (bbs_cd) as well, the DCQL query carries one zkp_req credential query per source format, as alternatives (credential_sets). Nothing is ticked when the demo starts or after a reset.
-        </p>
-        <p v-if="!data.acceptedProofSystems.length" class="mt-2 text-xs font-semibold text-adult" data-none-accepted>
-          Community accepts no proof system: sign-up, log-in and age checks stop before the QR code until one is ticked.
-        </p>
+        <p v-if="!data.acceptedProofSystems.length" class="mt-2 text-xs font-semibold text-adult" data-none-accepted>None accepted.</p>
         <p v-if="acceptError" class="mt-1 text-xs text-adult">{{ acceptError }}</p>
-        <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-line pt-3">
+
+        <!-- the detail of the icon clicked -->
+        <div v-if="openDetail" class="mt-3 border-t border-line pt-3" data-service-detail>
+          <template v-if="openDetail === 'signing'">
+            <h3 class="text-sm font-semibold">Request signing</h3>
+            <p class="mt-1 text-sm break-all">{{ data.signer.subject }}</p>
+            <p class="text-xs text-muted">ES256 · x5c · {{ data.signer.selfSigned ? 'self-signed demo certificate' : 'configured certificate' }}</p>
+          </template>
+          <template v-else-if="openService">
+            <div class="flex items-center gap-2">
+              <span class="size-2 rounded-full" :class="openService.up ? 'bg-emerald-500' : 'bg-adult'" />
+              <h3 class="text-sm font-semibold">{{ openDetail }}</h3>
+            </div>
+            <template v-if="openService.up">
+              <p class="mt-1 text-sm">{{ openService.implementation }}</p>
+              <p class="text-xs text-muted">Version {{ openService.version }}</p>
+              <p v-if="openService.load_ms != null" class="text-xs text-muted">
+                {{ openService.schemes ? 'Tables built once at start' : openService.implementation?.startsWith('Longfellow') ? 'Circuits read once at start' : 'Keys built once at start' }}: {{ ms(openService.load_ms) }}<template v-if="openService.keys_mb != null">, {{ mb(openService.keys_mb) }}</template> · {{ threadText(openService) }}
+              </p>
+              <p v-if="openService.trust_anchors?.length" class="text-xs text-muted">
+                Trust anchor {{ openService.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ openService.proof_time_tolerance_s }} s
+              </p>
+              <ul class="mt-2 space-y-0.5 font-mono text-[11px] text-muted">
+                <li v-for="c in openService.circuits" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }}</li>
+                <li v-for="c in openService.schemes" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }} · {{ c.plugins.join(', ') }}</li>
+                <li v-for="c in openService.issuers" :key="c.issuer_pk">trusted issuer {{ c.issuer_pk.slice(0, 16) }}… · {{ c.schema_id }}</li>
+              </ul>
+            </template>
+            <template v-else>
+              <p class="mt-1 text-sm text-adult">Not available</p>
+              <p v-if="openService.error" class="mt-1 text-xs break-words text-muted">{{ openService.error }}</p>
+            </template>
+          </template>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3">
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" data-threads :checked="data.multithreading" @change="setThreads(($event.target as HTMLInputElement).checked)" />
             Multithreading (Vega and BBS)
           </label>
-          <span class="text-xs text-muted" data-threads-text>
-            {{ data.multithreading ? `On: Vega and BBS run on ${data.measurements.machine.cores} threads, one per core of this machine.` : `Off: Vega and BBS run on 1 thread. On, they use all ${data.measurements.machine.cores} cores of this machine.` }}
-            Longfellow always runs on 1 thread: Google's runtime has no parallel code.
-          </span>
+          <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
         </div>
         <p v-if="threadError" class="mt-1 text-xs text-adult">{{ threadError }}</p>
-      </section>
-
-      <!-- services -->
-      <section class="grid gap-4 md:grid-cols-2">
-        <div v-for="(svc, name) in services" :key="name" class="card p-4">
-          <div class="flex items-center gap-2">
-            <span class="size-2 rounded-full" :class="svc.up ? 'bg-emerald-500' : 'bg-adult'" />
-            <h2 class="text-sm font-semibold">{{ name }}</h2>
-          </div>
-          <template v-if="svc.up">
-            <p class="mt-2 text-sm">{{ svc.implementation }}</p>
-            <p class="text-xs text-muted">Version {{ svc.version }}</p>
-            <p v-if="svc.load_ms != null" class="text-xs text-muted">
-              {{ svc.schemes ? 'Tables built once at start' : svc.implementation?.startsWith('Longfellow') ? 'Circuits read once at start' : 'Keys built once at start' }}: {{ ms(svc.load_ms) }} · {{ threadText(svc) }}
-            </p>
-            <p v-if="svc.trust_anchors?.length" class="text-xs text-muted">
-              Trust anchor {{ svc.trust_anchors.map((a) => a.subject).join('; ') }} · proof_time tolerance {{ svc.proof_time_tolerance_s }} s
-            </p>
-            <ul class="mt-2 space-y-0.5 font-mono text-[11px] text-muted">
-              <li v-for="c in svc.circuits" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }}</li>
-              <li v-for="c in svc.schemes" :key="c.system_id">{{ c.system_id }} · {{ c.proof_system }} · {{ c.plugins.join(', ') }}</li>
-              <li v-for="c in svc.issuers" :key="c.issuer_pk">trusted issuer {{ c.issuer_pk.slice(0, 16) }}… · {{ c.schema_id }}</li>
-            </ul>
-          </template>
-          <template v-else>
-            <p class="mt-2 text-sm text-adult">Not available</p>
-            <p v-if="svc.error" class="mt-1 text-xs break-words text-muted">{{ svc.error }}</p>
-          </template>
-        </div>
-        <div class="card p-4">
-          <h2 class="text-sm font-semibold">Request signing</h2>
-          <p class="mt-2 text-sm break-all">{{ data.signer.subject }}</p>
-          <p class="text-xs text-muted">ES256 · x5c · {{ data.signer.selfSigned ? 'self-signed demo certificate' : 'configured certificate' }}</p>
-        </div>
       </section>
 
       <p v-if="!session" class="card p-8 text-center text-sm text-muted">No sessions yet. Start a log-in or age check on Community.</p>
@@ -372,7 +440,7 @@ const statusTone = (s: string) =>
                     commitments {{ ms(t.data.metrics.offline_ms) }} · BBS proof {{ ms(t.data.metrics.bbs_ms) }} · ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }} (device signature {{ ms(t.data.metrics.device_sign_ms) }}) · pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null"> · date-range {{ ms(t.data.metrics.date_range_ms) }}</template> · presentation {{ kb(t.data.metrics.presentation_bytes) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.parts"> (BBS {{ kb(t.data.metrics.parts.bbs_proof) }}, ecdsa-pop {{ kb(t.data.metrics.parts.ecdsa_pop) }}, pseudonym {{ kb(t.data.metrics.parts.pseudonym) }}<template v-if="t.data.metrics.parts.date_range">, date-range {{ kb(t.data.metrics.parts.date_range) }}</template>)</template>
                   </p>
                   <p v-else-if="t.step === 'prove' && t.data?.metrics" class="text-xs text-muted">
-                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.peak_memory_mb"> · peak RSS of the server process {{ mb(t.data.metrics.peak_memory_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.backend"> · {{ t.data.backend }} addon</template>
+                    witness {{ ms(t.data.metrics.witness_ms) }} · prove {{ ms(t.data.metrics.prove_ms) }} · proof {{ kb(t.data.metrics.proof_bytes) }}<template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.metrics.threads"> · {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.backend"> · {{ t.data.backend }} addon</template>
                   </p>
                   <p v-else-if="t.step === 'response'" class="text-xs text-muted">
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
@@ -489,12 +557,8 @@ const statusTone = (s: string) =>
       <section class="card" data-measured>
         <div class="flex flex-wrap items-start gap-3 border-b border-line px-5 py-3">
           <div class="min-w-0 flex-1">
-            <h2 class="text-sm font-semibold">Measured on this server</h2>
-            <p class="mt-0.5 text-xs text-muted">
-              Every presentation proved through the phone and verified, {{ data.measurements.runs }} so far, kept in
-              <span class="font-mono">{{ data.measurements.file }}</span> across restarts and demo resets. Prove: the phone's work (device signature, witness and proof; BBS: the whole presentation), run here on the server's CPU. Times: median, then the range.
-            </p>
-            <p class="mt-0.5 text-xs text-muted">This server: {{ machineText(data.measurements.machine) }}.</p>
+            <h2 class="text-sm font-semibold">Benchmark</h2>
+            <p class="mt-0.5 text-xs text-muted" data-machine>{{ machineText(data.measurements.machine) }}</p>
           </div>
           <button v-if="data.measurements.runs" class="btn-ghost text-xs" data-clear-measurements @click="clearMeasurements">{{ clearing ? 'Click again to clear' : 'Clear' }}</button>
         </div>
@@ -513,12 +577,12 @@ const statusTone = (s: string) =>
                 <th class="px-3 py-2 font-medium">Presentation</th>
                 <th class="px-3 py-2 font-medium">Prover memory</th>
                 <th class="px-3 py-2 font-medium">Verifier memory</th>
-                <th class="px-3 py-2 font-medium">Process peak</th>
                 <th v-if="machines.length > 1" class="px-3 py-2 font-medium">Machine</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-line">
-              <tr v-for="r in data.measurements.rows" :key="`${r.proof_system}|${r.statement}|${r.threads}|${machineText(r.machine)}`" class="align-top" :data-measured-row="r.proof_system">
+              <template v-for="r in data.measurements.rows" :key="rowKey(r)">
+              <tr class="align-top" :data-measured-row="r.proof_system">
                 <td class="px-5 py-2.5 font-medium">{{ r.label }}</td>
                 <td class="px-3 py-2.5">{{ r.statement }}</td>
                 <td class="px-3 py-2.5 tabular-nums" data-measured-threads>{{ r.threads ?? '–' }}</td>
@@ -527,17 +591,47 @@ const statusTone = (s: string) =>
                 <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.verify) }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.proof_bytes) }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.presentation_bytes) }}</td>
-                <td class="px-3 py-2.5 tabular-nums" data-measured-heap>{{ mbSpread(r.prove_heap_mb) }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ mbSpread(r.verify_heap_mb) }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ r.peak_memory_mb ? mb(r.peak_memory_mb) : '–' }}</td>
+                <td v-for="side in (['prove', 'verify'] as const)" :key="side" class="px-3 py-1.5 tabular-nums">
+                  <button
+                    type="button"
+                    class="rounded px-1.5 py-1 underline decoration-line decoration-dotted underline-offset-4 hover:bg-canvas"
+                    :aria-expanded="openMemory === rowKey(r)"
+                    :data-measured-memory="side"
+                    @click="openMemory = openMemory === rowKey(r) ? null : rowKey(r)"
+                  >
+                    {{ memTotal(r, side) }}
+                  </button>
+                </td>
                 <td v-if="machines.length > 1" class="px-3 py-2.5">{{ machineText(r.machine) }}</td>
               </tr>
+              <!-- the memory a proof needs, prover and verifier, as stacked bars (medians) -->
+              <tr v-if="openMemory === rowKey(r)" data-memory-breakdown>
+                <td :colspan="machines.length > 1 ? 11 : 10" class="bg-canvas px-5 py-3">
+                  <div v-for="bar in memoryBars(r)" :key="bar.side" class="mb-2 last:mb-0">
+                    <div class="flex items-baseline justify-between text-[11px]">
+                      <span class="font-semibold">{{ bar.side }}</span>
+                      <span class="tabular-nums">{{ mb(bar.total) }}</span>
+                    </div>
+                    <div class="mt-1 flex h-3 overflow-hidden rounded bg-surface">
+                      <span
+                        v-for="part in bar.parts.filter((x) => x.mb)"
+                        :key="part.label"
+                        :style="{ width: `${(100 * (part.mb ?? 0)) / bar.scale}%`, backgroundColor: part.colour }"
+                        :title="`${part.label}: ${mb(part.mb)}`"
+                      />
+                    </div>
+                    <div class="mt-1 flex flex-wrap gap-x-4 text-[11px] text-muted">
+                      <span v-for="part in bar.parts" :key="part.label" class="flex items-center gap-1.5">
+                        <span class="size-2 rounded-sm" :style="{ backgroundColor: part.colour }" />{{ part.label }} {{ part.mb == null ? '–' : mb(part.mb) }}
+                      </span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>
-        <p class="border-t border-line px-5 py-2 text-[11px] leading-snug text-muted">
-          Prover and verifier memory: the most heap the addon's own code held during the step, above what it held before (for a circuit, witness and proof together); the keys and circuits loaded at start are not in it. Process peak: the server process's peak resident set during a step (Linux only), so it includes Node and all three addons.
-        </p>
       </section>
     </main>
   </div>
