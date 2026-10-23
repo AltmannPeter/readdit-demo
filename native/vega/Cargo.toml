@@ -14,3 +14,6 @@ members = ["vega-age", "nym-vega", "node", "issuer"]
 [profile.release]
 # The addon and the issuer are built once; the prover's speed matters, its build time does not.
 codegen-units = 16
+# Function names (line tables and linkage names), so the profiler (/tech's Profiling switch)
+# names inlined functions by their full path; no effect on the code generated.
+debug = "limited"

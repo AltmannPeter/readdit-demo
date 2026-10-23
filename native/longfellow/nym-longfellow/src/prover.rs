@@ -323,7 +323,6 @@ impl Prover {
       "metrics": {
         "load_ms": self.load_ms,
         "keys_mb": self.keys_mb,
-      "keys_mb": self.keys_mb,
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
@@ -332,6 +331,7 @@ impl Prover {
         "witness_mb": mb(heap.base().saturating_sub(w.heap_base)),
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
+        "proof_parts": proved.parts,
         "presentation_bytes": presentation.len(),
         "threads": 1,
       },

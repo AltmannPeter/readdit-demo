@@ -179,6 +179,11 @@ screen.
 - **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
   one thread. On, they run on one thread per core, and the line next to the switch says how many.
   Longfellow always runs on one thread: Google's runtime has no parallel code.
+- **Profiling.** Off at start and after **Reset demo**. On, every prover and verifier step records
+  where its time goes: a sampling profiler (about 250 to 1,000 samples a second, depending on the
+  system) and, for Vega, the library's own phases. The profiles are kept in `.data/profiles.jsonl`,
+  also after Profiling is switched off. Profiling slows a proof by a few to about ten percent, so
+  the Benchmark figures leave profiled runs out when a row has other runs.
 - **Tiles.** Session status, prove time (witness and proof), verify time, proof size and
   presentation size, and the size of the signed request.
 - **Flow.** Each step with its time from the start of the session: session created, request
@@ -198,10 +203,21 @@ screen.
   `.data/measurements.jsonl` (it survives restarts and **Reset demo**). The line under the heading
   names this machine. Per proof system, what was proven (pseudonym, or pseudonym and age) and thread
   count: runs, prove and verify times, proof and presentation size, and the prover's and the
-  verifier's memory. Click a memory figure for a stacked bar of what the side needs in total: the
-  keys or circuits loaded at start, the witness held into the proof (circuits), and the proving or
-  verifying work. Node and the other addons are not counted. Prove is the phone's work, run here on
-  the server's CPU, so a phone would be slower. **Clear** (click twice) empties the file.
+  verifier's memory. Prove is the phone's work, run here on the server's CPU, so a phone would be
+  slower. **Clear** (click twice) empties the file and the profiles. Click a figure for its
+  breakdown:
+  - **Prove or Verify:** the time by step (device signature, witness, proof; BBS: the commitments,
+    the BBS proof and each plugin) as stacked bars. Once the row has a profiled run: a flame graph
+    of the samples (click a box to zoom in; Rust's core, alloc and std frames are hidden unless
+    ticked) with the functions that were running, and for Vega its phases with their time and,
+    on one thread, their heap.
+  - **Proof or Presentation:** the bytes by part. The presentation by field (the proof, the issuer
+    key set, the proof time, the results); the proof by part: Vega by the fields of its proof type,
+    Longfellow by circuit (commitment, sumcheck, Ligero rows, opened columns, Merkle path), BBS the
+    BBS proof by field and each plugin's proof. Click a part with a dotted line for its own parts.
+  - **Prover or Verifier memory:** a stacked bar of what the side needs in total: the keys or
+    circuits loaded at start, the witness held into the proof (circuits), and the proving or
+    verifying work. Node and the other addons are not counted.
 
 ## 4. The developer view
 
@@ -322,6 +338,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
 | `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
+| `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
 | `NUXT_PUBLIC_SITE_HOST` | `community.example` | DNS name in `client_id` and the request-signing certificate |
 | `NUXT_VP_SESSION_TTL_S` | `600` | How long a wallet request (its QR code) stays valid, in seconds |
 
@@ -402,7 +419,8 @@ started with two settings, which it checks first:
 
 ```sh
 npm run build
-NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
+NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_PROFILES_FILE=/tmp/community-profiles.jsonl \
+  NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
   node .output/server/index.mjs > /tmp/server.log 2>&1 &
 node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log --startup .output/server/index.mjs
 ```
@@ -410,9 +428,10 @@ node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log 
 Requests then expire after 40 s, so the expiry paths take a minute. `COMMUNITY_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
-`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch and the
-measurements, V the developer view). The scratch measurements file keeps the run's proofs out of the demo's own
-measurements, which group P clears.
+`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch, the
+measurements and Profiling, V the developer view; G needs a session from a group before it). The
+scratch measurements and profiles files keep the run's proofs out of the demo's own, which group P
+clears.
 
 ## More
 

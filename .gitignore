@@ -14,3 +14,5 @@ native/bbs/community-bbs.node.tmp
 native/longfellow/target
 native/longfellow/community-longfellow.node
 native/longfellow/community-longfellow.node.tmp
+native/nym-profile/target
+native/nym-profile/Cargo.lock

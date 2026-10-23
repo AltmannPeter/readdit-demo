@@ -14,6 +14,9 @@
 //!
 //! Inputs and outputs are JSON text shaped as `docs/backend-api.md` describes. Every computation
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
+//!
+//! With `"profile": true` in a step's JSON (`/tech`'s Profiling switch), the step's metrics also
+//! carry `profile`: the sampled stacks (`nym-profile`).
 
 mod alloc;
 
@@ -44,6 +47,30 @@ fn guarded<T>(f: impl FnOnce() -> std::result::Result<T, String>) -> Result<T> {
 
 fn parse<T: serde::de::DeserializeOwned>(what: &str, input: &str) -> std::result::Result<T, Refusal> {
   serde_json::from_str(input).map_err(|e| Refusal::bad_request(format!("{what}: {e}")))
+}
+
+/// The addon's own code and Google's runtime, where a sampled stack begins.
+const ROOTS: &[&str] = &["nym_longfellow::", "runtime_", "core_algebra::", "core_proto::"];
+
+/// A boolean field of a step's JSON input (false when absent or not JSON).
+fn flag(input: &str, key: &str) -> bool {
+  serde_json::from_str::<serde_json::Value>(input).ok().and_then(|v| v.get(key)?.as_bool()).unwrap_or(false)
+}
+
+/// Runs a step under the sampler.
+fn profiled<T>(on: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
+  let sampler = nym_profile::Sampler::start(on, ROOTS);
+  let out = f();
+  (out, sampler.finish())
+}
+
+/// Puts `profile` into `json.metrics`.
+fn attach(json: &mut serde_json::Value, profile: Option<serde_json::Value>) {
+  if let Some(p) = profile
+    && let Some(m) = json.get_mut("metrics").and_then(|m| m.as_object_mut())
+  {
+    m.insert("profile".into(), p);
+  }
 }
 
 fn refusal_json(r: &Refusal) -> String {
@@ -115,6 +142,8 @@ pub struct Prover {
 pub struct Witness {
   data: Arc<Mutex<Option<prover::WitnessData>>>,
   summary: String,
+  /// The witness step's input asked for a profile; prove follows it.
+  profile: bool,
 }
 
 #[napi]
@@ -137,11 +166,12 @@ impl Task for Sign {
 
   fn compute(&mut self) -> Result<Self::Output> {
     guarded(|| {
-      let out = parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i));
+      let (out, profile) = profiled(flag(&self.input, "profile"), || parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i)));
       Ok(match out {
         Ok(o) => {
           let mut json = serde_json::to_value(o).map_err(|e| e.to_string())?;
           json["ok"] = serde_json::Value::Bool(true);
+          attach(&mut json, profile);
           json.to_string()
         }
         Err(r) => refusal_json(&r),
@@ -157,6 +187,7 @@ impl Task for Sign {
 pub struct MakeWitness {
   prover: Arc<prover::Prover>,
   input: String,
+  profile: bool,
 }
 
 impl Task for MakeWitness {
@@ -166,8 +197,11 @@ impl Task for MakeWitness {
   fn compute(&mut self) -> Result<Self::Output> {
     guarded(|| {
       let guard = measure::exclusive()?;
-      let out = parse::<prover::WitnessInput>("witness", &self.input).and_then(|i| self.prover.witness(&i));
+      let (mut out, profile) = profiled(self.profile, || parse::<prover::WitnessInput>("witness", &self.input).and_then(|i| self.prover.witness(&i)));
       drop(guard);
+      if let Ok(data) = out.as_mut() {
+        attach(&mut data.summary, profile);
+      }
       Ok(out)
     })
   }
@@ -176,7 +210,7 @@ impl Task for MakeWitness {
     Ok(match output {
       Ok(data) => {
         let summary = data.summary.to_string();
-        Either::A(Witness { data: Arc::new(Mutex::new(Some(data))), summary })
+        Either::A(Witness { data: Arc::new(Mutex::new(Some(data))), summary, profile: self.profile })
       }
       Err(r) => Either::B(refusal_json(&r)),
     })
@@ -186,6 +220,7 @@ impl Task for MakeWitness {
 pub struct Prove {
   prover: Arc<prover::Prover>,
   data: Option<prover::WitnessData>,
+  profile: bool,
 }
 
 impl Task for Prove {
@@ -196,10 +231,11 @@ impl Task for Prove {
     let data = self.data.take().ok_or_else(|| reason("the witness was already proved"))?;
     guarded(|| {
       let guard = measure::exclusive()?;
-      let out = self.prover.prove(data);
+      let (out, profile) = profiled(self.profile, || self.prover.prove(data));
       drop(guard);
       let mut json = out?;
       json["ok"] = serde_json::Value::Bool(true);
+      attach(&mut json, profile);
       Ok(json.to_string())
     })
   }
@@ -227,7 +263,8 @@ impl Prover {
   /// Step 2, the witness. JSON in; a Witness, or the refusal as JSON text.
   #[napi]
   pub fn witness(&self, input: String) -> AsyncTask<MakeWitness> {
-    AsyncTask::new(MakeWitness { prover: self.inner.clone(), input })
+    let profile = flag(&input, "profile");
+    AsyncTask::new(MakeWitness { prover: self.inner.clone(), input, profile })
   }
 
   /// Step 3, prove: consumes the witness. JSON out (presentation, results, metrics).
@@ -235,7 +272,7 @@ impl Prover {
   pub fn prove(&self, witness: &Witness) -> Result<AsyncTask<Prove>> {
     let data = witness.data.lock().map_err(|_| reason("the witness lock is poisoned"))?.take();
     let data = data.ok_or_else(|| reason("the witness was already proved"))?;
-    Ok(AsyncTask::new(Prove { prover: self.inner.clone(), data: Some(data) }))
+    Ok(AsyncTask::new(Prove { prover: self.inner.clone(), data: Some(data), profile: witness.profile }))
   }
 }
 
@@ -260,8 +297,9 @@ impl Task for Verify {
     guarded(|| {
       let input: verifier::VerifyInput = serde_json::from_str(&self.input).map_err(|e| format!("verify: {e}"))?;
       let guard = measure::exclusive()?;
-      let out = self.verifier.verify(&input);
+      let (mut out, profile) = profiled(flag(&self.input, "profile"), || self.verifier.verify(&input));
       drop(guard);
+      attach(&mut out, profile);
       Ok(out.to_string())
     })
   }

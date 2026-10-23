@@ -53,12 +53,15 @@ impl Peak {
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 static HIGH: AtomicUsize = AtomicUsize::new(0);
 static COUNTING: AtomicBool = AtomicBool::new(false);
+/// The high-water mark of the innermost phase being recorded (`phases`).
+static SPAN_HIGH: AtomicUsize = AtomicUsize::new(0);
 
 /// The allocator handed out `n` more bytes.
 pub fn heap_grew(n: usize) {
   COUNTING.store(true, Relaxed);
   let now = CURRENT.fetch_add(n, Relaxed) + n;
   HIGH.fetch_max(now, Relaxed);
+  SPAN_HIGH.fetch_max(now, Relaxed);
 }
 
 /// The allocator took `n` bytes back.
@@ -94,6 +97,19 @@ impl Heap {
   pub fn high(&self) -> usize {
     HIGH.load(Relaxed).max(self.base)
   }
+}
+
+/// A phase begins: the bytes held now, and the outer phase's mark, which the phase's own replaces.
+pub(crate) fn span_enter() -> (usize, usize) {
+  let now = CURRENT.load(Relaxed);
+  (now, SPAN_HIGH.swap(now, Relaxed))
+}
+
+/// A phase ends: its mark, which then counts for the outer phase too (`saved`, from [`span_enter`]).
+pub(crate) fn span_exit(saved: usize) -> usize {
+  let high = SPAN_HIGH.load(Relaxed);
+  SPAN_HIGH.fetch_max(saved, Relaxed);
+  high
 }
 
 /// Bytes as MB (10^6 bytes), to 0.1 MB; absent when the heap is not counted.

@@ -8,6 +8,9 @@
 //!
 //! Inputs and outputs are JSON text shaped as `docs/backend-api.md` describes. Every computation
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
+//!
+//! With `"profile": true` in a step's JSON (`/tech`'s Profiling switch), the step's metrics also
+//! carry `profile`: the sampled stacks (`nym-profile`).
 
 mod alloc;
 
@@ -32,6 +35,28 @@ fn guarded<T>(f: impl FnOnce() -> std::result::Result<T, String>) -> Result<T> {
       let what = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned());
       Err(reason(format!("panic: {}", what.unwrap_or_else(|| "unknown".into()))))
     }
+  }
+}
+
+/// The addon's own code and bbs-cd-plugins, where a sampled stack begins.
+const ROOTS: &[&str] = &["nym_bbs::", "bbs_cd::", "bbs_cd_plugin::", "cd_"];
+
+/// A boolean field of a step's JSON input (false when absent or not JSON).
+fn flag(input: &str, key: &str) -> bool {
+  serde_json::from_str::<serde_json::Value>(input).ok().and_then(|v| v.get(key)?.as_bool()).unwrap_or(false)
+}
+
+/// Runs a step under the sampler.
+fn profiled<T>(on: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
+  let sampler = nym_profile::Sampler::start(on, ROOTS);
+  let out = f();
+  (out, sampler.finish())
+}
+
+/// Puts `profile` into `json.metrics`.
+fn attach(json: &mut serde_json::Value, profile: Option<serde_json::Value>) {
+  if let (Some(p), Some(m)) = (profile, json.get_mut("metrics").and_then(|m| m.as_object_mut())) {
+    m.insert("profile".into(), p);
   }
 }
 
@@ -106,11 +131,12 @@ impl Task for Prove {
       let input: std::result::Result<prover::ProveInput, Refusal> =
         serde_json::from_str(&self.input).map_err(|e| Refusal::bad_request(format!("prove: {e}")));
       let guard = measure::exclusive()?;
-      let out = input.and_then(|i| self.prover.prove(&i));
+      let (out, profile) = profiled(flag(&self.input, "profile"), || input.and_then(|i| self.prover.prove(&i)));
       drop(guard);
       Ok(match out {
         Ok(mut json) => {
           json["ok"] = serde_json::Value::Bool(true);
+          attach(&mut json, profile);
           json.to_string()
         }
         Err(r) => refusal_json(&r),
@@ -159,8 +185,9 @@ impl Task for Verify {
     guarded(|| {
       let input: verifier::VerifyInput = serde_json::from_str(&self.input).map_err(|e| format!("verify: {e}"))?;
       let guard = measure::exclusive()?;
-      let out = self.verifier.verify(&input);
+      let (mut out, profile) = profiled(flag(&self.input, "profile"), || self.verifier.verify(&input));
       drop(guard);
+      attach(&mut out, profile);
       Ok(out.to_string())
     })
   }

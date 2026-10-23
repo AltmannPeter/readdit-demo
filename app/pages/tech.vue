@@ -79,11 +79,21 @@ interface MeasurementRow {
   }
   peak_memory_mb: number | null
   last: string
+  key: string
+  profiled_runs: number
+  steps: { prove: Array<{ name: string; ms: number }>; verify: Array<{ name: string; ms: number }> }
+  parts: { proof: SizePart[] | null; presentation: SizePart[] | null }
+}
+interface SizePart {
+  name: string
+  bytes: number
+  children: SizePart[]
 }
 interface Overview {
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   multithreading: boolean
+  profiling: boolean
   measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
@@ -183,9 +193,11 @@ const openDetail = ref<string | null>(null)
 const toggleDetail = (name: string) => (openDetail.value = openDetail.value === name ? null : name)
 const openService = computed(() => (openDetail.value && openDetail.value !== 'signing' ? services.value[openDetail.value] : undefined))
 
-/** The benchmark row whose memory breakdown is open. */
-const openMemory = ref<string | null>(null)
-const rowKey = (r: MeasurementRow) => `${r.proof_system}|${r.statement}|${r.threads}|${machineText(r.machine)}`
+/** The Benchmark breakdown open: a row's time, bytes or memory. */
+type Breakdown = 'time' | 'size' | 'memory'
+const openRow = ref<{ key: string; kind: Breakdown } | null>(null)
+const isOpen = (r: MeasurementRow, kind: Breakdown) => openRow.value?.key === r.key && openRow.value.kind === kind
+const toggleRow = (r: MeasurementRow, kind: Breakdown) => (openRow.value = isOpen(r, kind) ? null : { key: r.key, kind })
 const MEM_COLOURS = { keys: '#9ca3af', witness: '#93c5fd', prove: '#2563eb', verify: '#0d7a64' }
 /** The parts of the memory a proof needs (medians): the loaded keys or circuits, the witness held
  *  into the prove step, and the step's own work. */
@@ -235,6 +247,16 @@ async function setThreads(parallel: boolean) {
     await $fetch('/api/tech/threads', { method: 'POST', body: { parallel } })
   } catch {
     threadError.value = 'Not changed.'
+  }
+  await load()
+}
+const profilingError = ref('')
+async function setProfiling(on: boolean) {
+  profilingError.value = ''
+  try {
+    await $fetch('/api/tech/profiling', { method: 'POST', body: { on } })
+  } catch {
+    profilingError.value = 'Not changed.'
   }
   await load()
 }
@@ -365,8 +387,12 @@ const statusTone = (s: string) =>
             Multithreading (Vega and BBS)
           </label>
           <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" data-profiling :checked="data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
+            Profiling
+          </label>
         </div>
-        <p v-if="threadError" class="mt-1 text-xs text-adult">{{ threadError }}</p>
+        <p v-if="threadError || profilingError" class="mt-1 text-xs text-adult">{{ threadError || profilingError }}</p>
       </section>
 
       <p v-if="!session" class="card p-8 text-center text-sm text-muted">No sessions yet. Start a log-in or age check on Community.</p>
@@ -552,7 +578,6 @@ const statusTone = (s: string) =>
           </div>
         </div>
       </template>
-
       <!-- measured -->
       <section class="card" data-measured>
         <div class="flex flex-wrap items-start gap-3 border-b border-line px-5 py-3">
@@ -581,31 +606,38 @@ const statusTone = (s: string) =>
               </tr>
             </thead>
             <tbody class="divide-y divide-line">
-              <template v-for="r in data.measurements.rows" :key="rowKey(r)">
+              <template v-for="r in data.measurements.rows" :key="r.key">
               <tr class="align-top" :data-measured-row="r.proof_system">
                 <td class="px-5 py-2.5 font-medium">{{ r.label }}</td>
                 <td class="px-3 py-2.5">{{ r.statement }}</td>
                 <td class="px-3 py-2.5 tabular-nums" data-measured-threads>{{ r.threads ?? '–' }}</td>
                 <td class="px-3 py-2.5 tabular-nums">{{ r.runs }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.prove) }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ msSpread(r.verify) }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.proof_bytes) }}</td>
-                <td class="px-3 py-2.5 tabular-nums">{{ kbSpread(r.presentation_bytes) }}</td>
                 <td v-for="side in (['prove', 'verify'] as const)" :key="side" class="px-3 py-1.5 tabular-nums">
-                  <button
-                    type="button"
-                    class="rounded px-1.5 py-1 underline decoration-line decoration-dotted underline-offset-4 hover:bg-canvas"
-                    :aria-expanded="openMemory === rowKey(r)"
-                    :data-measured-memory="side"
-                    @click="openMemory = openMemory === rowKey(r) ? null : rowKey(r)"
-                  >
+                  <button type="button" class="cell" :aria-expanded="isOpen(r, 'time')" :data-measured-time="side" @click="toggleRow(r, 'time')">
+                    {{ msSpread(r[side]) }}
+                  </button>
+                </td>
+                <td v-for="what in (['proof_bytes', 'presentation_bytes'] as const)" :key="what" class="px-3 py-1.5 tabular-nums">
+                  <button type="button" class="cell" :aria-expanded="isOpen(r, 'size')" :data-measured-size="what" @click="toggleRow(r, 'size')">
+                    {{ kbSpread(r[what]) }}
+                  </button>
+                </td>
+                <td v-for="side in (['prove', 'verify'] as const)" :key="side" class="px-3 py-1.5 tabular-nums">
+                  <button type="button" class="cell" :aria-expanded="isOpen(r, 'memory')" :data-measured-memory="side" @click="toggleRow(r, 'memory')">
                     {{ memTotal(r, side) }}
                   </button>
                 </td>
                 <td v-if="machines.length > 1" class="px-3 py-2.5">{{ machineText(r.machine) }}</td>
               </tr>
+              <!-- the time by step and where it goes (profiles), the bytes by part -->
+              <tr v-if="isOpen(r, 'time') || isOpen(r, 'size')">
+                <td :colspan="machines.length > 1 ? 11 : 10" class="bg-canvas px-5 py-3">
+                  <TechTimeBreakdown v-if="isOpen(r, 'time')" :row="r" />
+                  <TechSizeBreakdown v-else :parts="r.parts" />
+                </td>
+              </tr>
               <!-- the memory a proof needs, prover and verifier, as stacked bars (medians) -->
-              <tr v-if="openMemory === rowKey(r)" data-memory-breakdown>
+              <tr v-if="isOpen(r, 'memory')" data-memory-breakdown>
                 <td :colspan="machines.length > 1 ? 11 : 10" class="bg-canvas px-5 py-3">
                   <div v-for="bar in memoryBars(r)" :key="bar.side" class="mb-2 last:mb-0">
                     <div class="flex items-baseline justify-between text-[11px]">
@@ -636,3 +668,16 @@ const statusTone = (s: string) =>
     </main>
   </div>
 </template>
+
+<style scoped>
+.cell {
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.375rem;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--color-line);
+  text-underline-offset: 4px;
+}
+.cell:hover {
+  background: var(--color-canvas);
+}
+</style>

@@ -43,6 +43,8 @@ export default defineNuxtConfig({
     // Where each verified presentation's measurements are appended (JSON lines); /tech shows them
     // and can clear the file. Relative to the working directory.
     measurementsFile: '.data/measurements.jsonl',
+    // The profiles of /tech's Profiling switch, one JSON line per profiled presentation.
+    profilesFile: '.data/profiles.jsonl',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',

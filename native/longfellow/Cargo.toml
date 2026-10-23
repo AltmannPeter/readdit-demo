@@ -23,6 +23,9 @@ runtime-zk = { path = "vendor/longfellow-zk/rust/runtime/zk" }
 
 [profile.release]
 opt-level = 3
+# Function names (line tables and linkage names), so the profiler (/tech's Profiling switch)
+# names inlined functions by their full path; no effect on the code generated.
+debug = "limited"
 
 # The proofs are compute-heavy: optimize dependencies even in test builds.
 [profile.dev]

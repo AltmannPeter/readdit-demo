@@ -27,6 +27,8 @@ der = "0.7"
 time = { version = "0.3", features = ["parsing", "formatting"] }
 # The prover's thread count, which the metrics report.
 rayon = "1.12"
+# vega-prover's phase spans, which /tech's profile records (phases.rs).
+tracing = "0.1"
 
 [lints.rust]
 unsafe_code = "forbid"

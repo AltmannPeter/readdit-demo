@@ -10,6 +10,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 nym-bbs = { path = "../nym-bbs" }
+# /tech's Profiling switch: the sampling profiler, shared by the three addons.
+nym-profile = { path = "../../nym-profile" }
 napi = { version = "3", features = ["napi8"] }
 napi-derive = "3"
 serde = "1"

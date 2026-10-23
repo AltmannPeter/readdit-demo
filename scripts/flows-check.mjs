@@ -19,10 +19,11 @@
 // The server is started for this run with two settings; the run checks them first:
 //   NUXT_VP_SESSION_TTL_S=40        requests expire after 40 s, so the expiry paths take a minute
 //   COMMUNITY_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
-// and a scratch measurements file, since every verified presentation of the run is measured and
-// group P clears it (NUXT_MEASUREMENTS_FILE; the default is the demo's own .data/measurements.jsonl).
-// For example:
-//   NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
+// and scratch measurements and profiles files, since every verified presentation of the run is
+// measured and group P clears both (NUXT_MEASUREMENTS_FILE, NUXT_PROFILES_FILE; the defaults are the
+// demo's own .data/measurements.jsonl and .data/profiles.jsonl). For example:
+//   NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_PROFILES_FILE=/tmp/community-profiles.jsonl \
+//   NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
 //     node .output/server/index.mjs > /tmp/server.log 2>&1 &
 //   node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log \
 //     [--startup .output/server/index.mjs] [--shots demo-shots]
@@ -2422,6 +2423,71 @@ async function groupP() {
   for (let k = 0; k < 30 && (await overview()).measurements.runs; k++) await page.waitForTimeout(100)
   eq('cleared from /tech (two clicks)', (await overview()).measurements.runs, 0)
   if (o.measurements.file.startsWith('/')) eq('the file is empty', readFileSync(o.measurements.file, 'utf8'), '')
+
+  begin('P5', 'Profiling: the time by step, where it goes (samples, Vega phases), the bytes by part')
+  await resetDemo(['vega-v1', LONGFELLOW_SYSTEM, BBS_SYSTEM])
+  o = await overview()
+  eq('Profiling off after a reset', o.profiling, false)
+  expectAnswer('server: a profiling switch without a boolean', await call(ctx, 'POST', '/api/tech/profiling', { data: { on: 'yes' } }), 400, 'bad_request')
+  eq('Vega without profiling', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  await tech.reload()
+  const vegaRow = tech.locator('[data-measured-row="vega-v1"]')
+  await vegaRow.locator('[data-measured-time="prove"]').click()
+  const time = tech.locator('[data-time-breakdown]')
+  await time.waitFor()
+  for (const t of ['Device signature', 'Witness', 'Proof', 'Decode', 'Verify']) check(`time by step: ${t}`, (await time.getByText(t, { exact: false }).count()) > 0)
+  check('no profile before Profiling', (await time.locator('[data-no-profile]').count()) === 1)
+  await tech.locator('[data-profiling]').check()
+  for (let k = 0; k < 30 && !(await overview()).profiling; k++) await page.waitForTimeout(100)
+  eq('server: Profiling on', (await overview()).profiling, true)
+  eq('Vega profiled', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  eq('Longfellow profiled', await signUp(LONGFELLOW), { status: 'verified', prove: 1, verify: 1 })
+  eq('BBS profiled', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
+  o = await overview()
+  const row = (id) => o.measurements.rows.find((r) => r.proof_system === id)
+  eq('Vega row: the plain run only, and one profiled', [row('vega-v1')?.runs, row('vega-v1')?.profiled_runs], [1, 1])
+  eq('Longfellow and BBS rows: their profiled run', [row(LONGFELLOW_SYSTEM)?.profiled_runs, row(BBS_SYSTEM)?.profiled_runs], [1, 1])
+  const sum = (parts) => (parts ?? []).reduce((t, p) => t + p.bytes, 0)
+  for (const id of ['vega-v1', LONGFELLOW_SYSTEM, BBS_SYSTEM]) {
+    const r = row(id)
+    eq(`${id}: the proof's parts add up to the proof`, sum(r?.parts.proof), r?.proof_bytes?.median)
+    eq(`${id}: the presentation's fields add up to the presentation`, sum(r?.parts.presentation), r?.presentation_bytes?.median)
+  }
+  check('Longfellow parts: the tags and both circuits', ['MAC tags (6)', 'Hash circuit (GF(2^128))', 'Signature circuit (P-256)'].every((n) => row(LONGFELLOW_SYSTEM)?.parts.proof?.some((p) => p.name === n)))
+  check('BBS parts: the BBS proof by field', row(BBS_SYSTEM)?.parts.proof?.find((p) => p.name === 'BBS proof')?.children.some((c) => c.name === 'Challenge'))
+  const profile = (id) => call(ctx, 'GET', `/api/tech/profile?row=${encodeURIComponent(row(id).key)}`)
+  const vp = (await profile('vega-v1')).body
+  check('Vega profile: prover samples, rooted at its steps', vp.runs === 1 && vp.prove.samples > 0 && Object.keys(vp.prove.stacks).every((k) => /^(Device signature|Witness|Proof);/.test(k)), JSON.stringify({ runs: vp.runs, samples: vp.prove.samples }))
+  const phaseNames = (list) => (list ?? []).flatMap((p) => [p.name, ...phaseNames(p.children)])
+  check("Vega profile: vega-prover's phases", phaseNames(vp.prove.phases).includes('neutronnova_prove'), JSON.stringify(phaseNames(vp.prove.phases).slice(0, 8)))
+  for (const id of [LONGFELLOW_SYSTEM, BBS_SYSTEM]) {
+    const p = (await profile(id)).body
+    check(`${id} profile: prover samples`, p.runs === 1 && p.prove.samples > 0 && !p.prove.phases, JSON.stringify({ runs: p.runs, samples: p.prove.samples }))
+  }
+  expectAnswer('server: a profile without a row', await call(ctx, 'GET', '/api/tech/profile'), 400, 'bad_request')
+  await tech.reload()
+  await vegaRow.locator('[data-measured-time="prove"]').click()
+  await tech.locator('[data-flame]').waitFor()
+  check('/tech: the samples as a flame graph', (await tech.locator('[data-profile-count]').textContent()).includes('1 run'))
+  await tech.locator('[data-profile-view="phases"]').click()
+  await tech.locator('[data-phases]', { hasText: 'neutronnova_prove' }).waitFor()
+  check('/tech: the phases', true)
+  await tech.locator(`[data-measured-row="${LONGFELLOW_SYSTEM}"] [data-measured-size="proof_bytes"]`).click()
+  await tech.locator('[data-size-bar="presentation"]').waitFor()
+  await tech.locator('[data-size-part="Hash circuit (GF(2^128))"]').click()
+  check("/tech: a circuit's proof by part", (await tech.locator('[data-size-bar="part"]', { hasText: 'Opened columns' }).count()) === 1)
+  await tech.locator('[data-profiling]').uncheck()
+  for (let k = 0; k < 30 && (await overview()).profiling; k++) await page.waitForTimeout(100)
+  o = await overview()
+  eq('switched off: the profiles stay', [o.profiling, row('vega-v1')?.profiled_runs], [false, 1])
+  await tech.locator('[data-profiling]').check()
+  for (let k = 0; k < 30 && !(await overview()).profiling; k++) await page.waitForTimeout(100)
+  await resetDemo([])
+  eq('a reset switches Profiling off', (await overview()).profiling, false)
+  await tech.locator('[data-clear-measurements]').click()
+  await tech.locator('[data-clear-measurements]', { hasText: 'Click again to clear' }).click()
+  for (let k = 0; k < 30 && (await overview()).measurements.runs; k++) await page.waitForTimeout(100)
+  eq('Clear empties the profiles too', (await profile('vega-v1')).body.runs, 0)
   await tech.close()
   await ctx.dispose()
 }

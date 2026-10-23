@@ -113,10 +113,12 @@ export default defineEventHandler(async (event) => {
   try {
     const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
     if (source === 'mso_mdoc') {
-      const r = await verifier.verify({ ...call, now: new Date().toISOString() })
+      const { profile, ...r } = await verifier.verify({ ...call, now: new Date().toISOString() })
+      keepProfile(s, 'verify', profile)
       result = r.ok ? { ok: true, proofId: r.system_id, results: r.results, metrics: r.metrics } : r
     } else {
-      const r = await bbsVerifier.verify(call)
+      const { profile, ...r } = await bbsVerifier.verify(call)
+      keepProfile(s, 'verify', profile)
       result = r.ok ? { ok: true, proofId: r.system_id, results: r.results, metrics: r.metrics } : r
     }
   } catch (e) {

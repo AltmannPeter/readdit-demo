@@ -115,10 +115,37 @@ pub struct ZkProverPair {
   sig: ZkProver<4, P256Field>,
 }
 
-/// What a proof is: the bytes (tags ‖ hash proof ‖ signature proof) and the pseudonym it reveals.
+/// What a proof is: the bytes (tags ‖ hash proof ‖ signature proof), the pseudonym it reveals,
+/// and the bytes of each part (`/tech`).
 pub struct Proved {
   pub proof: Vec<u8>,
   pub nym: [u8; 32],
+  pub parts: serde_json::Value,
+}
+
+/// The bytes of one circuit's proof by part, as `ZkProof::write_to_buf` lays them out: the
+/// commitment's Merkle root, the sumcheck transcript, then Ligero's proof (the blinding rows, the
+/// column nonces, the opened columns, the Merkle path).
+macro_rules! circuit_parts {
+  ($name:expr, $p:expr, $g:expr, $f:expr, $sf:expr) => {{
+    let mut sc = Vec::new();
+    $p.sumcheck_proof.write_to_buf(&mut sc, &$g.sc_geom, $f).map_err(|e| format!("sizing the sumcheck: {e}"))?;
+    let mut lg = Vec::new();
+    $p.com_proof.write_to_buf(&mut lg, &$g.com_geom, $f, $sf).map_err(|e| format!("sizing Ligero's proof: {e}"))?;
+    let c = &$p.com_proof;
+    let rows = (c.y_ldt.len() + c.y_dot.len() + c.y_quad_0.len() + c.y_quad_2.len()) * $f.serialized_size_bytes();
+    let nonces = c.merkle.nonce.len() * 32;
+    let path = 4 + c.merkle.path.len() * 32;
+    let columns = lg.len().saturating_sub(rows + nonces + path);
+    serde_json::json!({ "name": $name, "bytes": 32 + sc.len() + lg.len(), "children": [
+      { "name": "Commitment (Merkle root)", "bytes": 32, "children": [] },
+      { "name": format!("Sumcheck ({} layers)", $p.sumcheck_proof.layers.len()), "bytes": sc.len(), "children": [] },
+      { "name": "Ligero blinding rows", "bytes": rows, "children": [] },
+      { "name": format!("Column nonces ({})", c.merkle.nonce.len()), "bytes": nonces, "children": [] },
+      { "name": format!("Opened columns ({})", c.merkle.nonce.len()), "bytes": columns, "children": [] },
+      { "name": format!("Merkle path ({} hashes)", c.merkle.path.len()), "bytes": path, "children": [] },
+    ] })
+  }};
 }
 
 impl ZkProverPair {
@@ -156,7 +183,12 @@ impl ZkProverPair {
       }
       proof_h.write_to_buf(&mut out, &gh, &rt.f.gf2, &rt.f.sf_hash).map_err(|e| format!("writing the hash proof: {e}"))?;
       proof_s.write_to_buf(&mut out, &gs, &rt.f.p256, rt.sf_sig).map_err(|e| format!("writing the signature proof: {e}"))?;
-      Ok(Proved { proof: out, nym: w.nym })
+      let parts = serde_json::json!([
+        { "name": "MAC tags (6)", "bytes": 96, "children": [] },
+        circuit_parts!("Hash circuit (GF(2^128))", proof_h, gh, &rt.f.gf2, &rt.f.sf_hash),
+        circuit_parts!("Signature circuit (P-256)", proof_s, gs, &rt.f.p256, rt.sf_sig),
+      ]);
+      Ok(Proved { proof: out, nym: w.nym, parts })
     })
   }
 }

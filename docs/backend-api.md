@@ -29,6 +29,23 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   pool of one thread per core (`nym-vega/src/threads.rs`); the proof does not depend on it. The
   witness carries the choice to the prove step. `metrics.threads` reports the threads used (the
   witness summary's, the proof's and the verification's); `info.max_threads` the cores.
+- **Profiling.** Every step of the three addons (Vega, Longfellow, BBS: sign, witness, prove,
+  verify) takes `"profile": true | false` (absent: false), which `services.ts` sets from `/tech`'s
+  Profiling switch; the witness carries it to the prove step. On, the step's `metrics` also has
+  `profile`: `{ hz, ms, samples, other, lost, stacks }` from the sampling profiler
+  (`native/nym-profile`, pprof): `stacks` maps folded stacks (`entry;…;leaf`, the step's own code
+  down to the function that was running, Rust names without generics) to samples; `other` counts
+  samples of other threads, `lost` samples whose stack could not be walked; samples inside the C
+  library are not taken. Vega's witness, prove and verify add `phases`, vega-prover's own tracing
+  spans as a tree (`{ name, n, ms, mb, children }`, siblings of one name merged; `mb` on one thread
+  only). `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
+  one addon step at a time while Profiling is on (the sampler is process-wide).
+- **Proof parts.** The prove metrics carry `proof_parts`, the proof's bytes by part
+  (`[{ name, bytes, code?, children }]`, adding up to `proof_bytes`): Vega by the fields of
+  vega-prover's proof type, two levels, as bincode writes them (`nym-vega/src/sizes.rs`);
+  Longfellow the MAC tags and each circuit's commitment root, sumcheck, Ligero blinding rows,
+  column nonces, opened columns and Merkle path; BBS the BBS proof by field, each plugin's proof and
+  the envelope's framing. `services.ts` takes them out of the metrics too.
 
 When no addon loads, the built server stops at start with the reasons (exit code 1,
 `server/plugins/backends.ts`); the development server keeps running and answers 503
@@ -433,7 +450,9 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
 | `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
 | `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
-| `POST /api/tech/measurements/clear` | | Empties the measurements file |
+| `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
+| `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |
+| `POST /api/tech/measurements/clear` | | Empties the measurements file and the profiles file |
 
 `{ purpose: 'dev', age: 'none' | 'over18' | 'range13to17' }` is the developer view's request: the
 pseudonym, and the age range 18+ or 13–17 if chosen; its completion creates the account or logs in

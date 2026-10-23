@@ -181,6 +181,7 @@ impl Prover {
         "pseudonym": len(parsed.plugin_ranges[s.index_pseudonym]),
         "date_range": s.index_age.map(|i| len(parsed.plugin_ranges[i])),
       },
+      "proof_parts": proof_parts(&parsed, presentation.len(), s.index_pseudonym, s.index_age),
       "threads": par.threads(),
     });
     Ok(json!({
@@ -213,4 +214,37 @@ pub fn scheme_json() -> Json {
       String::from_utf8_lossy(cd_date_range::PLUGIN_ID),
     ],
   })
+}
+
+/// The envelope's bytes by part (`/tech`): the BBS proof by its fields (ETSI BBS proof octets: N,
+/// Abar ‖ Bbar ‖ D, ê ‖ r̂1 ‖ r̂3, the m̂ responses, the commitments to the committed messages, their
+/// ŝ responses, the challenge), each plugin's proof, and the envelope's own framing (magic,
+/// counts, lengths, plugin ids, disclosed values).
+fn proof_parts(parsed: &bbs_cd_plugin::envelope::ParsedEnvelope, total: usize, pseudonym: usize, age: Option<usize>) -> Json {
+  const P: usize = 48;
+  const S: usize = 32;
+  let c = &parsed.credentials[0];
+  let b = &c.bbs;
+  let leaf = |name: String, bytes: usize| json!({ "name": name, "bytes": bytes, "children": [] });
+  let bbs_children = vec![
+    leaf("N (8)".into(), 8),
+    leaf("Abar, Bbar, D (G1)".into(), 3 * P),
+    leaf("ê, r̂1, r̂3".into(), 3 * S),
+    leaf(format!("m̂ responses ({})", b.m_hats.len()), b.m_hats.len() * S),
+    leaf(format!("Commitments ({}, G1)", b.commitments.len()), b.commitments.len() * P),
+    leaf(format!("ŝ responses ({})", b.s_hats.len()), b.s_hats.len() * S),
+    leaf("Challenge".into(), S),
+  ];
+  let len = |r: (usize, usize)| r.1 - r.0;
+  let mut parts = vec![json!({ "name": "BBS proof", "bytes": c.bbs_proof.len(), "children": bbs_children })];
+  let mut plugins = vec![(0, "ecdsa-pop (device binding)"), (pseudonym, "pseudonym")];
+  if let Some(i) = age {
+    plugins.push((i, "date-range (age)"));
+  }
+  for (i, name) in plugins {
+    parts.push(leaf(name.into(), len(parsed.plugin_ranges[i])));
+  }
+  let counted: usize = parts.iter().filter_map(|p| p["bytes"].as_u64()).sum::<u64>() as usize;
+  parts.push(leaf("Envelope framing".into(), total.saturating_sub(counted)));
+  Json::Array(parts)
 }

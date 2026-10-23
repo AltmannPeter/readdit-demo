@@ -325,8 +325,11 @@ impl Prover {
     // The proof's working memory: the most the witness and prove steps held at once, above what
     // was held before the witness step (the witness itself stays held between the two).
     let heap_mb = mb(heap.high().max(w.witness_high).saturating_sub(w.heap_base));
+    // The proof's parts by field (two levels), when they add up to the bytes bincode writes.
+    let parts = crate::sizes::breakdown(&proof, 2).ok();
     let proof = bincode::serialize(&proof).map_err(|e| format!("serializing the proof: {e}"))?;
     let proof_bytes = proof.len();
+    let proof_parts = parts.filter(|(total, _)| *total == proof_bytes as u64).map(|(_, nodes)| crate::sizes::to_json(&nodes));
     let presentation = Presentation { proof, ..w.presentation }.encode()?;
     Ok(json!({
       "system_id": CIRCUIT_ID,
@@ -335,7 +338,6 @@ impl Prover {
       "metrics": {
         "load_ms": self.load_ms,
         "keys_mb": self.keys_mb,
-      "keys_mb": self.keys_mb,
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
@@ -344,6 +346,7 @@ impl Prover {
         "witness_mb": mb(heap.base().saturating_sub(w.heap_base)),
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
+        "proof_parts": proof_parts,
         "presentation_bytes": presentation.len(),
         "threads": pool.current_num_threads(),
       },

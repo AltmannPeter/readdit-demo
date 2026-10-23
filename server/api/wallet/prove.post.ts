@@ -51,6 +51,9 @@ export default defineEventHandler(async (event) => {
       secret_seed,
       device_signature,
     })
+    keepProfile(s, 'witness', result.profiles.witness)
+    keepProfile(s, 'prove', result.profiles.prove)
+    keepParts(s, result.presentation, result.proof_parts)
     if (s) {
       if (result.witness) addTrace(s, 'witness', 'Witness built', { ...result.witness })
       addTrace(s, 'prove', 'Proof created', {
@@ -62,7 +65,7 @@ export default defineEventHandler(async (event) => {
         round_trip_ms: Date.now() - t0,
       })
     }
-    const { witness, backend: _backend, ...out } = result
+    const { witness, backend: _backend, profiles: _profiles, proof_parts: _parts, ...out } = result
     return { ...out, witness_ms: witness?.metrics.witness_ms }
   } catch (e) {
     const code = e instanceof ServiceError ? e.code : 'error'
@@ -87,13 +90,15 @@ async function proveBbs(request: RequestObject, queryId: string | undefined, cre
   const s = sid ? store().sessions.get(sid) : undefined
   const t0 = Date.now()
   try {
-    const result = await bbsProver.prove({
+    const { profile, proof_parts, ...result } = await bbsProver.prove({
       request,
       credential_query_id: queryId,
       handover: await handoverOf(request),
       credential,
       device_key: deviceKey,
     })
+    keepProfile(s, 'prove', profile)
+    keepParts(s, result.presentation, proof_parts)
     if (s) {
       addTrace(s, 'prove', 'Presentation created', {
         format: 'bbs_cd',

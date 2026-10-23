@@ -2,12 +2,16 @@
 # Longfellow (circuits over mso_mdoc, native/vega and native/longfellow) and BBS (bbs_cd, native/bbs).
 #   docker compose up -d --build        then http://localhost:3000
 
+# Each addon also takes native/nym-profile (/tech's sampling profiler), at ../../nym-profile from
+# its node crate, so at /nym-profile here.
+
 # 1. The Vega addon: native/vega/node, built against the vendored vega-age and its locked dependencies.
 FROM rust:1-bookworm AS native
 # Optional: --build-arg JOBS=4 limits Cargo's parallel jobs on a shared machine.
 ARG JOBS
 WORKDIR /native
 COPY native/vega ./
+COPY native/nym-profile /nym-profile
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
  && cargo build --release --locked -p community-vega-node \
  && cp target/release/libcommunity_vega_node.so community-vega.node
@@ -17,6 +21,7 @@ FROM rust:1-bookworm AS native-bbs
 ARG JOBS
 WORKDIR /native
 COPY native/bbs ./
+COPY native/nym-profile /nym-profile
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
  && cargo build --release --locked -p community-bbs-node \
  && cp target/release/libcommunity_bbs_node.so community-bbs.node
@@ -28,6 +33,7 @@ FROM rust:1-bookworm AS native-longfellow
 ARG JOBS
 WORKDIR /native
 COPY native/longfellow ./
+COPY native/nym-profile /nym-profile
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
  && cargo build --release --locked -p community-longfellow-node \
  && cp target/release/libcommunity_longfellow_node.so community-longfellow.node

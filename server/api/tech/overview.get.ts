@@ -8,7 +8,8 @@ export default defineEventHandler(async () => {
     services: await servicesStatus(),
     acceptedProofSystems: store().acceptedProofSystems,
     multithreading: store().multithreading,
-    measurements: measurementSummary(),
+    profiling: store().profiling,
+    measurements: await measurementSummary(),
     signer: { subject: signer.subject, selfSigned: signer.selfSigned },
     sessions: sessions.map((s) => {
       const done = s.outcome?.ok ? s.outcome : undefined

@@ -1,6 +1,7 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
 import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
 import type { ResponseKey } from './response-key'
+import type { SizePart, StepProfile } from './services'
 
 /**
  * signin: `signup` creates the account; `login` only logs in. With `community` (a logged-out
@@ -51,6 +52,12 @@ export interface TraceEvent {
   data?: Record<string, unknown>
 }
 
+export interface SessionDetail {
+  profiles: Partial<Record<'sign' | 'witness' | 'prove' | 'verify', StepProfile>>
+  proofParts?: SizePart[] | null
+  presentationParts?: SizePart[] | null
+}
+
 export interface VpSessionRecord {
   id: string
   purpose: VpPurpose
@@ -92,6 +99,10 @@ export interface VpSessionRecord {
   /** `age`: the session's age proof was recorded for the account. */
   completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
+  /** For /tech's Benchmark only, never in a trace or an API answer about the session: the
+   *  profiles of this presentation's steps (Profiling on), and the bytes of its proof and
+   *  presentation by part. */
+  detail?: SessionDetail
 }
 
 export interface AccountRecord extends Account {
@@ -127,6 +138,8 @@ interface Store {
   acceptedProofSystems: string[]
   /** Vega and BBS on every core (/tech's switch; a demo reset restores runtime config multithreading). */
   multithreading: boolean
+  /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
+  profiling: boolean
 }
 
 const g = globalThis as unknown as { __communityStore?: Store }
@@ -154,6 +167,7 @@ function fresh(): Store {
     bannedNotices: new Map(),
     acceptedProofSystems: configuredProofSystems(),
     multithreading: configuredMultithreading(),
+    profiling: false,
   }
 }
 

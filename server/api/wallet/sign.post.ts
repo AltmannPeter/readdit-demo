@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
 
   const t0 = Date.now()
   try {
-    const result = await prover.sign(
+    const { profile, ...result } = await prover.sign(
       {
         device_key,
         doc_type: NYM_DOCTYPE,
@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
       },
       typeof system_id === 'string' ? system_id : undefined,
     )
+    keepProfile(s, 'sign', profile)
     if (s) {
       addTrace(s, 'sign', 'Device key signed', {
         metrics: result.metrics,
