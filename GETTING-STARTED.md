@@ -179,6 +179,12 @@ screen.
 - **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
   one thread. On, they run on one thread per core, and the line next to the switch says how many.
   Longfellow always runs on one thread: Google's runtime has no parallel code.
+- **Trust new issuers.** On at start and after **Reset demo**. Community's mdoc verifiers trust the
+  demo issuer. With this on, a presentation from a wallet whose credential comes from another
+  issuer is accepted, and that issuer's certificate is trusted from then on (kept in
+  `.data/trusted-issuers.json`). The added issuers are listed under the switches, each with
+  **Remove**. Off, a presentation from an unknown issuer is refused. A demo verifier only: a real
+  one trusts the issuers its trust framework lists.
 - **Profiling.** Off at start and after **Reset demo**. On, every prover and verifier step records
   where its time goes: a sampling profiler (about 250 to 1,000 samples a second, depending on the
   system) and, for Vega, the library's own phases. The profiles are kept in `.data/profiles.jsonl`,
@@ -339,6 +345,8 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
+| `NUXT_TRUST_NEW_ISSUERS` | `true` | Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start and after a demo reset |
+| `NUXT_TRUSTED_ISSUERS_FILE` | `.data/trusted-issuers.json` | The issuers added that way |
 | `NUXT_PUBLIC_SITE_HOST` | `community.example` | DNS name in `client_id` and the request-signing certificate |
 | `NUXT_VP_SESSION_TTL_S` | `600` | How long a wallet request (its QR code) stays valid, in seconds |
 

@@ -439,7 +439,9 @@ export const verifier = {
   },
 
   /** By the addon of the circuit the presentation names. */
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string }): Promise<VerifyResult & { profile?: StepProfile }> {
+  /** `learned_issuers`: Document Signer certificates (base64 DER) trusted besides the configured
+   *  trust anchors (server/utils/issuers.ts). */
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
     const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult), b.name)
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }

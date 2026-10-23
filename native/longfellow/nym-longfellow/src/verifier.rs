@@ -42,6 +42,10 @@ pub struct VerifyInput {
   pub handover: Handover,
   /// The verifier's clock, RFC 3339.
   pub now: String,
+  /// Issuers trusted besides the configured trust anchors: Document Signer certificates, base64
+  /// DER, that `/tech` learned from earlier presentations ("Trust new issuers").
+  #[serde(default)]
+  pub learned_issuers: Vec<String>,
 }
 
 /// Why a presentation is refused.
@@ -142,7 +146,11 @@ impl Verifier {
     let [certificate] = &p.issuer_key_set[..] else {
       return Err(refuse("issuer_key_set", format!("{} certificates; this circuit takes exactly one", p.issuer_key_set.len())));
     };
-    let signer = self.anchors.validate(certificate, now).map_err(|e| refuse("issuer_key_set", e))?;
+    let learned: Vec<Vec<u8>> = {
+      use base64::Engine;
+      input.learned_issuers.iter().filter_map(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).collect()
+    };
+    let signer = self.anchors.validate(certificate, now, &learned).map_err(|e| refuse("issuer_key_set", e))?;
 
     // 3. proof_time.
     let proof_time = dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?;

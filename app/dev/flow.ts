@@ -310,6 +310,7 @@ export function checksOf(s: DevSession): Check[] {
     { label: `ZK proof verifies${system ? ` (${systemShort(system)})` : ''}`, detail: 'against the verifier\'s statement', status: 'pending', codes: ['proof_invalid', 'public_input'] },
     { label: 'Results match request', detail: 'the results keys are the return handles', status: 'pending', codes: ['results'] },
   ]
+  if (verify?.issuer_added) list[4]!.detail = `a new issuer, trusted from now on: ${verify.issuer_added}`
   const code = verify?.code ? (verify.input ? `${verify.code}:${verify.input}` : verify.code) : undefined
   if (decrypt) list[0]!.status = list[1]!.status = 'pass'
   if (!verify) {

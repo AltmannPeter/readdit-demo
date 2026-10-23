@@ -21,7 +21,8 @@
 //   COMMUNITY_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
 // and scratch measurements and profiles files, since every verified presentation of the run is
 // measured and group P clears both (NUXT_MEASUREMENTS_FILE, NUXT_PROFILES_FILE; the defaults are the
-// demo's own .data/measurements.jsonl and .data/profiles.jsonl). For example:
+// demo's own .data/measurements.jsonl and .data/profiles.jsonl). Group N adds and removes its own
+// test issuer in the trusted issuers (NUXT_TRUSTED_ISSUERS_FILE) and leaves the others. For example:
 //   NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_PROFILES_FILE=/tmp/community-profiles.jsonl \
 //   NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
 //     node .output/server/index.mjs > /tmp/server.log 2>&1 &
@@ -35,7 +36,7 @@
 // --only        runs only the named self-contained groups, for example --only M
 // (needs: npm i --no-save playwright && npx playwright install chromium)
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,7 +51,7 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
-// --only K,M: run only these groups (E F H I J K L M P V G), after the preconditions, in the full run's
+// --only K,M: run only these groups (E F H I J K L M N P V G), after the preconditions, in the full run's
 // order whatever the order given. G needs a session from a group before it (P, V or K, say).
 const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
@@ -60,6 +61,12 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const [teen, adult] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet.json'), 'utf8')).holders
 // The teen's BBS credential (bbs_cd, docs/bbs_cd.md), with the teen's device key and seed.
 const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs.json'), 'utf8')).holders
+// A teen's mdoc from another issuer, a Document Signer the site does not trust at start (group N).
+const otherIssuer = JSON.parse(readFileSync(join(root, 'scripts/fixtures/other-issuer-wallet.json'), 'utf8'))
+const [otherTeen] = otherIssuer.holders
+const otherFingerprint = createHash('sha256')
+  .update(Buffer.from(otherIssuer.document_signer_pem.replace(/-----[A-Z ]+-----|\s/g, ''), 'base64'))
+  .digest('hex')
 const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
 const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:vega:nym_auth:v1'
@@ -2492,6 +2499,72 @@ async function groupP() {
   await ctx.dispose()
 }
 
+/** Another issuer: a credential whose Document Signer is not a configured trust anchor. With
+ *  "Trust new issuers" on (the default), its first verified presentation adds it to the trusted
+ *  issuers; off, it is refused (issuer_key_set). */
+async function groupN() {
+  await resetDemo(['vega-v1', LONGFELLOW_SYSTEM])
+  await openPage()
+  const ctx = await client()
+  // Only the fixture's issuer: the run leaves any other added issuer alone.
+  const forgetOther = () => call(ctx, 'POST', '/api/tech/issuers', { data: { forget: otherFingerprint } })
+  const others = async () => (await overview()).learnedIssuers.filter((i) => i.fingerprint === otherFingerprint)
+  await forgetOther()
+  const signUp = async (circuit, wallet = otherTeen) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const only = (system, id) => JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [system], system_id_values: [id] } } })
+    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? only(LONGFELLOW_SYSTEM, LONGFELLOW) : WALLET_METADATA)
+    const p = await present(ctx, r, wallet, circuit)
+    await respond(ctx, r, vpForm(r, p.presentation))
+    return sessionView(s.id)
+  }
+  const verified = (v) => v?.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+
+  begin('N1', 'a new issuer: trusted from its first verified presentation (Vega)')
+  let o = await overview()
+  eq('on by default, the other issuer not added', [o.trustNewIssuers, (await others()).length], [true, 0])
+  let v = await signUp(VEGA)
+  eq('verified', v?.status, 'verified')
+  check('the trace says the issuer was added', /Demo Document Signer/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
+  eq('the issuer added', (await others()).length, 1)
+  const added = (await others())[0]
+  check('with its subject and fingerprint', /CN=Demo Document Signer/.test(added?.subject) && /^[0-9a-f]{64}$/.test(added?.fingerprint), JSON.stringify(added))
+  v = await signUp(VEGA)
+  check('the next presentation: trusted, nothing new', v?.status === 'verified' && !verified(v)?.issuer_added && (await others()).length === 1)
+
+  begin('N2', 'switched off in /tech: an unknown issuer is refused; Remove forgets one')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-learned-issuers]').waitFor()
+  await tech.locator(`[data-forget-issuer="${added.fingerprint}"]`).click()
+  for (let k = 0; k < 30 && (await others()).length; k++) await page.waitForTimeout(100)
+  eq('removed from /tech', (await others()).length, 0)
+  await tech.locator('[data-trust-new]').uncheck()
+  for (let k = 0; k < 30 && (await overview()).trustNewIssuers; k++) await page.waitForTimeout(100)
+  eq('server: off', (await overview()).trustNewIssuers, false)
+  v = await signUp(VEGA)
+  eq('refused: issuer_key_set', [v?.status, rejectedTrace(v)?.code], ['failed', 'issuer_key_set'])
+  eq('nothing added', (await others()).length, 0)
+  v = await signUp(VEGA, teen)
+  eq("the demo issuer still verifies", v?.status, 'verified')
+  expectAnswer('server: an issuers call without a boolean or a fingerprint', await call(ctx, 'POST', '/api/tech/issuers', { data: { trust_new: 'yes' } }), 400, 'bad_request')
+  expectAnswer('server: forget an unknown issuer', await call(ctx, 'POST', '/api/tech/issuers', { data: { forget: 'ab'.repeat(32) } }), 404, 'unknown_issuer')
+
+  begin('N3', 'a demo reset switches it on again; Longfellow learns the issuer too')
+  await resetDemo([LONGFELLOW_SYSTEM])
+  eq('on after a reset', (await overview()).trustNewIssuers, true)
+  v = await signUp(LONGFELLOW)
+  eq('Longfellow: verified', v?.status, 'verified')
+  check('added', !!verified(v)?.issuer_added && (await others()).length === 1)
+  await tech.reload()
+  await tech.locator('[data-learned-issuers]', { hasText: 'Demo Document Signer' }).waitFor()
+  check('/tech lists it', true)
+  await forgetOther()
+  eq('cleaned up', (await others()).length, 0)
+  await tech.close()
+  await ctx.dispose()
+}
+
 /** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
  *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
 async function groupV() {
@@ -2564,7 +2637,10 @@ async function groupV() {
   eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.jwt', l.session.responseKey.kid])
   await devPhone().getByRole('button', { name: 'Close' }).click()
   await until('the session ends declined', (x) => x.session?.outcome?.reason === 'denied')
-  check('the answer was encrypted (response=JWE)', since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied'))
+  // The page logs the response_uri call when its answer arrives, which can be after the server ended the session.
+  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied')
+  for (let k = 0; k < 30 && !encryptedDenial(); k++) await page.waitForTimeout(100)
+  check('the answer was encrypted (response=JWE)', encryptedDenial())
   await dev().locator('.rows li', { hasText: 'Not completed: access_denied' }).waitFor()
   const r2 = await rows()
   for (const t of ['Create presentation request', 'Build DCQL query (zkp_req)', 'Make response encryption key', 'Fetch request + wallet_metadata', 'Authenticate verifier', 'Attestation does not meet the age range', 'Encrypt response', 'Send error response', 'Decrypt response']) {
@@ -2573,7 +2649,8 @@ async function groupV() {
   eq('no account', (await me()).account, null)
 
   begin('V3', 'keys 3 and S, then Scan: 13–17 on the same phone, shared; the account is created with the age range')
-  await popup().getByRole('button', { name: 'Close' }).click()
+  // The popup's own Close (the phone may still show its outcome screen's Close for a moment).
+  await popup().locator('button.cancel', { hasText: 'Close' }).click()
   await page.keyboard.press('3')
   await popup().getByText('Scan with the SIROS ID wallet').waitFor()
   await page.keyboard.press('s')
@@ -2633,9 +2710,9 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, P: groupP, V: groupV, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, V: groupV, G: groupG }
     // In the full run's order: G reads the sessions the groups before it leave.
-    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'P', 'V', 'K', 'G']
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'V', 'K', 'G']
     for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2650,6 +2727,7 @@ try {
   await groupJ()
   await groupM()
   await groupL()
+  await groupN()
   await groupP()
   await groupV()
   await groupK()

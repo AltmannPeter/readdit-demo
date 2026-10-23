@@ -108,12 +108,17 @@ export default defineEventHandler(async (event) => {
     return reject('format', `${source} (${systems.map((p) => p.id).join(', ') || 'unknown'}) is no longer accepted`)
   }
 
+  // An unknown mdoc issuer, with "Trust new issuers" on: trusted for this verification, and added
+  // to the trusted issuers once the presentation is accepted (server/utils/issuers.ts).
+  const presented = source === 'mso_mdoc' ? presentedIssuer(list[0]) : null
+  const newIssuer = presented && store().trustNewIssuers && !(await isTrusted(presented)) ? presented : null
   const t0 = Date.now()
   let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; metrics?: VerifyMetrics }
   try {
     const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
     if (source === 'mso_mdoc') {
-      const { profile, ...r } = await verifier.verify({ ...call, now: new Date().toISOString() })
+      const learned = [...(await learnedDers()), ...(newIssuer ? [newIssuer] : [])]
+      const { profile, ...r } = await verifier.verify({ ...call, now: new Date().toISOString(), learned_issuers: learned })
       keepProfile(s, 'verify', profile)
       result = r.ok ? { ok: true, proofId: r.system_id, results: r.results, metrics: r.metrics } : r
     } else {
@@ -152,12 +157,14 @@ export default defineEventHandler(async (event) => {
 
   s.status = 'verified'
   s.outcome = { ok: true, format: source, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const }) }
+  const added = newIssuer ? await learnIssuer(newIssuer, result.proofId) : null
   await recordMeasurement(s, source, result.proofId, result.metrics as Record<string, unknown> | undefined, hasAge)
   addTrace(s, 'verify', 'Proof verified', {
     format: source,
     system_id: result.proofId,
     results: result.results,
     metrics: result.metrics,
+    ...(added && { issuer_added: added.subject || added.fingerprint }),
     round_trip_ms: roundTripMs,
   })
   return {}

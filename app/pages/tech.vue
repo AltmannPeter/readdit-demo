@@ -94,6 +94,8 @@ interface Overview {
   acceptedProofSystems: string[]
   multithreading: boolean
   profiling: boolean
+  trustNewIssuers: boolean
+  learnedIssuers: Array<{ fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
   measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
@@ -193,6 +195,22 @@ const openDetail = ref<string | null>(null)
 const toggleDetail = (name: string) => (openDetail.value = openDetail.value === name ? null : name)
 const openService = computed(() => (openDetail.value && openDetail.value !== 'signing' ? services.value[openDetail.value] : undefined))
 
+/** The width of an open breakdown: the visible width of the Benchmark table, so the bars fit the
+ *  screen and stay in view when the table itself is wider and scrolls. */
+const benchScroll = ref<HTMLElement | null>(null)
+const panelWidth = ref<number | null>(null)
+let resize: ResizeObserver | undefined
+watch(benchScroll, (el) => {
+  resize?.disconnect()
+  if (!el) return
+  const set = () => (panelWidth.value = el.clientWidth - 40)
+  set()
+  resize = new ResizeObserver(set)
+  resize.observe(el)
+})
+onBeforeUnmount(() => resize?.disconnect())
+const panelStyle = computed(() => (panelWidth.value ? { width: `${panelWidth.value}px` } : { width: '0', minWidth: '100%' }))
+
 /** The Benchmark breakdown open: a row's time, bytes or memory. */
 type Breakdown = 'time' | 'size' | 'memory'
 const openRow = ref<{ key: string; kind: Breakdown } | null>(null)
@@ -260,6 +278,17 @@ async function setProfiling(on: boolean) {
   }
   await load()
 }
+const issuerError = ref('')
+async function issuers(body: { trust_new: boolean } | { forget: string }) {
+  issuerError.value = ''
+  try {
+    await $fetch('/api/tech/issuers', { method: 'POST', body })
+  } catch {
+    issuerError.value = 'Not changed.'
+  }
+  await load()
+}
+const day = (iso: string) => iso.slice(0, 10)
 /** The threads a backend runs on now: Vega and BBS follow the switch, Longfellow has one. */
 const threadsNow = computed(() => (data.value?.multithreading ? data.value.measurements.machine.cores : 1))
 const threadText = (svc: Service) => {
@@ -391,8 +420,20 @@ const statusTone = (s: string) =>
             <input type="checkbox" data-profiling :checked="data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
             Profiling
           </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" data-trust-new :checked="data.trustNewIssuers" @change="issuers({ trust_new: ($event.target as HTMLInputElement).checked })" />
+            Trust new issuers
+          </label>
         </div>
-        <p v-if="threadError || profilingError" class="mt-1 text-xs text-adult">{{ threadError || profilingError }}</p>
+        <p v-if="threadError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || profilingError || issuerError }}</p>
+        <ul v-if="data.learnedIssuers.length" class="mt-2 space-y-1 text-xs" data-learned-issuers>
+          <li v-for="i in data.learnedIssuers" :key="i.fingerprint" class="flex flex-wrap items-center gap-x-2">
+            <span class="break-all">{{ i.subject || 'Unnamed issuer' }}</span>
+            <span class="font-mono text-muted" :title="i.fingerprint">{{ i.fingerprint.slice(0, 16) }}</span>
+            <span class="text-muted">added {{ day(i.added_at) }}</span>
+            <button type="button" class="text-muted underline decoration-dotted underline-offset-2 hover:text-adult" :data-forget-issuer="i.fingerprint" @click="issuers({ forget: i.fingerprint })">Remove</button>
+          </li>
+        </ul>
       </section>
 
       <p v-if="!session" class="card p-8 text-center text-sm text-muted">No sessions yet. Start a log-in or age check on Community.</p>
@@ -479,7 +520,7 @@ const statusTone = (s: string) =>
                     {{ t.data.code }}<template v-if="t.data.input"> · {{ t.data.input }}</template> · {{ t.data.reason }}
                   </p>
                   <p v-else-if="t.step === 'verify' && t.data?.metrics" class="text-xs text-muted">
-                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.threads"> on {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template>
+                    decode {{ ms(t.data.metrics.decode_ms) }} · verify {{ ms(t.data.metrics.verify_ms) }}<template v-if="t.data.metrics.threads"> on {{ t.data.metrics.threads }} thread{{ t.data.metrics.threads === 1 ? '' : 's' }}</template><template v-if="t.data.metrics.bbs_ms != null"> (BBS proof {{ ms(t.data.metrics.bbs_ms) }}, ecdsa-pop {{ ms(t.data.metrics.ecdsa_pop_ms) }}, pseudonym {{ ms(t.data.metrics.pseudonym_ms) }}<template v-if="t.data.metrics.date_range_ms != null">, date-range {{ ms(t.data.metrics.date_range_ms) }}</template>)</template><template v-if="t.data.metrics.heap_mb != null"> · memory {{ mb(t.data.metrics.heap_mb) }}</template><template v-if="t.data.metrics.load_ms != null"> · loaded at start {{ ms(t.data.metrics.load_ms) }}</template><template v-if="t.data.issuer_added"> · new issuer trusted: {{ t.data.issuer_added }}</template>
                   </p>
                   <p v-else-if="t.step === 'failed' || t.step === 'completed'" class="text-xs text-muted">
                     {{ t.data?.reason ?? t.data?.kind }}<template v-if="t.data?.detail"> · {{ t.data.detail }}</template>
@@ -588,7 +629,7 @@ const statusTone = (s: string) =>
           <button v-if="data.measurements.runs" class="btn-ghost text-xs" data-clear-measurements @click="clearMeasurements">{{ clearing ? 'Click again to clear' : 'Clear' }}</button>
         </div>
         <p v-if="!data.measurements.rows.length" class="px-5 py-6 text-center text-sm text-muted">No measurements yet. Each verified presentation adds one.</p>
-        <div v-else class="overflow-x-auto">
+        <div v-else ref="benchScroll" class="overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead>
               <tr class="border-b border-line text-muted">
@@ -632,30 +673,34 @@ const statusTone = (s: string) =>
               <!-- the time by step and where it goes (profiles), the bytes by part -->
               <tr v-if="isOpen(r, 'time') || isOpen(r, 'size')">
                 <td :colspan="machines.length > 1 ? 11 : 10" class="bg-canvas px-5 py-3">
-                  <TechTimeBreakdown v-if="isOpen(r, 'time')" :row="r" />
-                  <TechSizeBreakdown v-else :parts="r.parts" />
+                  <div class="sticky left-5 overflow-x-auto" :style="panelStyle">
+                    <TechTimeBreakdown v-if="isOpen(r, 'time')" :row="r" />
+                    <TechSizeBreakdown v-else :parts="r.parts" />
+                  </div>
                 </td>
               </tr>
               <!-- the memory a proof needs, prover and verifier, as stacked bars (medians) -->
               <tr v-if="isOpen(r, 'memory')" data-memory-breakdown>
                 <td :colspan="machines.length > 1 ? 11 : 10" class="bg-canvas px-5 py-3">
-                  <div v-for="bar in memoryBars(r)" :key="bar.side" class="mb-2 last:mb-0">
-                    <div class="flex items-baseline justify-between text-[11px]">
-                      <span class="font-semibold">{{ bar.side }}</span>
-                      <span class="tabular-nums">{{ mb(bar.total) }}</span>
-                    </div>
-                    <div class="mt-1 flex h-3 overflow-hidden rounded bg-surface">
-                      <span
-                        v-for="part in bar.parts.filter((x) => x.mb)"
-                        :key="part.label"
-                        :style="{ width: `${(100 * (part.mb ?? 0)) / bar.scale}%`, backgroundColor: part.colour }"
-                        :title="`${part.label}: ${mb(part.mb)}`"
-                      />
-                    </div>
-                    <div class="mt-1 flex flex-wrap gap-x-4 text-[11px] text-muted">
-                      <span v-for="part in bar.parts" :key="part.label" class="flex items-center gap-1.5">
-                        <span class="size-2 rounded-sm" :style="{ backgroundColor: part.colour }" />{{ part.label }} {{ part.mb == null ? '–' : mb(part.mb) }}
-                      </span>
+                  <div class="sticky left-5 overflow-x-auto" :style="panelStyle">
+                    <div v-for="bar in memoryBars(r)" :key="bar.side" class="mb-2 last:mb-0">
+                      <div class="flex items-baseline justify-between text-[11px]">
+                        <span class="font-semibold">{{ bar.side }}</span>
+                        <span class="tabular-nums">{{ mb(bar.total) }}</span>
+                      </div>
+                      <div class="mt-1 flex h-3 overflow-hidden rounded bg-surface">
+                        <span
+                          v-for="part in bar.parts.filter((x) => x.mb)"
+                          :key="part.label"
+                          :style="{ width: `${(100 * (part.mb ?? 0)) / bar.scale}%`, backgroundColor: part.colour }"
+                          :title="`${part.label}: ${mb(part.mb)}`"
+                        />
+                      </div>
+                      <div class="mt-1 flex flex-wrap gap-x-4 text-[11px] text-muted">
+                        <span v-for="part in bar.parts" :key="part.label" class="flex items-center gap-1.5">
+                          <span class="size-2 rounded-sm" :style="{ backgroundColor: part.colour }" />{{ part.label }} {{ part.mb == null ? '–' : mb(part.mb) }}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </td>

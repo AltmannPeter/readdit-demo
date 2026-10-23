@@ -140,6 +140,8 @@ interface Store {
   multithreading: boolean
   /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
   profiling: boolean
+  /** /tech's "Trust new issuers" (server/utils/issuers.ts; a demo reset restores runtime config trustNewIssuers). */
+  trustNewIssuers: boolean
 }
 
 const g = globalThis as unknown as { __communityStore?: Store }
@@ -158,6 +160,13 @@ export function configuredMultithreading(): boolean {
   return v === true || v === 'true' || v === '1'
 }
 
+/** Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start
+ *  (runtime config trustNewIssuers, true unless set to false). */
+export function configuredTrustNewIssuers(): boolean {
+  const v = useRuntimeConfig().trustNewIssuers as unknown
+  return !(v === false || v === 'false' || v === '0')
+}
+
 function fresh(): Store {
   return {
     sessions: new Map(),
@@ -168,6 +177,7 @@ function fresh(): Store {
     acceptedProofSystems: configuredProofSystems(),
     multithreading: configuredMultithreading(),
     profiling: false,
+    trustNewIssuers: configuredTrustNewIssuers(),
   }
 }
 

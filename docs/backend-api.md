@@ -40,6 +40,11 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   spans as a tree (`{ name, n, ms, mb, children }`, siblings of one name merged; `mb` on one thread
   only). `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
   one addon step at a time while Profiling is on (the sampler is process-wide).
+- **Learned issuers.** The verify input takes `"learned_issuers": [<base64 DER>, …]` (absent:
+  none): Document Signer certificates trusted besides the configured trust anchors, any P-256
+  certificate, self-signed or not, valid at `now`. `server/utils/issuers.ts` passes the issuers
+  `/tech` added, plus, with "Trust new issuers" on, an unknown one the presentation carries; the
+  server adds that one only once the presentation is accepted.
 - **Proof parts.** The prove metrics carry `proof_parts`, the proof's bytes by part
   (`[{ name, bytes, code?, children }]`, adding up to `proof_bytes`): Vega by the fields of
   vega-prover's proof type, two levels, as bincode writes them (`nym-vega/src/sizes.rs`);
@@ -450,6 +455,7 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
 | `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
 | `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
+| `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
 | `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
 | `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |
 | `POST /api/tech/measurements/clear` | | Empties the measurements file and the profiles file |

@@ -45,6 +45,10 @@ export default defineNuxtConfig({
     measurementsFile: '.data/measurements.jsonl',
     // The profiles of /tech's Profiling switch, one JSON line per profiled presentation.
     profilesFile: '.data/profiles.jsonl',
+    // /tech's "Trust new issuers": an unknown mdoc Document Signer is trusted from its first verified
+    // presentation on (true at start and after a demo reset), and the issuers added that way.
+    trustNewIssuers: true,
+    trustedIssuersFile: '.data/trusted-issuers.json',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',

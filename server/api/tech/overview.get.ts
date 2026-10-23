@@ -9,6 +9,8 @@ export default defineEventHandler(async () => {
     acceptedProofSystems: store().acceptedProofSystems,
     multithreading: store().multithreading,
     profiling: store().profiling,
+    trustNewIssuers: store().trustNewIssuers,
+    learnedIssuers: (await learnedIssuers()).map(({ der: _der, ...i }) => i),
     measurements: await measurementSummary(),
     signer: { subject: signer.subject, selfSigned: signer.selfSigned },
     sessions: sessions.map((s) => {
