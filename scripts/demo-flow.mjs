@@ -30,6 +30,9 @@ for (const f of readdirSync(OUT)) if (f.endsWith('.png')) rmSync(join(OUT, f))
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5 })
+// The site dialog hides the demo phone at first (the main flow scans with a real phone); this run
+// drives the demo phone, so it is shown, as Show demo phone does.
+await context.addInitScript(() => localStorage.setItem('community-demo-phone', '1'))
 const page = await context.newPage()
 const errors = []
 const watch = (p) => {

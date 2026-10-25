@@ -273,9 +273,15 @@ let page
 let net = []
 const sessionIds = []
 
-async function openPage() {
+/** A fresh browser page. The site dialog hides the demo phone at first (the main flow scans with a
+ *  real phone); the flows here drive the demo phone, so it is shown unless `demoPhone` is false. */
+async function openPage({ demoPhone = true } = {}) {
   if (ctxBrowser) await ctxBrowser.close()
   ctxBrowser = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, baseURL: BASE })
+  if (demoPhone)
+    await ctxBrowser.addInitScript(() => {
+      if (localStorage.getItem('community-demo-phone') == null) localStorage.setItem('community-demo-phone', '1')
+    })
   page = await ctxBrowser.newPage()
   net = []
   page.on('console', (m) => {
@@ -2638,6 +2644,63 @@ async function groupN() {
   await ctx.dispose()
 }
 
+/** A real phone: the site dialog hides the demo phone at first, shows it on request, and when
+ *  another phone scans the code, the code and the demo phone go away and the request completes. */
+async function groupR() {
+  await resetDemo()
+  await openPage({ demoPhone: false })
+  await goto('/')
+  const demoPhone = () => page.locator('[data-demo-phone]')
+  const toggle = () => site().locator('[data-demo-phone-toggle]')
+
+  begin('R1', 'the dialog hides the demo phone at first; Show demo phone shows it, and the choice stays')
+  await (await siteButton('Sign up')).click()
+  await site().locator('[data-qr]').waitFor({ timeout: 15_000 })
+  check('the QR code, no demo phone', !(await demoPhone().isVisible()))
+  await page.waitForTimeout(400)
+  check('the guide names no demo phone', !(await guidePanel().textContent()).includes(TEEN), (await guidePanel().textContent()).slice(0, 300))
+  eq('the toggle', (await toggle().textContent()).trim(), 'Show demo phone')
+  await toggle().click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor()
+  check('Show demo phone shows it', await demoPhone().isVisible())
+  await page.waitForTimeout(400)
+  check('the guide names it', (await guidePanel().textContent()).includes(TEEN))
+  eq('the toggle then', (await toggle().textContent()).trim(), 'Hide demo phone')
+  await closeDialog()
+  await goto('/')
+  await (await siteButton('Sign up')).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  check('after a reload: still shown', await demoPhone().isVisible())
+  await toggle().click()
+  check('Hide demo phone hides it', !(await demoPhone().isVisible()))
+  await toggle().click()
+
+  begin('R2', 'a real phone scans the code: the code and the demo phone go away; its answer completes the request')
+  const id = await newSessionId(undefined)
+  const ctx = await client()
+  const r = await fetchRequest(ctx, { authorizationUrl: `openid4vp://?request_uri=${encodeURIComponent(`${BASE}/api/vp/request/${id}`)}&request_uri_method=post` })
+  await dialogShows('Continue on your phone')
+  check('the QR code is gone', !(await site().locator('[data-qr]').count()))
+  check('the demo phone is hidden, without its toggle', !(await demoPhone().isVisible()) && !(await toggle().count()))
+  check('no scan steps', !(await site().getByText('Open an EUDI Wallet App on your phone').count()))
+  const p = await present(ctx, r, teen)
+  await respond(ctx, r, vpForm(r, p.presentation))
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  check('logged in', !!(await me()).account)
+  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  check('the dialog closes by itself after the outcome', true)
+  await ctx.dispose()
+
+  begin('R3', 'the next request: the demo phone as the presenter left it')
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await (await siteButton('Log in')).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  check('shown again, with the QR code', (await demoPhone().isVisible()) && (await site().locator('[data-qr]').count()) === 1)
+  await closeDialog()
+}
+
 /** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
  *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
 async function groupV() {
@@ -2783,9 +2846,9 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, V: groupV, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, R: groupR, V: groupV, G: groupG }
     // In the full run's order: G reads the sessions the groups before it leave.
-    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'V', 'K', 'G']
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'R', 'V', 'K', 'G']
     for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2802,6 +2865,7 @@ try {
   await groupL()
   await groupN()
   await groupP()
+  await groupR()
   await groupV()
   await groupK()
   await groupG()

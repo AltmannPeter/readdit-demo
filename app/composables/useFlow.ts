@@ -70,6 +70,8 @@ export interface DialogFlow {
   completion: { kind: string; handle?: string; age?: boolean; community?: string; linked?: boolean } | null
   /** The phone was swapped while this request's QR code was on screen. */
   swapped: boolean
+  /** The demo phone is on screen beside the QR code (hidden at first, and once a real phone scanned). */
+  demoPhone: boolean
   verification: VerificationMetrics | null
 }
 
@@ -101,6 +103,6 @@ export const initialWalletFlow = (): WalletFlow => ({
 export const useWalletFlow = () => useState<WalletFlow>('flow-wallet', initialWalletFlow)
 
 export const useDialogFlow = () =>
-  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null, swapped: false }))
+  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null, swapped: false, demoPhone: false }))
 
 export const useLastOutcome = () => useState<LastOutcome | null>('flow-last', () => null)

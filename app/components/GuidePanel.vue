@@ -41,7 +41,8 @@ const step = computed(() =>
     siteHost: String(config.siteHost),
     today: today.value,
     dialog: { ...dialogFlow.value, open: wallet.state.value.open, purpose: wallet.state.value.purpose },
-    wallet: walletFlow.value,
+    // The demo phone is named only while it is on screen: otherwise a real phone answers.
+    wallet: wallet.state.value.open && !dialogFlow.value.demoPhone ? { ...walletFlow.value, phone: '' } : walletFlow.value,
     last: last.value,
     page: community.value ? { kind: 'community', community: community.value } : route.path === '/' ? { kind: 'home' } : { kind: 'other' },
     access: community.value ? access.value : null,

@@ -38,7 +38,7 @@ const props = withDefaults(
   { transport: () => httpTransport, autoScan: false },
 )
 /** Close on the success screen: the person is done on the phone and goes back to the site. */
-const emit = defineEmits<{ finished: [] }>()
+const emit = defineEmits<{ finished: []; scanned: [] }>()
 
 // Titles and descriptions from the SIROS ID wallet's English strings (src/locales/en.json).
 const ERRORS = {
@@ -174,6 +174,8 @@ async function onScanned() {
   if (!(await prepare())) return
   const parsed = props.url ? parseAuthorizationUrl(props.url) : null
   if (!parsed) return fail(ERRORS.qr, props.url ? 'not an openid4vp:// request' : 'no QR code on screen')
+  // Before the fetch: the site tells this phone's scan from a real phone's by it.
+  emit('scanned')
   try {
     const verified = await props.transport.fetchRequest({
       requestUri: parsed.requestUri,
