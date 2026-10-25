@@ -4,7 +4,9 @@
 //! from the presentation, and the proof.
 //!
 //! 1. `system_id` is this scheme, and the request offered it;
-//! 2. `issuer_key_set` is one BBS issuer key, the trusted issuer's;
+//! 2. `issuer_key_set` is one BBS issuer key: the trusted issuer's, or one of `learned_issuers`
+//!    (keys the site added at runtime, `/tech`'s Trust new issuers), which the verifier trusts
+//!    with the trusted issuer's schema, the profile's;
 //! 3. the request's `zkp_req` query over `bbs_cd` is one the profile defines, and the keys of
 //!    `results` are its `return` handles;
 //! 4. the envelope parses against the BBS request (`BCDP`, counts, lengths), the ETSI BBS proof
@@ -46,6 +48,10 @@ pub struct VerifyInput {
   /// ecdsa-pop's check on one thread per core; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// BBS issuer public keys (base64 of the 96-byte G2 point) trusted besides the configured issuer,
+  /// each with the profile's schema. A key that is not a valid point is ignored.
+  #[serde(default)]
+  pub learned_issuers: Vec<String>,
 }
 
 pub struct Verifier {
@@ -61,10 +67,13 @@ pub struct Verifier {
 struct Refused {
   code: &'static str,
   reason: String,
+  /// For `issuer_key_set` when the one key is not trusted: that key, base64, so the site can trust
+  /// it on the next try (`/tech`'s Trust new issuers).
+  issuer_key: Option<String>,
 }
 
 fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
-  Refused { code, reason: reason.into() }
+  Refused { code, reason: reason.into(), issuer_key: None }
 }
 
 impl Verifier {
@@ -100,6 +109,18 @@ impl Verifier {
     })
   }
 
+  /// The issuer parameters for `key` when it is trusted: the configured issuer, or a learned key
+  /// (a valid G2 point) with the configured issuer's schema.
+  fn trusted(&self, key: &[u8], learned: &[String]) -> Option<IssuerParams> {
+    use base64::Engine;
+    if key == self.issuer.pk.as_slice() {
+      return Some(self.issuer.clone());
+    }
+    let learned = learned.iter().filter_map(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).any(|k| k == key);
+    (learned && key.len() == 96 && bbs_cd::primitives::octets_to_pubkey(key).is_ok())
+      .then(|| IssuerParams { pk: key.to_vec(), schema: self.issuer.schema.clone() })
+  }
+
   pub fn verify(&self, input: &VerifyInput) -> Json {
     let t = Instant::now();
     let peak = Peak::start();
@@ -113,7 +134,7 @@ impl Verifier {
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
       Ok(results) => json!({ "ok": true, "system_id": SYSTEM_ID, "results": results, "metrics": metrics }),
-      Err(r) => json!({ "ok": false, "code": r.code, "reason": r.reason, "metrics": metrics }),
+      Err(r) => json!({ "ok": false, "code": r.code, "reason": r.reason, "issuer_key": r.issuer_key, "metrics": metrics }),
     }
   }
 
@@ -131,7 +152,14 @@ impl Verifier {
     if p.system_id != SYSTEM_ID {
       return Err(refuse("scheme", format!("unknown system {}", p.system_id)));
     }
-    let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, &self.issuer).map_err(|r| {
+    // The issuer the presentation names, when the verifier trusts it (checked in 2.); the
+    // statement is derived for it, since the BBS request binds the issuer's key.
+    let trusted = match &p.issuer_key_set[..] {
+      [key] => self.trusted(key, &input.learned_issuers),
+      _ => None,
+    };
+    let issuer = trusted.as_ref().unwrap_or(&self.issuer);
+    let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, issuer).map_err(|r| {
       let code = if r.error == "unsupported_circuit" { "scheme" } else { "request" };
       refuse(code, format!("{}: {}", r.error, r.detail))
     })?;
@@ -144,8 +172,10 @@ impl Verifier {
     let [key] = &p.issuer_key_set[..] else {
       return Err(refuse("issuer_key_set", format!("{} keys; this scheme takes exactly one", p.issuer_key_set.len())));
     };
-    if *key != self.issuer.pk {
-      return Err(refuse("issuer_key_set", "not a trusted issuer key"));
+    if trusted.is_none() {
+      use base64::Engine;
+      let issuer_key = Some(base64::engine::general_purpose::STANDARD.encode(key));
+      return Err(Refused { issuer_key, ..refuse("issuer_key_set", "not a trusted issuer key") });
     }
 
     // 3. results: exactly the return handles.
@@ -173,7 +203,7 @@ impl Verifier {
     metrics.insert("threads".into(), json!(par.threads()));
     let bbs = if input.parallel { &self.bbs_parallel } else { &self.bbs };
     let verified = bbs
-      .verify(std::slice::from_ref(&self.issuer), &s.request, bytes, None, Some(&mut vs))
+      .verify(std::slice::from_ref(issuer), &s.request, bytes, None, Some(&mut vs))
       .map_err(|e| match e {
         bbs_cd_plugin::error::Error::Decode(m) => refuse("presentation", m),
         other => refuse("proof_invalid", other.to_string()),

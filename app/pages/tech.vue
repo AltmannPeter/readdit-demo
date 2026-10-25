@@ -95,7 +95,7 @@ interface Overview {
   multithreading: boolean
   profiling: boolean
   trustNewIssuers: boolean
-  learnedIssuers: Array<{ fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
+  learnedIssuers: Array<{ format: 'mso_mdoc' | 'bbs_cd'; fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
   measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
@@ -428,7 +428,7 @@ const statusTone = (s: string) =>
         <p v-if="threadError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || profilingError || issuerError }}</p>
         <ul v-if="data.learnedIssuers.length" class="mt-2 space-y-1 text-xs" data-learned-issuers>
           <li v-for="i in data.learnedIssuers" :key="i.fingerprint" class="flex flex-wrap items-center gap-x-2">
-            <span class="break-all">{{ i.subject || 'Unnamed issuer' }}</span>
+            <span class="break-all">{{ i.format === 'bbs_cd' ? 'BBS issuer key' : i.subject || 'Unnamed issuer' }}</span>
             <span class="font-mono text-muted" :title="i.fingerprint">{{ i.fingerprint.slice(0, 16) }}</span>
             <span class="text-muted">added {{ day(i.added_at) }}</span>
             <button type="button" class="text-muted underline decoration-dotted underline-offset-2 hover:text-adult" :data-forget-issuer="i.fingerprint" @click="issuers({ forget: i.fingerprint })">Remove</button>

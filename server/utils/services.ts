@@ -527,7 +527,7 @@ export interface BbsProveResult {
 
 export type BbsVerifyResult =
   | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
-  | { ok: false; reason: string; code?: string; metrics?: VerifyMetrics }
+  | { ok: false; reason: string; code?: string; issuer_key?: string | null; metrics?: VerifyMetrics }
 
 interface NativeBbsProver {
   readonly info: string
@@ -599,7 +599,10 @@ export const bbsVerifier = {
     return call('verifier', 'verifier.info', async () => JSON.parse(n.verifier.info) as BbsInfo, 'bbs')
   },
 
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
+  /** `learned_issuers`: BBS issuer keys (base64) trusted besides the configured issuer
+   *  (server/utils/issuers.ts). An `issuer_key_set` refusal for a key that is not trusted carries
+   *  it as `issuer_key`. */
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
     const n = await bbsNative('verifier')
     const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading('bbs') }))) as BbsVerifyResult), 'bbs')
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }

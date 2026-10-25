@@ -199,3 +199,42 @@ fn parallel_and_sequential_agree() {
     assert_eq!(r["metrics"]["threads"], if verify_parallel { cores } else { 1 });
   }
 }
+
+/// /tech's Trust new issuers: a credential from another BBS issuer is refused, its key named in the
+/// refusal; with that key in `learned_issuers` it verifies (with the profile's schema). Reads
+/// `scripts/fixtures/other-issuer-wallet-bbs.json`.
+#[test]
+fn learned_issuer() {
+  use base64::Engine;
+  let prover = Prover::load();
+  let verifier = Verifier::load(&std::fs::read(root("native/bbs/demo/issuer-params.bin")).unwrap()).unwrap();
+  let other: Value = serde_json::from_str(&std::fs::read_to_string(root("scripts/fixtures/other-issuer-wallet-bbs.json")).unwrap()).unwrap();
+  let req = request("community.example", "learned-issuer-nonce-0123456789", None);
+  let input: ProveInput = serde_json::from_value(json!({
+    "request": req, "credential_query_id": "nym_attestation_bbs", "handover": handover(&req),
+    "credential": other["holders"][0]["credential"], "device_key": other["holders"][0]["device_key"],
+  }))
+  .unwrap();
+  let out = prover.prove(&input).unwrap();
+  let pres = out["presentation"].as_str().unwrap();
+  let with = |learned: Value| {
+    let input: VerifyInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation_bbs", "presentation": pres, "handover": handover(&req), "learned_issuers": learned,
+    }))
+    .unwrap();
+    verifier.verify(&input)
+  };
+  let refused = with(json!([]));
+  assert_eq!(refused["code"], "issuer_key_set");
+  let key = refused["issuer_key"].as_str().expect("the refusal names the key").to_string();
+  let bytes = base64::engine::general_purpose::STANDARD.decode(&key).unwrap();
+  assert_eq!(bytes.len(), 96);
+  // Not a G2 point: still refused.
+  let junk = base64::engine::general_purpose::STANDARD.encode([7u8; 96]);
+  assert_eq!(with(json!([junk]))["code"], "issuer_key_set");
+  let ok = with(json!([key]));
+  assert_eq!(ok["ok"], true, "{ok}");
+  // The demo issuer's presentations still verify with a learned key around.
+  let demo = prove(&prover, &req).unwrap();
+  assert_eq!(verify(&verifier, &req, demo["presentation"].as_str().unwrap())["ok"], true);
+}

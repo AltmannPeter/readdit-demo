@@ -179,10 +179,11 @@ screen.
 - **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
   one thread. On, they run on one thread per core, and the line next to the switch says how many.
   Longfellow always runs on one thread: Google's runtime has no parallel code.
-- **Trust new issuers.** On at start and after **Reset demo**. Community's mdoc verifiers trust the
-  demo issuer. With this on, a presentation from a wallet whose credential comes from another
-  issuer is accepted, and that issuer's certificate is trusted from then on (kept in
-  `.data/trusted-issuers.json`). The added issuers are listed under the switches, each with
+- **Trust new issuers.** On at start and after **Reset demo**. Community's verifiers trust the
+  demo issuers. With this on, a presentation from a wallet whose credential comes from another
+  issuer is accepted, and that issuer is trusted from then on (kept in
+  `.data/trusted-issuers.json`): an mdoc issuer by its Document Signer certificate, a BBS issuer
+  by its public key (credentials with Community's BBS schema only). The added issuers are listed under the switches, each with
   **Remove**. Off, a presentation from an unknown issuer is refused. A demo verifier only: a real
   one trusts the issuers its trust framework lists.
 - **Profiling.** Off at start and after **Reset demo**. On, every prover and verifier step records

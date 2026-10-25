@@ -10,7 +10,7 @@ export default defineEventHandler(async () => {
     multithreading: store().multithreading,
     profiling: store().profiling,
     trustNewIssuers: store().trustNewIssuers,
-    learnedIssuers: (await learnedIssuers()).map(({ der: _der, ...i }) => i),
+    learnedIssuers: (await learnedIssuers()).map(({ key: _key, ...i }) => i),
     measurements: await measurementSummary(),
     signer: { subject: signer.subject, selfSigned: signer.selfSigned },
     sessions: sessions.map((s) => {

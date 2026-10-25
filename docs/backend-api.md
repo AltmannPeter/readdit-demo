@@ -416,10 +416,13 @@ is outside the range), `400 unsupported_request`, `unsupported_config`, `unsuppo
 `unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
 does not decode or verify, or the device key is not the credential's), `bad_request`.
 
-**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover }`, all but the
-presentation from the site's session store. It answers `{ ok: true, system_id, results, metrics }`
-or `{ ok: false, code, reason, metrics }` with `code` `presentation`, `scheme`, `issuer_key_set`,
-`request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5). `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
+**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover, learned_issuers? }`,
+all but the presentation from the site's session store. `learned_issuers`: BBS issuer public keys
+(base64 of the 96-byte point) trusted besides the configured issuer, each with the profile's
+schema ("Trust new issuers", `server/utils/issuers.ts`). It answers `{ ok: true, system_id, results, metrics }`
+or `{ ok: false, code, reason, issuer_key, metrics }` with `code` `presentation`, `scheme`, `issuer_key_set`,
+`request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5); `issuer_key` (base64) names the
+one key of an `issuer_key_set` refusal that is not trusted, null otherwise. `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
 `ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
 
 ## Community's routes and their refusals

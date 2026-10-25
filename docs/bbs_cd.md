@@ -111,7 +111,9 @@ No `proof_time`: the encoding has no validity period, and the reader refuses one
 ## 5. Verification (`nym-bbs` verifier)
 
 1. `system_id` is `urn:mms:bbs-cd:nym_auth:v1`, and the request offered it and its proof system.
-2. `issuer_key_set` holds exactly one key, the trusted issuer's.
+2. `issuer_key_set` holds exactly one key: the trusted issuer's, or a key the site added at runtime
+   (`learned_issuers`, `/tech`'s Trust new issuers), trusted with the profile's schema. The BBS
+   request binds the issuer's key, so the verifier derives it for the key presented.
 3. The query is one the rulebook allows (§2); the keys of `results` are its `return` handles.
 4. The envelope parses against the derived BBS request; the BBS proof verifies under the issuer
    key with the presentation header; each plugin verifies.

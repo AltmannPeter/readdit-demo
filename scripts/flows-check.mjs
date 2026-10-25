@@ -64,6 +64,10 @@ const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs
 // A teen's mdoc from another issuer, a Document Signer the site does not trust at start (group N).
 const otherIssuer = JSON.parse(readFileSync(join(root, 'scripts/fixtures/other-issuer-wallet.json'), 'utf8'))
 const [otherTeen] = otherIssuer.holders
+// The teen's BBS credential from another BBS issuer (scripts/fixtures/other-issuer-wallet-bbs.json).
+const [otherTeenBbs] = JSON.parse(readFileSync(join(root, 'scripts/fixtures/other-issuer-wallet-bbs.json'), 'utf8')).holders
+const otherBbsKey = Buffer.from(otherTeenBbs.credential.issuer_params, 'base64url').subarray(1, 97)
+const otherBbsFingerprint = createHash('sha256').update(otherBbsKey).digest('hex')
 const otherFingerprint = createHash('sha256')
   .update(Buffer.from(otherIssuer.document_signer_pem.replace(/-----[A-Z ]+-----|\s/g, ''), 'base64'))
   .digest('hex')
@@ -2524,9 +2528,9 @@ async function groupP() {
   await ctx.dispose()
 }
 
-/** Another issuer: a credential whose Document Signer is not a configured trust anchor. With
- *  "Trust new issuers" on (the default), its first verified presentation adds it to the trusted
- *  issuers; off, it is refused (issuer_key_set). */
+/** Another issuer: a credential whose Document Signer is not a configured trust anchor, or (N4) a
+ *  BBS credential under another issuer key. With "Trust new issuers" on (the default), its first
+ *  verified presentation adds it to the trusted issuers; off, it is refused (issuer_key_set). */
 async function groupN() {
   await resetDemo(['vega-v1', LONGFELLOW_SYSTEM])
   await openPage()
@@ -2564,7 +2568,7 @@ async function groupN() {
   eq('verified', v?.status, 'verified')
   check('the trace says the issuer was added', /Demo Document Signer/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
   eq('the issuer added', (await others()).length, 1)
-  check('the server log says it verified again', !SERVER_LOG || /\[issuers\] [^\n]*the verifier does not know Document Signer [^\n]*CN=Demo Document Signer[^\n]*verifying again with it trusted/.test(serverLog()))
+  check('the server log says it verified again', !SERVER_LOG || /\[issuers\] [^\n]*the verifier does not know issuer CN=Demo Document Signer[^\n]*verifying again with it trusted/.test(serverLog()))
 
   begin('N2', 'switched off in /tech: an unknown issuer is refused; Remove forgets one')
   const tech = await ctxBrowser.newPage()
@@ -2596,6 +2600,40 @@ async function groupN() {
   check('/tech lists it', true)
   await forgetOther()
   eq('cleaned up', (await others()).length, 0)
+
+  begin('N4', 'BBS: a new issuer key, trusted from its first verified presentation; off, refused')
+  await resetDemo([BBS_SYSTEM])
+  const bbsOthers = async () => (await overview()).learnedIssuers.filter((i) => i.fingerprint === otherBbsFingerprint)
+  await call(ctx, 'POST', '/api/tech/issuers', { data: { forget: otherBbsFingerprint } })
+  const bbsSignUp = async (wallet = otherTeenBbs) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, s, JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } } }))
+    const p = await presentBbs(ctx, r, wallet)
+    await respond(ctx, r, bbsForm(r, p.presentation))
+    return sessionView(s.id)
+  }
+  v = await bbsSignUp()
+  eq('verified', v?.status, 'verified')
+  check('the trace says the issuer key was added', /^BBS issuer key 8c3e7f468123aa32/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
+  const bbsAdded = (await bbsOthers())[0]
+  eq('added as a BBS issuer', [bbsAdded?.format, (await bbsOthers()).length], ['bbs_cd', 1])
+  check('the server log says it verified again', !SERVER_LOG || /\[issuers\] [^\n]*the verifier does not know issuer BBS issuer key 8c3e7f468123aa32[^\n]*verifying again with it trusted/.test(serverLog()))
+  v = await bbsSignUp()
+  check('the next presentation: trusted, nothing new', v?.status === 'verified' && !verified(v)?.issuer_added && (await bbsOthers()).length === 1)
+  v = await bbsSignUp(teenBbs)
+  check("the demo issuer: verified, nothing added", v?.status === 'verified' && !verified(v)?.issuer_added)
+  await tech.reload()
+  await tech.locator('[data-learned-issuers]', { hasText: 'BBS issuer key' }).waitFor()
+  check('/tech lists it', true)
+  await tech.locator(`[data-forget-issuer="${otherBbsFingerprint}"]`).click()
+  for (let k = 0; k < 30 && (await bbsOthers()).length; k++) await page.waitForTimeout(100)
+  eq('removed from /tech', (await bbsOthers()).length, 0)
+  await call(ctx, 'POST', '/api/tech/issuers', { data: { trust_new: false } })
+  v = await bbsSignUp()
+  eq('off: refused, issuer_key_set', [v?.status, rejectedTrace(v)?.code], ['failed', 'issuer_key_set'])
+  check('the trace names the key', /^BBS issuer key 8c3e7f468123aa32/.test(rejectedTrace(v)?.issuer ?? '') && rejectedTrace(v)?.trust_new_issuers === false, JSON.stringify(rejectedTrace(v)))
+  eq('nothing added', (await bbsOthers()).length, 0)
+  await resetDemo()
   await tech.close()
   await ctx.dispose()
 }
