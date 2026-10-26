@@ -1,0 +1,63 @@
+{
+  "caseName": "all disclosed (U = 0, N = 0) (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "proof": "000000000000000095ad05d10b35aedb8065e86dadae43bc50fe9632ad1a2932dcb12cbf439aadb0b64811ba0d070b19f074d37a538c6f74b2a6071cfa0a76e62c51177dc4aba4979de0b142589c5a87a6b8b3153306cf1d74d44e480eb940cd480a6930a017220580729936665e601405859ad84021aed7281f23e236f6ff4613a31212b62600c14abf185f04acf74638c40384ebfef11838d9171ea3be6747f1f6d94a31ac2228db96ca1b1b6fbaf96d82d8f7224200f366dde80a79e9b55a0091162f7f167cceb839e08b232fd0b81379d775c83dc3bd0a04344b74043662a39f7aec377cd02e166d537c956a71306baad9f115731f896109f58995427381d34e1d44ddbc89c7069e3e2499aa4386786bd791b338001d",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      "676976656e206e616d65",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "",
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"
+      },
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "00",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "6c617374"
+    ],
+    "commitments": [],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE",
+      "DISCLOSE"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "5db1e9193e2b4231c394babf18fa7ea86568b84c288f0e998f7b95bd295da95a",
+    "challenge": "6109f58995427381d34e1d44ddbc89c7069e3e2499aa4386786bd791b338001d"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

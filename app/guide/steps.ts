@@ -5,13 +5,13 @@
 // credential, and the account as the server reports it.
 
 import type { Account, AgeGate, BirthDateRange, Community } from '#shared/types'
-import type { CircuitEntry } from '#shared/registry/circuits'
+import type { CircuitEntry, SchemeEntry } from '#shared/registry/circuits'
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { gateRange } from '#shared/utils/age'
 import type { DialogFlow, LastOutcome, VerificationMetrics, WalletFlow } from '~/composables/useFlow'
 import type { WalletPurpose } from '~/composables/useWallet'
 import type { CommunityAccess } from '~/composables/useCommunityAccess'
-import type { ConsentView } from '~/wallet/engine'
+import type { ConsentView, RequestView } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
 import { PHONES, credentialLabel, neverExpires } from '~/wallet/holder'
 import { ageText, birthRangeText, fmtDate, parseAuthorizationUrl } from '~/wallet/engine'
@@ -39,7 +39,7 @@ export const STAGES = ['QR', 'Scan', 'Consent', 'PIN', 'Proof', 'Result'] as con
 export interface GuideStep {
   /** Stable id of the step (data-guide-step). */
   id: string
-  /** What the step belongs to: "Sign-up", "Age check · c/teenspace", "Readdit"… */
+  /** What the step belongs to: "Sign-up", "Age check · c/teenspace", "Community"… */
   context: string
   title: string
   summary: string
@@ -82,7 +82,7 @@ function usedCredentialSection(i: GuideInput, site: string): GuideSection | null
     items:
       i.wallet.matching > 1
         ? [
-            `Each credential has its own secret seed. Under known-offender-matching-ssc the pseudonym is derived from the seed, so another credential gives another pseudonym for ${i.siteHost}, and so another ${site} account.`,
+            `Under known-offender-matching-ssc the pseudonym is derived from the credential's seed, so another credential gives another pseudonym for ${i.siteHost}, and so another ${site} account: another person's has its own seed, and a BBS credential uses another PRF (hashdh-bls12381g1), even over the same seed.`,
           ]
         : undefined,
     stacked: true,
@@ -111,7 +111,10 @@ function pseudonymSection(c: ConsentView): GuideSection | null {
   return {
     heading: `Pseudonym · ${c.pseudonym.config}`,
     rows: [
-      { label: 'Value', value: shortHex(c.pseudonym.value), mono: true },
+      { label: 'prf', value: c.pseudonym.prf, mono: true, code: true },
+      ...(c.pseudonym.prf === 'hashdh-bls12381g1'
+        ? [{ label: 'Value', value: 'secret_seed·OP, OP = hash_to_curve_G1(config ‖ verifier_id): a 48-byte BLS12-381 G1 point, computed in the proof' }]
+        : [{ label: 'Value', value: shortHex(c.pseudonym.value ?? ''), mono: true }]),
       { label: 'verifier_id', value: c.pseudonym.verifierId, mono: true, code: true },
     ],
     items: c.pseudonym.properties,
@@ -148,43 +151,82 @@ function consentSections(c: ConsentView, site: string, i: GuideInput): GuideSect
   ].filter((s): s is GuideSection => !!s)
 }
 
+/** The addon that runs a request's proofs: Vega or Longfellow for mso_mdoc (by the circuit), BBS
+ *  for bbs_cd. */
+const addonOf = (v: RequestView | null | undefined) =>
+  v?.scheme ? 'the BBS addon' : v?.circuit?.proof_system === 'longfellow-libzk-v1' ? 'the Longfellow addon' : v?.circuit ? 'the Vega addon' : 'its proof addons'
+
 function proofSection(w: WalletFlow, site: string): GuideSection | null {
   const m = w.metrics
   const circuit = w.view?.circuit
-  if (!m && !circuit) return null
+  const scheme = w.view?.scheme
+  if (!m && !circuit && !scheme) return null
   const rows: GuideRow[] = []
   if (w.credential) rows.push({ label: 'Credential', value: credentialLabel(w.credential) })
   if (circuit) rows.push({ label: 'Circuit', value: `${circuit.label} (${circuit.proof_system})` })
-  if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) })
-  if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
-  if (m?.prove_ms != null) rows.push({ label: 'Proving', value: ms(m.prove_ms) })
-  if (m?.proof_bytes != null) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) })
+  if (scheme) rows.push({ label: 'Scheme', value: `${scheme.label} (${scheme.proof_system})` })
+  const b = m?.bbs
+  if (b) {
+    if (b.offline_ms != null) rows.push({ label: 'Commitments and preparation', value: `${ms(b.offline_ms)}, before the request in a real wallet` })
+    if (b.bbs_ms != null) rows.push({ label: 'BBS proof', value: `${ms(b.bbs_ms)}${b.parts ? `, ${kB(b.parts.bbs_proof)}` : ''}` })
+    if (b.ecdsa_pop_ms != null) rows.push({ label: 'Device binding (ecdsa-pop)', value: `${ms(b.ecdsa_pop_ms)}${b.device_sign_ms != null ? `, of which the device signature ${ms(b.device_sign_ms)}` : ''}${b.parts ? `, ${kB(b.parts.ecdsa_pop)}` : ''}` })
+    if (b.pseudonym_ms != null) rows.push({ label: 'Pseudonym', value: `${ms(b.pseudonym_ms)}${b.parts ? `, ${b.parts.pseudonym} bytes` : ''}` })
+    if (b.date_range_ms != null) rows.push({ label: 'Age range (date-range)', value: `${ms(b.date_range_ms)}${b.parts?.date_range ? `, ${kB(b.parts.date_range)}` : ''}` })
+  } else {
+    if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) })
+    if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
+  }
+  if (m?.prove_ms != null) rows.push({ label: b ? 'Proving, all parts' : 'Proving', value: ms(m.prove_ms) })
+  if (m?.proof_bytes != null && !b) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) })
   if (m?.presentation_bytes != null) rows.push({ label: 'Presentation size', value: kB(m.presentation_bytes) })
-  rows.push({ label: 'Runs on', value: `${site}'s server (the Vega addon), in place of the phone` })
+  rows.push({ label: 'Runs on', value: `${site}'s server (${addonOf(w.view)}), in place of the phone` })
   return { heading: 'Proof', rows }
 }
 
 /** The verifier's timings, apart from the prover's: as measured on this machine, in the server. */
-function verificationSection(v: VerificationMetrics | null | undefined, site: string): GuideSection | null {
+function verificationSection(v: VerificationMetrics | null | undefined, site: string, view?: RequestView | null): GuideSection | null {
   if (!v) return null
   const rows: GuideRow[] = []
   if (v.decode_ms != null) rows.push({ label: 'Decoding', value: ms(v.decode_ms) })
   if (v.verify_ms != null) rows.push({ label: 'Verification', value: ms(v.verify_ms) })
   if (v.total_ms != null) rows.push({ label: 'Verifier total', value: ms(v.total_ms) })
   rows.push({ label: 'Verifier call', value: `${ms(v.round_trip_ms)}, timed by ${site}'s response route around the call` })
-  rows.push({ label: 'Runs on', value: `${site}'s server (the Vega addon); measured on this machine` })
+  rows.push({ label: 'Runs on', value: `${site}'s server (${addonOf(view)}); measured on this machine` })
   return { heading: 'Verification', rows }
 }
 
-function checksSection(circuit: CircuitEntry | undefined, site: string): GuideSection | null {
+const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.jwt) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
+
+function checksSection(view: RequestView | null | undefined, site: string): GuideSection | null {
+  if (view?.scheme) return schemeChecksSection(view.scheme, site)
+  const circuit: CircuitEntry | undefined = view?.circuit
   if (!circuit) return null
   const rows: GuideRow[] = circuit.public_inputs.map((p) => ({
     label: p.name,
     code: true,
     value: `${p.source === 'presentation' ? 'From the presentation' : `Computed by ${site}`}: ${p.derivation}`,
   }))
-  const items = circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : undefined
+  const items = [ENCRYPTED_NOTE, ...(circuit.checks_validity ? ['The circuit also proves that the credential is valid at proof_time.'] : [])]
+  if (circuit.proof_system === 'longfellow-libzk-v1') {
+    items.push(
+      'Two circuits: the hash circuit (GF(2^128)) reads the credential, the dates and the pseudonym; the signature circuit (P-256) checks the issuer and device signatures. The MAC tags tie the two to the same message and device key.',
+    )
+  }
   return { heading: `What ${site} checks`, rows, items, stacked: true }
+}
+
+/** bbs_cd: what the BBS verifier derives itself, and what each plugin proves (the registry entry). */
+function schemeChecksSection(scheme: SchemeEntry, site: string): GuideSection {
+  return {
+    heading: `What ${site} checks`,
+    rows: [
+      ...scheme.statement.map((x) => ({ label: x.name, code: true, value: `Computed by ${site}: ${x.derivation}` })),
+      { label: 'BBS proof', code: true, value: 'The signed credential behind the commitments, under the issuer key; nothing disclosed' },
+      ...scheme.plugins.map((p) => ({ label: p.id, code: true, value: `On ${p.attribute}: ${p.proves}` })),
+    ],
+    items: [ENCRYPTED_NOTE, 'Every plugin proof is bound to the request and to the BBS proof\'s commitments, so none can be moved to another presentation. The credential has no expiry for the proof to check.'],
+    stacked: true,
+  }
 }
 
 function storedSection(account: Account | null, site: string): GuideSection | null {
@@ -202,6 +244,25 @@ function storedSection(account: Account | null, site: string): GuideSection | nu
 
 function credentialSection(c: CredentialView | null): GuideSection | null {
   if (!c) return null
+  if (c.bbs) {
+    return {
+      heading: 'Credential',
+      rows: [
+        { label: 'Schema', value: c.bbs.schemaId, mono: true },
+        { label: 'Encoding', value: c.encoding },
+        { label: 'Attributes', value: c.bbs.attributes.map((a) => `${a.name} (${a.type}${a.messages > 1 ? `, ${a.messages} messages` : ''})`).join(', '), mono: true },
+        { label: 'Issuer', value: c.issuer.country ? `${c.issuer.name} (${c.issuer.country})` : c.issuer.name },
+        { label: 'Issuer signature', value: `BBS over ${c.bbs.messages} messages, key ${c.bbs.issuerKey.slice(0, 16)}…` },
+        { label: 'Valid', value: 'No expiry' },
+        { label: 'Device key', value: `${c.deviceKey.kty} ${c.deviceKey.crv}, the same key as the phone's mdoc, attested at issuance` },
+        { label: 'Size', value: `${c.sizes.issuerSigned.toLocaleString('en-GB')} bytes` },
+      ],
+      items: [
+        'The pseudonym seed is a signed attribute the issuer chose and keeps (nym-seed.issuer-known), so the issuer can compute any pseudonym of the holder.',
+        'Demo setup: the device key and the credential are stored in this page. A production wallet keeps the device key in secure hardware.',
+      ],
+    }
+  }
   return {
     heading: 'Credential',
     rows: [
@@ -245,7 +306,7 @@ function lastContext(p: WalletPurpose): string {
   return p.intent === 'login' ? 'Log-in' : 'Sign-up'
 }
 
-/** The verifier identity of a request: Readdit's, or a community's own (Community.nymHost). */
+/** The verifier identity of a request: Community's, or a community's own (Community.nymHost). */
 function hostOf(i: GuideInput): string {
   return i.wallet.consent?.verifier.host ?? (i.page.kind === 'community' && i.dialog.purpose?.kind === 'community' ? (i.page.community.nymHost ?? i.siteHost) : i.siteHost)
 }
@@ -259,6 +320,7 @@ const REFUSALS: Record<string, string> = {
   state_mismatch: 'the state does not match the request',
   already_answered: 'the request already has an answer',
   unavailable: 'its verifier failed',
+  none_accepted: 'it accepts no proof system now (all switched off in the technical view)',
 }
 
 /** The wallet stopped on its own error: what happened and what the site sees, from the error's cause. */
@@ -276,9 +338,9 @@ function walletErrorStep(i: GuideInput, context: string): GuideStep {
   } else if (endpoint === 'response_uri' && status) {
     summary = `${i.siteName} refused the wallet's response (${status}): ${REFUSALS[code ?? ''] ?? 'see the technical view'}. Nothing was applied.`
   } else if (endpoint === '/api/wallet/capabilities') {
-    summary = `The wallet could not reach the prover in ${i.siteName}'s server (the Vega addon), so it cannot answer requests. ${waits}`
+    summary = `The wallet could not reach the provers in ${i.siteName}'s server (the Vega, Longfellow and BBS addons), so it cannot answer requests. ${waits}`
   } else if (endpoint?.startsWith('/api/wallet/')) {
-    summary = `The prover in ${i.siteName}'s server (the Vega addon) did not ${endpoint.endsWith('sign') ? 'sign' : 'create the proof'}. ${waits}`
+    summary = `The prover in ${i.siteName}'s server (${addonOf(i.wallet.view)}) did not ${endpoint.endsWith('sign') ? 'sign' : 'create the proof'}. ${waits}`
   } else if (e?.title === 'Verifier is not Trusted') {
     summary = `The signed request did not check out, so the wallet stops and sends nothing to a verifier it cannot trust. ${waits}`
   } else {
@@ -319,7 +381,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 3,
             title: 'Cancelled at the PIN',
             summary: 'The person cancelled at the PIN screen. The device key did not sign, no proof was made, and the wallet answers access_denied, as for a declined request.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
           }
         : {
             id: 'declined',
@@ -327,7 +389,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 2,
             title: 'Declined',
             summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
           }
     case 'error':
       return walletErrorStep(i, context)
@@ -343,7 +405,7 @@ function dialogStep(i: GuideInput): GuideStep {
       stage: 5,
       title: 'Verifying',
       summary: `${i.siteName} received the presentation and verifies the proof against the request it signed.`,
-      details: [checksSection(w.view?.circuit, i.siteName)].filter((s): s is GuideSection => !!s),
+      details: [checksSection(w.view, i.siteName)].filter((s): s is GuideSection => !!s),
     }
   }
   return qrStep(i, context)
@@ -384,7 +446,7 @@ function qrStep(i: GuideInput, context: string): GuideStep {
     summary = `${i.siteName} shows a QR code that points to a signed OpenID4VP request. The person scans it with the SIROS ID wallet on their phone.`
   }
   if (i.dialog.swapped) {
-    summary = `The phones were swapped: the ${i.wallet.phone.toLowerCase() || 'other phone'} now faces the QR code. The request names no wallet, so any phone can answer it; only what its presentation proves counts. ${summary}`
+    summary = `The phones were swapped: the ${i.wallet.phone.replace(/^\w/, (ch) => ch.toLowerCase()) || 'other phone'} now faces the QR code. The request names no wallet, so any phone can answer it; only what its presentation proves counts. ${summary}`
   }
   const id = p?.kind === 'community' ? 'community-qr' : p?.kind === 'age' ? 'age-qr' : p?.community ? 'signin-age-qr' : 'signin-qr'
   return { id, context, stage: 0, title: 'QR code', summary, details }
@@ -394,13 +456,16 @@ function credentialStep(i: GuideInput, context: string): GuideStep {
   const c = focusOf(i)
   const phone = PHONES.find((p) => p.label === i.wallet.phone)
   const n = phone ? phone.credentials.length : i.credentials.length
+  const bbsToo = i.credentials.some((k) => k.format === 'bbs_cd' && (!phone || phone.credentials.includes(k.index)))
   return {
     id: 'credential',
     context,
     title: 'The credential',
-    summary: `The wallet holds ${n === 1 ? 'one Age and pseudonym credential' : `${n} Age and pseudonym credentials`}${c ? ` from ${c.issuer.name}` : ''}${
-      n > 1 && c ? `; this one was issued for a birth date of ${fmtDate(c.attributes.birth_date)}` : ''
-    }. Each contains a birth date and a commitment to its own secret seed. Neither value is sent to sites.`,
+    summary: c?.format === 'bbs_cd'
+      ? `This is the BBS form of the Age and pseudonym credential, from ${c.issuer.name}: a birth date, a pseudonym seed and the device key, signed with BBS. A presentation commits to them without revealing them, and plugins prove the age range and the pseudonym.`
+      : `The wallet holds ${n === 1 ? 'one Age and pseudonym credential' : bbsToo ? 'an mdoc and a BBS credential, both Age and pseudonym,' : `${n} Age and pseudonym credentials`}${c ? ` from ${c.issuer.name}` : ''}${
+          n > 1 && c && !bbsToo ? `; this one was issued for a birth date of ${fmtDate(c.attributes.birth_date)}` : ''
+        }. Each contains a birth date and its own pseudonym seed. Neither value is sent to sites.`,
     details: [credentialSection(c)].filter((s): s is GuideSection => !!s),
   }
 }
@@ -412,7 +477,7 @@ function switchStep(i: GuideInput, context: string): GuideStep {
     context,
     stage: 2,
     title: 'Switch credential',
-    summary: `${i.wallet.matching} credentials in the wallet match the request. Each has its own secret seed, so each gives a different pseudonym for ${i.siteHost}, and so a different ${i.siteName} account.`,
+    summary: `${i.wallet.matching} credentials in the wallet match the request. Another person's has its own seed, and a BBS credential another PRF, so each gives a different pseudonym for ${i.siteHost}, and so a different ${i.siteName} account.`,
     details: [
       {
         heading: 'Credentials',
@@ -436,6 +501,7 @@ function scanStep(i: GuideInput, context: string): GuideStep {
         rows: [
           { label: 'Method', value: 'POST to request_uri, with wallet_metadata and wallet_nonce' },
           { label: 'Circuits the wallet supports', value: i.wallet.walletCircuits.join(', ') || 'None', mono: true },
+          { label: 'Schemes the wallet supports', value: i.wallet.walletSchemes.join(', ') || 'None', mono: true },
           { label: 'Certificate chain', value: 'Not checked against a trust anchor by this demo wallet' },
         ],
         stacked: true,
@@ -450,7 +516,7 @@ function consentStep(i: GuideInput, context: string): GuideStep {
   const signinAge = !!c?.age && i.dialog.purpose?.kind === 'signin'
   let summary: string
   if (i.dialog.purpose?.kind === 'community') {
-    summary = `${communityName(i.dialog.purpose.community)} asks for a pseudonym for ${host}, its own name. The wallet derives it from the same secret seed as for ${i.siteHost}, but the different verifier_id gives a pseudonym that cannot be linked to the Readdit one.`
+    summary = `${communityName(i.dialog.purpose.community)} asks for a pseudonym for ${host}, its own name. The wallet derives it from the same secret seed as for ${i.siteHost}, but the different verifier_id gives a pseudonym that cannot be linked to the Community one.`
   } else if (signinAge) {
     summary = `${i.siteName} asks for a pseudonym and proof that the holder is ${c!.age!.text}, in one presentation. The pseudonym logs in to the account, or creates it; the birth date stays on the phone.`
   } else if (c?.age) {
@@ -467,6 +533,26 @@ function consentStep(i: GuideInput, context: string): GuideStep {
 function pinStep(i: GuideInput, context: string): GuideStep {
   const f = focusOf(i)
   const key = f ? `${f.deviceKey.kty} ${f.deviceKey.crv}, bound to the credential` : 'Bound to the credential'
+  if (i.wallet.view?.scheme) {
+    return {
+      id: 'pin',
+      context,
+      stage: 3,
+      title: 'PIN',
+      summary: "The PIN unlocks the wallet's device key, which signs this request. Any PIN unlocks it in this demo. The ecdsa-pop plugin proves that the key in the credential made the signature, without revealing the key.",
+      details: [
+        {
+          heading: 'Device key',
+          rows: [
+            { label: 'Key', value: key },
+            { label: 'Signs', value: "ECDSA-P256-SHA256 over the plugin's device message, which binds the nonce, the request and the presentation's commitments" },
+            { label: 'PIN', value: 'Any 6 digits unlock the key in this demo; the PIN never leaves the phone. The SIROS ID app unlocks with a passkey.' },
+          ],
+          stacked: true,
+        },
+      ],
+    }
+  }
   return {
     id: 'pin',
     context,
@@ -488,13 +574,14 @@ function pinStep(i: GuideInput, context: string): GuideStep {
 }
 
 function provingStep(i: GuideInput, context: string): GuideStep {
-  const circuit = i.wallet.view?.circuit
+  const v = i.wallet.view
+  const by = v?.circuit ? ` with ${v.circuit.label}` : v?.scheme ? ` with ${v.scheme.label}: a BBS proof and one plugin proof per requested item` : ''
   return {
     id: 'proving',
     context,
     stage: 4,
     title: 'Proof',
-    summary: `The wallet proves the request's statement over its credential${circuit ? ` with ${circuit.label}` : ''} and sends the presentation to ${i.siteName}. ${i.siteName} verifies it against the request it signed.`,
+    summary: `The wallet proves the request's statement over its credential${by} and sends the presentation to ${i.siteName}. ${i.siteName} verifies it against the request it signed.`,
     details: [proofSection(i.wallet, i.siteName)].filter((s): s is GuideSection => !!s),
   }
 }
@@ -531,7 +618,7 @@ function unmetStep(i: GuideInput, context: string): GuideStep {
     stage: 2,
     title: 'Request not supported',
     summary: `The wallet cannot answer this request: ${
-      v?.problem === 'no_circuit' ? 'it has no circuit in common with the request' : 'the request is outside what the wallet supports'
+      v?.problem === 'no_circuit' ? 'it has no circuit or scheme in common with the request' : 'the request is outside what the wallet supports'
     }. It answers invalid_request, which does not depend on the holder's data.`,
     details: [
       {
@@ -550,9 +637,9 @@ function unmetStep(i: GuideInput, context: string): GuideStep {
 function successStep(i: GuideInput, context: string): GuideStep {
   const kind = i.dialog.completion?.kind
   const handle = i.dialog.completion?.handle ?? i.account?.handle
-  const checks = checksSection(i.wallet.view?.circuit, i.siteName)
+  const checks = checksSection(i.wallet.view, i.siteName)
   const proof = proofSection(i.wallet, i.siteName)
-  const verification = verificationSection(i.dialog.verification, i.siteName)
+  const verification = verificationSection(i.dialog.verification, i.siteName, i.wallet.view)
   const done = i.dialog.completion
   if (done?.community) {
     const name = communityName(done.community)
@@ -565,7 +652,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
       title: kind === 'created' ? `Joined ${name}` : `Back in ${name}`,
       summary:
         (kind === 'created'
-          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is for ${host} only; nothing in it connects to the person's Readdit pseudonym.`
+          ? `${i.siteName} verified the proof and created u/${handle} in ${name}. The pseudonym is unique to /${done.community}; nothing in it connects to the person's Community pseudonym.`
           : `The pseudonym for ${host} belongs to an existing ${name} account, u/${handle}.`) + linkNote,
       details: [
         {
@@ -573,7 +660,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
           rows: [
             { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
             { label: 'Handle', value: `u/${handle}` },
-            { label: 'Linked to a Readdit account', value: done.linked || i.membership?.linked ? 'Yes, by the person logging in to both' : 'No' },
+            { label: 'Linked to a Community account', value: done.linked || i.membership?.linked ? 'Yes, by the person logging in to both' : 'No' },
           ],
           stacked: true,
         },
@@ -624,7 +711,7 @@ function successStep(i: GuideInput, context: string): GuideStep {
  *  verifier timings join the details. */
 function failedStep(i: GuideInput, context: string, failure: string): GuideStep {
   const step = failedStepFor(i, context, failure)
-  const v = verificationSection(i.dialog.verification, i.siteName)
+  const v = verificationSection(i.dialog.verification, i.siteName, i.wallet.view)
   return v ? { ...step, details: [...step.details, v] } : step
 }
 
@@ -657,7 +744,7 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         ...base,
         id: 'community-linked-elsewhere',
         title: 'Linked to another account',
-        summary: `This wallet's ${name} account is already linked to another Readdit account. ${i.siteName} links each ${name} account to one Readdit account at most.`,
+        summary: `This wallet's ${name} account is already linked to another Community account. ${i.siteName} links each ${name} account to one Community account at most.`,
         details: [],
       }
     }
@@ -686,7 +773,15 @@ function failedStepFor(i: GuideInput, context: string, failure: string): GuideSt
         ...base,
         id: 'unavailable',
         title: 'Verifier not available',
-        summary: `${i.siteName}'s proof backend, the Vega addon in its server, failed, so ${i.siteName} could not ${i.dialog.authUrl ? 'verify the response' : 'start the request'}. Nothing was applied. The technical view and the server log show the error.`,
+        summary: `${i.siteName}'s proof backend, ${addonOf(i.wallet.view)} in its server, failed, so ${i.siteName} could not ${i.dialog.authUrl ? 'verify the response' : 'start the request'}. Nothing was applied. The technical view and the server log show the error.`,
+        details: [],
+      }
+    case 'none_accepted':
+      return {
+        ...base,
+        id: 'none-accepted',
+        title: 'No proof system accepted',
+        summary: `${i.siteName} accepts none of its proof systems, so it has nothing to ask a wallet for and shows no QR code. The demo starts this way. Tick Vega, Longfellow or BBS under "Community accepts" in the technical view, then try again.`,
         details: [],
       }
     case 'expired':
@@ -846,8 +941,8 @@ function siteStep(i: GuideInput): GuideStep {
       details: [
         storedSection(i.account, i.siteName),
         proofSection(i.wallet, i.siteName),
-        verificationSection(i.dialog.verification, i.siteName),
-        checksSection(i.wallet.view?.circuit, i.siteName),
+        verificationSection(i.dialog.verification, i.siteName, i.wallet.view),
+        checksSection(i.wallet.view, i.siteName),
       ].filter((s): s is GuideSection => !!s),
     }
   }
@@ -879,7 +974,7 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
           rows: [
             { label: 'Requirement', value: gateText(c.gate) },
             { label: 'Birth dates that qualify today', value: birthRangeText(gateRange(c.gate, i.today)) },
-            { label: 'req', value: 'pseudonym-v1-sha256 and age_check, in one credential query', mono: true },
+            { label: '_req', value: 'pseudonym and age_check, in one zkp_req credential query', mono: true },
           ],
           items: [
             'One presentation carries the pseudonym and the age result: both are outputs of the same proof over the same credential, so the age is bound to the pseudonym.',
@@ -948,13 +1043,13 @@ function communityStep(i: GuideInput, c: Community): GuideStep {
         stacked: true,
       },
       ...(lastHere?.ok
-        ? [proofSection(i.wallet, i.siteName), verificationSection(i.dialog.verification, i.siteName), checksSection(i.wallet.view?.circuit, i.siteName)]
+        ? [proofSection(i.wallet, i.siteName), verificationSection(i.dialog.verification, i.siteName, i.wallet.view), checksSection(i.wallet.view, i.siteName)]
         : []),
     ].filter((s): s is GuideSection => !!s),
   }
 }
 
-/** A community with its own pseudonym (Community.nymHost): one account per person, unlinkable to Readdit's. */
+/** A community with its own pseudonym (Community.nymHost): one account per person, unlinkable to Community's. */
 function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
   const name = communityName(c)
   const host = c.nymHost!
@@ -962,33 +1057,33 @@ function ownPseudonymStep(i: GuideInput, c: Community): GuideStep {
     heading: 'Own pseudonym',
     rows: [
       { label: 'Verifier identity', value: `x509_san_dns:${host}`, mono: true },
-      { label: "Readdit's", value: `x509_san_dns:${i.siteHost}`, mono: true },
-      { label: 'Pseudonym', value: 'pseudonym-v1-sha256, known-offender-matching-ssc', mono: true },
+      { label: "Community's", value: `x509_san_dns:${i.siteHost}`, mono: true },
+      { label: 'Pseudonym', value: 'pseudonym, known-offender-matching-ssc', mono: true },
     ],
     items: [
-      `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Readdit account, if any, a ${name} account belongs to, unless the person chooses to link them.`,
+      `Different verifier_id, different pseudonym: ${i.siteName} cannot tell which Community account, if any, a ${name} account belongs to, unless the person chooses to link them.`,
       `Known-offender matching still holds for ${host}: one wallet, one ${name} account, and a ban sticks.`,
-      `A ban of the Readdit account also bans the ${name} account linked to it; a ban in ${name} leaves the Readdit account alone.`,
-      `Linking moves no age: age checks always use the logged-in Readdit account's own proven range, so a ${name} account from another phone opens nothing else.`,
-      'The issuer can still link the pseudonym to the person, because it knows the secret seed. A private seed (psc) would prevent that; it needs a new circuit.',
+      `A ban of the Community account also bans the ${name} account linked to it; a ban in ${name} leaves the Community account alone.`,
+      `Linking moves no age: age checks always use the logged-in Community account's own proven range, so a ${name} account from another phone opens nothing else.`,
+      'Today the request still uses known-offender-matching-ssc, so the issuer, which knows the secret seed, can link the pseudonym to the person. The psc-based configuration that replaces it (config: X in the side nav) prevents that; it needs a new circuit.',
     ],
     stacked: true,
   }
   const m = i.membership
   if (i.access === 'member-banned' && m) {
     return { id: 'community-banned', context: name, title: 'Account banned', summary: m.bannedWith
-        ? `A moderator banned the Readdit account u/${m.bannedWith}, and with it u/${m.handle}, the ${name} account linked to it. Unbanning u/${m.bannedWith} lifts both.`
-        : `A moderator banned u/${m.handle} in ${name}. The ban is stored against the ${name} pseudonym; the person's Readdit account is not affected.`, details: [identity] }
+        ? `A moderator banned the Community account u/${m.bannedWith}, and with it u/${m.handle}, the ${name} account linked to it. Unbanning u/${m.bannedWith} lifts both.`
+        : `A moderator banned u/${m.handle} in ${name}. The ban is stored against the ${name} pseudonym; the person's Community account is not affected.`, details: [identity] }
   }
   if (i.access === 'join' || !m) {
     return {
       id: 'community-join',
       context: name,
-      title: 'Proof of human',
-      summary: `${name} wants proof of a real person and no bots. It asks the wallet for a pseudonym for ${host}, its own name, so a person gets one ${name} account, not linked to their other accounts unless they choose to.${
+      title: 'Fully anonymous',
+      summary: `${name} is fully anonymous. The person proves they are real with a pseudonym for ${host}, its own name, so the pseudonym is unique to /${c.slug} and each person gets one ${name} account. Association to the main account is optional.${
         i.account
-          ? ` Logged in as u/${i.account.handle}, the person chooses: join and link the two, or log out and join separately.`
-          : ' No Readdit account is needed.'
+          ? ` Logged in as u/${i.account.handle}, the person chooses: link the two (Link to u/${i.account.handle}), or join separately, which logs out first.`
+          : ' No Community account is needed.'
       }`,
       details: [identity],
     }

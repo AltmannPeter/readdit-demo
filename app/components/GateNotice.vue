@@ -6,7 +6,7 @@ const props = defineProps<{ community: Community; state: 'login' | 'ask-signin' 
 const wallet = useWallet()
 const { account, memberships, signOut } = useAccount()
 
-/** Logged in, joining is a choice: link the new account to this one, or log out and join separately. */
+/** Logged in, joining is a choice: link the new account to this one, or join separately (which logs out first). */
 function join(link: boolean) {
   wallet.start({ kind: 'community', community: props.community.slug, link })
 }
@@ -32,17 +32,16 @@ const ageText = computed(() => {
       <span class="flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand">
         <AppIcon name="user" class="size-6" />
       </span>
-      <h2 class="mt-4 text-lg font-semibold">{{ name }} asks for proof of human</h2>
-      <div class="mt-3 max-w-md space-y-2 text-left text-sm text-muted">
-        <p>Prove with your wallet that you are a real person. You get a pseudonym for {{ name }} only, which is not linked to your other accounts unless you choose to. One account per person.</p>
-        <p v-if="account">
-          You are logged in as u/{{ account.handle }}. Linking tells Readdit that both accounts are yours. To keep them apart, log out
-          first.
-        </p>
-      </div>
+      <!-- Copy: Peter, 2026-10-23. "Fully anonymous" anticipates the psc-based configuration; the
+           demo still asks for known-offender-matching-ssc. -->
+      <h2 class="mt-4 text-lg font-semibold">{{ name }} is fully anonymous</h2>
+      <p class="mt-3 max-w-md text-sm text-muted">
+        Prove that you are a real person. Your pseudonym will be unique to /{{ props.community.slug }}. Association to your main account is optional. One
+        account per person.
+      </p>
       <div v-if="account" class="mt-5 flex flex-wrap justify-center gap-2">
-        <button class="btn-outline" @click="logOutAndJoin">Log out and join separately</button>
-        <button class="btn-primary" @click="join(true)">Join and link to u/{{ account.handle }}</button>
+        <button class="btn-outline" @click="logOutAndJoin">Join separately</button>
+        <button class="btn-primary" @click="join(true)">Link to u/{{ account.handle }}</button>
       </div>
       <button v-else class="btn-primary mt-5" @click="join(false)">Join with wallet</button>
     </template>
@@ -53,7 +52,7 @@ const ageText = computed(() => {
       </span>
       <h2 class="mt-4 text-lg font-semibold">Your {{ name }} account is banned</h2>
       <p v-if="memberships[props.community.slug]?.bannedWith" class="mt-1 max-w-sm text-sm text-muted">
-        It is linked to u/{{ memberships[props.community.slug]?.bannedWith }}, and a moderator banned that Readdit account.
+        It is linked to u/{{ memberships[props.community.slug]?.bannedWith }}, and a moderator banned that Community account.
       </p>
       <p v-else class="mt-1 max-w-sm text-sm text-muted">A moderator banned u/{{ memberships[props.community.slug]?.handle }} in {{ name }}.</p>
       <NuxtLink to="/" class="btn-outline mt-5">Back to Home</NuxtLink>
@@ -65,9 +64,9 @@ const ageText = computed(() => {
       </span>
       <h2 class="mt-4 text-lg font-semibold">{{ name }} is {{ ageText }}</h2>
       <p class="mt-1 max-w-sm text-sm text-muted">
-        Prove your age with your wallet to enter. Readdit learns whether you meet the requirement, not your date of birth.
+        Prove your age with your wallet to enter. Community learns whether you meet the requirement, not your date of birth.
       </p>
-      <p v-if="props.state === 'ask-signin'" class="mt-2 max-w-sm text-sm text-muted">The same step logs you in to Readdit with a pseudonym.</p>
+      <p v-if="props.state === 'ask-signin'" class="mt-2 max-w-sm text-sm text-muted">The same step logs you in to Community with a pseudonym.</p>
       <button
         class="btn-primary mt-5"
         @click="

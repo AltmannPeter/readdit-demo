@@ -1,0 +1,48 @@
+{
+  "caseName": "single committed scalar at the final index, disclosed messages before it (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "proof": "0000000000000001801a9c5bbb03f24a7b2ba2410c6ca2a3762ea54a94952c61b124fd550863a3171a19d79f2805a11e81e59a4c742ec91a84f563c38fb89c26bf6f8bacad9491e1f76cca83dfcdc98a214b1ff10dd78b945c343467ab74bbb5c6b4a081702199ffba010a0405a2beddf9d81b43a77ed5e49acac9eb4178a87ac99afd946c107ccb0d837f2032fe4ee1e28f1f04071cbca92a69aa898b750ce5a8e8194677bd835e7f1c21d31535e5165693b9da00b3196c0b92e7d41050caa174b08bfdc3f868597441361e16056bb8e87526a84ac38cc42ca1c8cf121271a7e094f69abcb8941c418087a5e9f8903618f5de5e38575d7d60f63f6c1270bf9563a0b3061984a6430559cce38799af1d6b860332ef48a09b612b9b140362c73f788dd23900751e09b918abe2abd13f9ef958e3e25437b07e8497ce91a5a8bd956933d8a55abd97cbb59862b12d65c3bb7167a09789cdf600e1bede7b40efee00f761d43c6d89540c547a1c1feb9538b6ec2ce63a7285a8de3a0133fb0d2ae61daaa8bff255faed8260d652b9123b1d77927d6a349df6e47d3d294591e869e7e5b0b8b87518e63956",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "6e616d65",
+      ""
+    ],
+    "commitments": [
+      "8497ce91a5a8bd956933d8a55abd97cbb59862b12d65c3bb7167a09789cdf600e1bede7b40efee00f761d43c6d89540c"
+    ],
+    "messageTypes": [
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "DISCLOSE",
+      "HIDE",
+      "DISCLOSE",
+      "COMMIT"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "5d799b3e47e4a73b4eef039a75530acf4550b99681d2d2713d879dacbb9ae78b",
+    "challenge": "60d652b9123b1d77927d6a349df6e47d3d294591e869e7e5b0b8b87518e63956"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

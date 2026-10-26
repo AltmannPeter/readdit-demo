@@ -1,0 +1,25 @@
+{
+  "source": "D.1.1.2",
+  "caseName": "Modified Message Signature",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "Verify",
+  "input": {
+    "SK": null,
+    "PK": "92d37d1d6cd38fea3a873953333eab23a4c0377e3e049974eb62bd45949cdeb18fb0490edcd4429adff56e65cbce42cf188b31bddbd619e419b99c2c41b38179eb001963bc3decaae0d9f702c7a8c004f207f46c734a5eae2e8e82833f3e7ea5",
+    "header": "11223344556677889900aabbccddeeff",
+    "messages": [
+      ""
+    ],
+    "messageRefs8_2": [
+      9
+    ],
+    "signature": "b9a622a4b404e6ca4c85c15739d2124a1deb16df750be202e2430e169bc27fb71c44d98e6d40792033e1c452145ada95030832c5dc778334f2f1b528eced21b0b97a12025a283d78b7136bb9825d04ef"
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "modified message"
+    }
+  }
+}

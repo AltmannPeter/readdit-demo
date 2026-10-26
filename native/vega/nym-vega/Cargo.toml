@@ -2,7 +2,7 @@
 name = "nym-vega"
 version = "0.1.0"
 edition = "2024"
-description = "Prover and verifier of the nym_auth age and pseudonym statement (Vega), as Readdit runs them"
+description = "Prover and verifier of the nym_auth age and pseudonym statement (Vega), as Community runs them"
 publish = false
 
 [dependencies]
@@ -27,6 +27,8 @@ der = "0.7"
 time = { version = "0.3", features = ["parsing", "formatting"] }
 # The prover's thread count, which the metrics report.
 rayon = "1.12"
+# vega-prover's phase spans, which /tech's profile records (phases.rs).
+tracing = "0.1"
 
 [lints.rust]
 unsafe_code = "forbid"

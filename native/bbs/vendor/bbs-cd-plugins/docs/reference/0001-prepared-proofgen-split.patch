@@ -1,0 +1,340 @@
+From 45b6019ba6a0abd9385cc4421f2920a2f4a4c38a Mon Sep 17 00:00:00 2001
+From: "Claude (for Peter)" <peter@siros.org>
+Date: Thu, 15 Oct 2026 17:28:43 +0200
+Subject: [PATCH] PROPOSAL: prepared ProofGen split (prepared.rs) +
+ device-binding probes
+
+---
+ examples/prepared_probe.rs |  48 +++++++
+ src/lib.rs                 |   3 +
+ src/prepared.rs            | 249 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 300 insertions(+)
+ create mode 100644 examples/prepared_probe.rs
+ create mode 100644 src/prepared.rs
+
+diff --git a/examples/prepared_probe.rs b/examples/prepared_probe.rs
+new file mode 100644
+index 0000000..e9f68aa
+--- /dev/null
++++ b/examples/prepared_probe.rs
+@@ -0,0 +1,48 @@
++//! Byte-equality and latency of the proposed ProofPrepare/complete split.
++use bbs_cd::interface::{KeyGen, PrecomputeCommitment, ProofGen, ProofVerify, SkToPk, Sign};
++use bbs_cd::mock_rng::ProfileRng;
++use bbs_cd::params::Ciphersuite;
++use bbs_cd::prepared::ProofPrepare;
++use bbs_cd::types::{Index, Message, MessageType, ScalarInput, COMMIT, DISCLOSE, HIDE, OCTETS, SCALAR};
++use std::time::Instant;
++
++fn limb(v: u128) -> ScalarInput { let mut b = [0u8; 32]; b[16..].copy_from_slice(&v.to_be_bytes()); ScalarInput(b) }
++
++fn main() {
++    let suite = Ciphersuite::Sha256;
++    let sk = KeyGen(suite, &[7u8; 32], b"", None).unwrap();
++    let pk = SkToPk(sk).unwrap();
++    let mut msgs: Vec<Message> = [1u128, 2, 3, 4].iter().map(|&v| Message::Scalar(limb(v << 100))).collect();
++    for a in [&b"Alice"[..], b"1990-01-01", b"age_over_18:true", b"SE"] { msgs.push(Message::Octets(a.to_vec())); }
++    let types: Vec<MessageType> = vec![SCALAR, SCALAR, SCALAR, SCALAR, OCTETS, OCTETS, OCTETS, OCTETS];
++    let header = b"devbind-p256-limbs-v0".to_vec();
++    let sig = Sign(suite, sk, &pk, &header, &msgs, &types).unwrap();
++    let disc = vec![COMMIT, COMMIT, COMMIT, COMMIT, HIDE, HIDE, DISCLOSE, HIDE];
++    let ph = b"verifier-context-or-devbind-digest";
++    // byte equality with the same mocked stream
++    let mk = || ProfileRng::new(suite, b"3.141592653589793238462643383279".to_vec(), b"probe-dst".to_vec(), vec![]);
++    let mut r1 = mk(); let mut r2 = mk();
++    let (a, _) = ProofGen(suite, &pk, &sig, &header, ph, &msgs, &types, &disc, None, Some(&mut r1)).unwrap();
++    let b = ProofPrepare(suite, &pk, &sig, &header, &msgs, &types, &disc, None, Some(&mut r2)).unwrap().complete(ph).unwrap();
++    assert_eq!(a, b, "prepared split must be byte-identical to ProofGen");
++    let mut r3 = mk();
++    let c = ProofPrepare(suite, &pk, &sig, &header, &msgs, &types, &disc, None, Some(&mut r3)).unwrap().complete_fast(ph).unwrap();
++    assert_eq!(a, c, "fast path must be byte-identical to ProofGen");
++    println!("byte-identical to ProofGen: ok ({} bytes)", a.len());
++    // latency
++    let idx: Vec<Index> = (0u64..4).map(Index::from).collect();
++    let n = 50; let mut prep = vec![]; let mut onl = vec![];
++    for _ in 0..n {
++        let (_c, rands) = PrecomputeCommitment(suite, &msgs[..4], &idx, &types, None).unwrap();
++        let t = Instant::now();
++        let st = ProofPrepare(suite, &pk, &sig, &header, &msgs, &types, &disc, Some(&rands), None).unwrap();
++        prep.push(t.elapsed().as_secs_f64() * 1e3);
++        let coms = st.commitments().to_vec();
++        let t = Instant::now();
++        let proof = st.complete_fast(ph).unwrap();
++        onl.push(t.elapsed().as_secs_f64() * 1e3);
++        ProofVerify(suite, &pk, &proof, &header, ph, &[msgs[6].clone()], &coms, &types, &disc).unwrap();
++    }
++    prep.sort_by(|a, b| a.partial_cmp(b).unwrap()); onl.sort_by(|a, b| a.partial_cmp(b).unwrap());
++    println!("ProofPrepare p50 {:.2} ms | complete(ph) p50 {:.3} ms p95 {:.3} ms (n={n})", prep[n/2], onl[n/2], onl[n*95/100]);
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index 7c0fc1c..da36b82 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -28,6 +28,9 @@ mod proof_protocol;
+ /// Key, signing, proof, and commitment interface procedures from spec Sections 3.4–3.5 and 4.1.3.
+ pub mod interface;
+ 
++/// PROPOSED (not in spec v0.7): offline/online split of ProofGen.
++pub mod prepared;
++
+ /// Fixture-only injectable randomness support for spec Section 4.2.1.
+ pub mod mock_rng;
+ 
+diff --git a/src/prepared.rs b/src/prepared.rs
+new file mode 100644
+index 0000000..84e3830
+--- /dev/null
++++ b/src/prepared.rs
+@@ -0,0 +1,249 @@
++//! PROPOSED EXTENSION (not part of ETSI profile v0.7): split `ProofGen` into an
++//! offline `ProofPrepare` and an online `PreparedProof::complete(ph)`.
++//!
++//! Spec 3.7 permits exposing the proof subroutines provided the Section 3.6
++//! checks are enforced at that boundary and the state passed between
++//! `ProofInit`, `ProofChallengeCalculate` and `ProofFinalize` comes from a
++//! single invocation.  `ProofPrepare` performs every check of `ProofGen` /
++//! `CoreProofGen` (including the mandatory signature verification) before
++//! `ProofInit`; `complete` consumes the state by value, so one prepared state
++//! can answer at most one `ph` through this API.  Persisting the state outside
++//! the process (e.g. a slot store) is out of scope here and re-opens cloning
++//! risks: answering two `ph` values from one state reveals the hidden messages.
++//! For identical randomness the output is byte-identical to `ProofGen`.
++
++use bls12_381::G1Projective;
++
++use crate::core::{CoreVerify, ProofInit};
++use crate::helpers::{
++    complement, disclosure_indexes, disjoint, select, valid_generators, valid_indexes,
++    valid_message_vector,
++};
++use crate::params::Ciphersuite;
++use crate::proof_protocol::{ProofChallengeCalculate, ProofFinalize};
++use crate::types::{
++    AddZkpInfo, DisclosureState, Index, InitResult, Message, MessageType, OsRandom, ScalarInput,
++    ScalarSource,
++};
++use crate::utils::{compute_commitments, create_generators, messages_to_scalars, octets_to_signature};
++use crate::{BbsResult, INVALID};
++
++/// One-shot private presentation state.  Deliberately neither `Clone` nor `Copy`.
++pub struct PreparedProof {
++    suite: Ciphersuite,
++    api_id: Vec<u8>,
++    init_res: InitResult,
++    e: ScalarInput,
++    random_scalars: Vec<ScalarInput>,
++    s_tildes: Vec<ScalarInput>,
++    disclosed_indexes: Vec<Index>,
++    disclosed_messages: Vec<ScalarInput>,
++    commitment_indexes: Vec<Index>,
++    undisclosed_messages: Vec<ScalarInput>,
++    commitments: Vec<G1Projective>,
++    committed_messages: Vec<ScalarInput>,
++    commitment_rands: Vec<ScalarInput>,
++    // Offline transcript material for the fast path (all ph-independent):
++    c_arr_octs: Vec<u8>,          // serialize(c_arr), spec 3.7.4
++    commitment_octs: Vec<u8>,     // serialize(commitments)
++    proof_prefix: Vec<u8>,        // I2OSP(N,8) || A_bar || B_bar || D
++}
++
++impl PreparedProof {
++    /// Public commitments (available before `ph` is known).
++    pub fn commitments(&self) -> &[G1Projective] {
++        &self.commitments
++    }
++    /// Private openings for external proofs (never send to a Verifier).
++    pub fn add_zkp_info(&self) -> AddZkpInfo {
++        (self.committed_messages.clone(), self.commitment_rands.clone())
++    }
++    /// Fast online step: identical output to `complete`, but every
++    /// ph-independent validation and serialization was done in `ProofPrepare`
++    /// (the points are prover-computed and were checked there).
++    pub fn complete_fast(self, ph: &[u8]) -> BbsResult<Vec<u8>> {
++        use crate::helpers::nonzero_scalar;
++        use crate::primitives::I2OSP;
++        use crate::utils::hash_to_scalar;
++        let N = self.commitments.len();
++        let ctx = [I2OSP(ph.len() as u128, 8)?.as_slice(), ph, &I2OSP(N as u128, 8)?,
++                   &self.commitment_octs].concat();
++        let c = hash_to_scalar(self.suite, &[self.c_arr_octs.as_slice(), &ctx].concat(),
++                               &[self.api_id.as_slice(), b"COM_DIS_ETSI_PROOF_V1_H2S_"].concat())?;
++        if !nonzero_scalar(c) {
++            return Err(INVALID);
++        }
++        let cs = c.to_scalar()?;
++        let r = &self.random_scalars;
++        let (r1, r2) = (r[0].to_scalar()?, r[1].to_scalar()?);
++        let r3 = Option::<bls12_381::Scalar>::from(r2.invert()).ok_or(INVALID)?;
++        let mut out = self.proof_prefix.clone();
++        let mut push = |x: bls12_381::Scalar| -> BbsResult<()> {
++            let v: ScalarInput = x.into();
++            if !nonzero_scalar(v) { return Err(INVALID); }
++            out.extend_from_slice(&v.0);
++            Ok(())
++        };
++        push(r[2].to_scalar()? + self.e.to_scalar()? * cs)?;
++        push(r[3].to_scalar()? - r1 * cs)?;
++        push(r[4].to_scalar()? - r3 * cs)?;
++        for (k, m) in self.undisclosed_messages.iter().enumerate() {
++            push(r[5 + k].to_scalar()? + m.to_scalar()? * cs)?;
++        }
++        out.extend_from_slice(&self.commitment_octs);
++        let mut out2 = out;
++        for (b, s) in self.commitment_rands.iter().enumerate() {
++            let v: ScalarInput = (self.s_tildes[b].to_scalar()? + s.to_scalar()? * cs).into();
++            if !nonzero_scalar(v) { return Err(INVALID); }
++            out2.extend_from_slice(&v.0);
++        }
++        out2.extend_from_slice(&c.0);
++        Ok(out2)
++    }
++
++    /// Online step: challenge and scalar responses only.  Consumes the state.
++    /// On INVALID (zero challenge or response) the caller prepares again with
++    /// fresh masks; commitments/openings MAY be retained (spec 3.3.4.2).
++    pub fn complete(self, ph: &[u8]) -> BbsResult<Vec<u8>> {
++        let c = ProofChallengeCalculate(
++            self.suite,
++            &self.init_res,
++            &self.disclosed_messages,
++            &self.disclosed_indexes,
++            &self.commitments,
++            &self.commitment_indexes,
++            ph,
++            &self.api_id,
++        )?;
++        if c == 0u64.into() {
++            return Err(INVALID);
++        }
++        ProofFinalize(
++            self.suite,
++            &self.init_res,
++            c,
++            self.e,
++            &self.random_scalars,
++            &self.undisclosed_messages,
++            &self.commitments,
++            &self.commitment_rands,
++            &self.s_tildes,
++        )
++    }
++}
++
++/// Offline step: identical inputs, validation and randomness order as `ProofGen`.
++#[allow(clippy::too_many_arguments)]
++pub fn ProofPrepare(
++    suite: Ciphersuite,
++    PK: &[u8],
++    signature: &[u8],
++    header: &[u8],
++    messages: &[Message],
++    message_types: &[MessageType],
++    message_disclosures: &[DisclosureState],
++    precomputed_rands: Option<&[ScalarInput]>,
++    rng: Option<&mut dyn ScalarSource>,
++) -> BbsResult<PreparedProof> {
++    let mut default_rng = OsRandom;
++    let rng: &mut dyn ScalarSource = rng.unwrap_or(&mut default_rng);
++    let api_id = suite.api_id();
++    let messages = messages_to_scalars(suite, messages, message_types, &api_id)?;
++    let L = messages.len();
++    let (disclosed_indexes, commitment_indexes) =
++        disclosure_indexes(message_disclosures, L as u128)?;
++    let generators = create_generators(suite, L as u128 + 1, &api_id)?;
++    // --- CoreProofGen input validation (spec 3.6.3) ---
++    if !valid_message_vector(&messages) || !valid_generators(suite, &generators, L as u128) {
++        return Err(INVALID);
++    }
++    if !valid_indexes(&disclosed_indexes, L as u128)
++        || !valid_indexes(&commitment_indexes, L as u128)
++        || !disjoint(&disclosed_indexes, &commitment_indexes)
++    {
++        return Err(INVALID);
++    }
++    CoreVerify(suite, PK, signature, &generators, header, &messages, &api_id)?;
++    let N = commitment_indexes.len();
++    let committed_messages = select(&messages, &commitment_indexes)?;
++    let commitment_rands = match precomputed_rands {
++        None => rng.calculate_random_scalars(N)?,
++        Some(values) => values.to_vec(),
++    };
++    let commitments = compute_commitments(suite, &committed_messages, &commitment_rands, &api_id)?;
++    let signature_result = octets_to_signature(signature)?;
++    let undisclosed_indexes = complement(&disclosed_indexes, L)?;
++    let U = undisclosed_indexes.len();
++    let disclosed_messages = select(&messages, &disclosed_indexes)?;
++    let undisclosed_messages = select(&messages, &undisclosed_indexes)?;
++    let random_scalars = rng.calculate_random_scalars(5 + U)?;
++    let s_tildes = rng.calculate_random_scalars(N)?;
++    if random_scalars.len() != 5 + U
++        || random_scalars[0] == 0u64.into()
++        || random_scalars[1] == 0u64.into()
++    {
++        return Err(INVALID);
++    }
++    let init_res = ProofInit(
++        suite,
++        PK,
++        &signature_result,
++        &generators,
++        &random_scalars,
++        header,
++        &messages,
++        &undisclosed_indexes,
++        &commitment_indexes,
++        &s_tildes,
++        &api_id,
++    )?;
++    // ph-independent transcript material (same checks as ProofChallengeCalculate)
++    use crate::helpers::{in_g1, nonidentity};
++    use crate::primitives::{I2OSP, point_to_octets_E1};
++    use crate::utils::{Field, serialize};
++    let mut pts = vec![init_res.A_bar, init_res.B_bar, init_res.D, init_res.T1, init_res.T2];
++    pts.extend_from_slice(&commitments);
++    pts.extend_from_slice(&init_res.C_tildes);
++    let mut nid = vec![init_res.A_bar, init_res.B_bar, init_res.D];
++    nid.extend_from_slice(&commitments);
++    if !in_g1(&pts) || !nonidentity(&nid) {
++        return Err(INVALID);
++    }
++    let mut c_arr = vec![Field::U64(disclosed_indexes.len() as u128)];
++    for (a, idx) in disclosed_indexes.iter().enumerate() {
++        let Index::Integer(i) = idx else { return Err(INVALID) };
++        c_arr.push(Field::U64(*i as u128));
++        c_arr.push(Field::Scalar(disclosed_messages[a]));
++    }
++    c_arr.extend([Field::G1(&init_res.A_bar), Field::G1(&init_res.B_bar), Field::G1(&init_res.D),
++                  Field::G1(&init_res.T1), Field::G1(&init_res.T2), Field::Scalar(init_res.domain),
++                  Field::U64(N as u128)]);
++    for (b, idx) in commitment_indexes.iter().enumerate() {
++        let Index::Integer(i) = idx else { return Err(INVALID) };
++        c_arr.push(Field::U64(*i as u128));
++        c_arr.push(Field::G1(&commitments[b]));
++        c_arr.push(Field::G1(&init_res.C_tildes[b]));
++    }
++    let c_arr_octs = serialize(&c_arr)?;
++    let commitment_octs: Vec<u8> = commitments.iter().flat_map(point_to_octets_E1).collect();
++    let proof_prefix = [I2OSP(N as u128, 8)?.as_slice(), &point_to_octets_E1(&init_res.A_bar),
++                        &point_to_octets_E1(&init_res.B_bar), &point_to_octets_E1(&init_res.D)].concat();
++    Ok(PreparedProof {
++        c_arr_octs,
++        commitment_octs,
++        proof_prefix,
++        suite,
++        api_id,
++        init_res,
++        e: signature_result.e,
++        random_scalars,
++        s_tildes,
++        disclosed_indexes,
++        disclosed_messages,
++        commitment_indexes,
++        undisclosed_messages,
++        commitments,
++        committed_messages,
++        commitment_rands,
++    })
++}
+-- 
+2.43.0
+

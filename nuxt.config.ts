@@ -4,33 +4,66 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-10-01',
   devtools: { enabled: false },
   telemetry: false,
-  css: ['~/assets/css/main.css'],
+  css: ['~/assets/css/main.css', '~/assets/css/dev.css'],
   vite: { plugins: [tailwindcss()] },
+  // One-letter routes to the views (the quick links in every header, components/QuickNav.vue).
+  routeRules: {
+    '/c': { redirect: '/' },
+    '/d': { redirect: '/dev' },
+    '/t': { redirect: '/tech' },
+    '/m': { redirect: '/mod' },
+  },
   runtimeConfig: {
     // Vega backend: the Rust Node addon (npm run build:native), the circuits as data and the
     // verifier's trust anchors. Paths are relative to the working directory.
-    vegaAddon: 'native/vega/readdit-vega.node',
+    vegaAddon: 'native/vega/community-vega.node',
     vegaShapes: 'native/vega/circuits/mdoc/shapes.zst',
     vegaTrustAnchors: 'native/vega/demo/document-signer.pem',
+    // Longfellow backend: the Rust Node addon, the directory of circuits.zst, params.tsv and
+    // hash-semantic.tsv, and the verifier's trust anchors (the same demo issuer as Vega's).
+    longfellowAddon: 'native/longfellow/community-longfellow.node',
+    longfellowCircuits: 'native/longfellow/circuits/mdoc',
+    longfellowTrustAnchors: 'native/vega/demo/document-signer.pem',
+    // BBS backend (bbs_cd): the Rust Node addon and the issuer parameters the verifier trusts.
+    bbsAddon: 'native/bbs/community-bbs.node',
+    bbsIssuerParams: 'native/bbs/demo/issuer-params.bin',
     // How far proof_time may lie from the verifier's clock, in seconds.
     proofTimeToleranceS: 300,
-    // Comma-separated circuit ids the site accepts, in order of preference.
-    acceptedCircuits: 'urn:circuits:vega:nym_auth:v1',
+    // Comma-separated system ids the site can accept, circuits (mso_mdoc) and schemes (bbs_cd), in
+    // order of preference.
+    acceptedCircuits: 'urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1',
+    acceptedSchemes: 'urn:mms:bbs-cd:nym_auth:v1',
+    // The proof systems accepted when the site starts (and after a demo reset); /tech switches
+    // them. Comma-separated: vega-v1, longfellow-libzk-v1, bbs-cd-plugins-v0.1. Empty: none, so
+    // the site asks for nothing until one is switched on.
+    acceptedProofSystems: '',
+    // Whether Vega and BBS run on every core (true) or on one thread (false) at start and after a
+    // demo reset; /tech switches it. Longfellow always runs on one thread.
+    multithreading: false,
+    // Where each verified presentation's measurements are appended (JSON lines); /tech shows them
+    // and can clear the file. Relative to the working directory.
+    measurementsFile: '.data/measurements.jsonl',
+    // The profiles of /tech's Profiling switch, one JSON line per profiled presentation.
+    profilesFile: '.data/profiles.jsonl',
+    // /tech's "Trust new issuers": an unknown mdoc Document Signer is trusted from its first verified
+    // presentation on (true at start and after a demo reset), and the issuers added that way.
+    trustNewIssuers: true,
+    trustedIssuersFile: '.data/trusted-issuers.json',
     // PEM files for signing Request Objects. Empty = self-signed key and cert generated at start.
     requestSigningKey: '',
     requestSigningCert: '',
-    sessionPassword: 'readdit-demo-only-session-password-0123456789abcdef',
+    sessionPassword: 'community-demo-only-session-password-0123456789abcdef',
     // How long a wallet request (its QR code) stays valid, in seconds.
     vpSessionTtlS: 600,
     public: {
-      siteName: 'Readdit',
+      siteName: 'Community',
       // DNS name in the access certificate. client_id = x509_san_dns:<siteHost>
-      siteHost: 'readdit.example',
+      siteHost: 'community.example',
     },
   },
   app: {
     head: {
-      title: 'Readdit',
+      title: 'Community',
       htmlAttrs: { lang: 'en' },
       meta: [{ name: 'viewport', content: 'width=device-width, initial-scale=1' }],
       link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],

@@ -1,0 +1,22 @@
+{
+  "caseName": "empty message vector, L = 0",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "Sign",
+  "input": {
+    "SK": "0ebf4817f321fe3c62a828d275523a8393767534367abb9d1895841cf3e53a9b",
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "header": "11223344556677889900aabbccddeeff",
+    "messages": [],
+    "messageTypes": []
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "messageScalars": [],
+    "domain": "5b76a0711d40b8a2b679fd99e55e911b8663c1ded15cab3a2bba5eed8556c443"
+  },
+  "expected": {
+    "output": "acf79bbce0c45039a7fa9018ab69a30cbced22ce625ee67b691188c018a92633c4157d60a0d1dea7eb53769ff584cfdc6b3872c957bd1a85b0b122921a7e859f53e3dcf84b75f7a5e175571542835449"
+  }
+}

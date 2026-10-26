@@ -7,11 +7,11 @@ interface BrowserSessionData {
   communities?: Record<string, string>
 }
 
-/** Cookie session of the browser that shows Readdit (never the phone). */
+/** Cookie session of the browser that shows Community (never the phone). */
 export async function browserSession(event: H3Event) {
   const cfg = useRuntimeConfig(event)
   const session = await useSession<BrowserSessionData>(event, {
-    name: 'readdit',
+    name: 'community',
     password: cfg.sessionPassword,
     cookie: { sameSite: 'lax', httpOnly: true, secure: false },
   })

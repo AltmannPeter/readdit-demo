@@ -2,7 +2,7 @@
 //! `proof_time` and `results` from the presentation and computes every other public input itself
 //! from the request and handover it holds and from its clock:
 //!
-//! 1. `circuit_id` is this circuit, and the request offered it;
+//! 1. `system_id` is this circuit, and the request offered it;
 //! 2. `issuer_key_set` holds one Document Signer certificate, valid against the trust anchors;
 //! 3. `proof_time` lies within the tolerance of `now`;
 //! 4. the keys of `results` are the `return` handles of `req`;
@@ -22,11 +22,11 @@ use vega_age::request::Request;
 
 use crate::circuit::{BIRTH_DATE, CIRCUIT_ID, DOC_TYPE, LAYOUT, PROOF_SYSTEM, PUBLIC_INPUTS, PUBLIC_VALUES, input_at};
 use crate::handover::Handover;
-use crate::measure::{Peak, ms};
+use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, statement};
 use crate::x509::TrustAnchors;
-use crate::{dates, hex, keys};
+use crate::{dates, hex, keys, threads};
 
 /// The largest proof the verifier decodes. A proof of this circuit is 96,079 bytes.
 const MAX_PROOF_BYTES: u64 = 1 << 20;
@@ -35,11 +35,18 @@ const MAX_PROOF_BYTES: u64 = 1 << 20;
 pub struct VerifyInput {
   pub request: RequestObject,
   pub credential_query_id: String,
-  /// base64url(CBOR(CircuitZkPresentation)).
+  /// base64url(CBOR(ZkpPresentation)).
   pub presentation: String,
   pub handover: Handover,
   /// The verifier's clock, RFC 3339.
   pub now: String,
+  /// Issuers trusted besides the configured trust anchors: Document Signer certificates, base64
+  /// DER, that `/tech` learned from earlier presentations ("Trust new issuers").
+  #[serde(default)]
+  pub learned_issuers: Vec<String>,
+  /// One thread per core for the proof check; one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// Why a presentation is refused.
@@ -52,16 +59,22 @@ pub struct Refused {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub input: Option<&'static str>,
   pub reason: String,
+  /// For `issuer_key_set` when the certificate is not trusted: the certificate presented, as
+  /// base64 DER, so the site can trust it on the next try (`/tech`'s Trust new issuers).
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub certificate: Option<String>,
 }
 
 fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
-  Refused { code, input: None, reason: reason.into() }
+  Refused { code, input: None, reason: reason.into(), certificate: None }
 }
 
 pub struct Verifier {
   vk: VerifierKey,
   pub shapes_sha256: [u8; 32],
   pub load_ms: f64,
+  /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
+  pub keys_mb: Option<f64>,
   anchors: TrustAnchors,
   tolerance_s: i64,
 }
@@ -72,9 +85,11 @@ impl Verifier {
     if tolerance_s <= 0 {
       return Err("the proof_time tolerance must be positive".into());
     }
+    let _one = crate::measure::exclusive()?;
+    let heap = Heap::start();
     let anchors = TrustAnchors::from_pem(trust_anchors_pem)?;
     let loaded = keys::verifier_key(shapes)?;
-    Ok(Verifier { vk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, anchors, tolerance_s })
+    Ok(Verifier { vk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, keys_mb: mb(heap.held()), anchors, tolerance_s })
   }
 
   pub fn info(&self) -> Json {
@@ -84,7 +99,7 @@ impl Verifier {
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
       "circuits": [{
-        "circuit_id": CIRCUIT_ID,
+        "system_id": CIRCUIT_ID,
         "proof_system": PROOF_SYSTEM,
         "shapes_sha256": hex(&self.shapes_sha256),
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
@@ -92,7 +107,8 @@ impl Verifier {
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
-      "threads": rayon::current_num_threads(),
+      "keys_mb": self.keys_mb,
+      "max_threads": threads::cores(),
     })
   }
 
@@ -100,14 +116,17 @@ impl Verifier {
   pub fn verify(&self, input: &VerifyInput) -> Json {
     let t = Instant::now();
     let peak = Peak::start();
+    let heap = Heap::start();
     let mut metrics = Map::new();
     metrics.insert("load_ms".into(), json!(self.load_ms));
+    metrics.insert("keys_mb".into(), json!(self.keys_mb));
     let outcome = self.check(input, &mut metrics);
     metrics.insert("total_ms".into(), json!(ms(t)));
+    metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
-      Ok((results, circuit_id)) => json!({ "ok": true, "circuit_id": circuit_id, "results": results, "metrics": metrics }),
-      Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "metrics": metrics }),
+      Ok((results, system_id)) => json!({ "ok": true, "system_id": system_id, "results": results, "metrics": metrics }),
+      Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "certificate": r.certificate, "metrics": metrics }),
     }
   }
 
@@ -120,12 +139,12 @@ impl Verifier {
     let now = dates::rfc3339(&input.now).map_err(|e| refuse("request", format!("now: {e}")))?;
 
     // 1. The circuit.
-    if p.circuit_id != CIRCUIT_ID {
-      return Err(refuse("circuit", format!("unknown circuit {}", p.circuit_id)));
+    if p.system_id != CIRCUIT_ID {
+      return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
     }
     let s = statement(&input.request, &input.credential_query_id, &input.handover)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
-    if s.offered_circuits.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
+    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
       return Err(refuse("circuit", "the request did not offer this circuit"));
@@ -135,7 +154,17 @@ impl Verifier {
     let [certificate] = &p.issuer_key_set[..] else {
       return Err(refuse("issuer_key_set", format!("{} certificates; this circuit takes exactly one", p.issuer_key_set.len())));
     };
-    let signer = self.anchors.validate(certificate, now).map_err(|e| refuse("issuer_key_set", e))?;
+    let learned: Vec<Vec<u8>> = {
+      use base64::Engine;
+      input.learned_issuers.iter().filter_map(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).collect()
+    };
+    let signer = self.anchors.validate(certificate, now, &learned).map_err(|e| {
+      use base64::Engine;
+      // An unknown certificate goes back with the refusal (not one that is known but out of date).
+      let unknown = e.contains("not a trust anchor");
+      let certificate = unknown.then(|| base64::engine::general_purpose::STANDARD.encode(certificate));
+      Refused { certificate, ..refuse("issuer_key_set", e) }
+    })?;
 
     // 3. proof_time.
     let proof_time = dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?;
@@ -190,7 +219,9 @@ impl Verifier {
     if expected.len() + 2 != PUBLIC_VALUES {
       return Err(refuse("request", format!("{} public values computed, the registry lists {}", expected.len() + 2, PUBLIC_VALUES)));
     }
-    let accepted = app::accept_pseudonym(&LAYOUT, &self.vk, &proof, &expected);
+    let pool = threads::pool(input.parallel);
+    let accepted = pool.install(|| app::accept_pseudonym(&LAYOUT, &self.vk, &proof, &expected));
+    metrics.insert("threads".into(), json!(pool.current_num_threads()));
     metrics.insert("verify_ms".into(), json!(ms(t)));
     let revealed = match accepted {
       Ok(revealed) => revealed,
@@ -204,6 +235,7 @@ impl Verifier {
         return Err(Refused {
           code: "public_input",
           input: Some(name),
+          certificate: None,
           reason: format!("the proof does not match the public input {name} (value {index})"),
         });
       }
@@ -213,6 +245,7 @@ impl Verifier {
       return Err(Refused {
         code: "public_input",
         input: Some("results.nym"),
+        certificate: None,
         reason: "the proof does not match the public input results.nym".into(),
       });
     }

@@ -1,5 +1,5 @@
-//! Prover and verifier of the nym_auth statement (age range and `pseudonym-v1-sha256`,
-//! configuration `known-offender-matching-ssc`) with Vega, as the Readdit demo runs them.
+//! Prover and verifier of the nym_auth statement (age range and the `pseudonym` function with `prf` `sha-256`,
+//! configuration `known-offender-matching-ssc`) with Vega, as the Community demo runs them.
 //!
 //! The circuits and the witness builder are the nym-auth-circuits archive's `vega-age`, vendored
 //! unchanged. This crate adds what an OpenID4VP presentation needs around them:
@@ -12,9 +12,10 @@
 //! | [`dates`] | Full-dates, date-times and the clock |
 //! | [`mdoc`] | The holder's IssuerSigned taken apart |
 //! | [`x509`] | The Document Signer certificate of `issuer_key_set` |
-//! | [`presentation`] | `CircuitZkPresentation` in CBOR (rulebook, "Presentation encoding") |
+//! | [`presentation`] | `ZkpPresentation` in CBOR (rulebook, "Presentation encoding") |
 //! | [`keys`] | The keys from `shapes.zst` |
 //! | [`measure`] | Timing and peak memory |
+//! | [`threads`] | One thread or one per core, per call (`/tech`'s switch) |
 //! | [`prover`] | The holder's native steps: unlock and sign, witness, prove |
 //! | [`verifier`] | Verification of a presentation against the verifier's own values |
 //!
@@ -28,9 +29,12 @@ pub mod handover;
 pub mod keys;
 pub mod mdoc;
 pub mod measure;
+pub mod phases;
 pub mod presentation;
 pub mod prover;
 pub mod request;
+pub mod sizes;
+pub mod threads;
 pub mod verifier;
 pub mod x509;
 

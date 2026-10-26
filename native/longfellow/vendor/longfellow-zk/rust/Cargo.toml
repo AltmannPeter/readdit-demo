@@ -1,0 +1,30 @@
+# Readdit's manifest, not Google's: the workspace of the crates vendored from
+# google/longfellow-zk 61a8a735964d1b22bccf79bf14ef6767249cdf92 (rust/), the ones the nym_auth
+# prover and verifier use. Every other file under vendor/longfellow-zk is upstream's, unchanged
+# (native/longfellow/VENDOR-SHA256SUMS).
+#
+# Upstream's rust/Cargo.toml lists 43 members; this one lists the 11 the runtime needs, with the
+# same lints. The crates' dev-dependencies name crates left out (compile/compiler, circuits/*), so
+# their own tests do not build here; native/longfellow builds them only as dependencies.
+# Profiles are set by native/longfellow/Cargo.toml, the workspace that builds them.
+[workspace]
+resolver = "2"
+members = [
+    "core/algebra",
+    "core/proto",
+    "compile/algebra",
+    "util",
+    "runtime/random",
+    "runtime/algebra",
+    "runtime/proto",
+    "runtime/merkle",
+    "runtime/sumcheck",
+    "runtime/ligero",
+    "runtime/zk",
+]
+
+[workspace.lints.clippy]
+shadow_same = "warn"
+shadow_reuse = "warn"
+shadow_unrelated = "warn"
+type_complexity = "allow"

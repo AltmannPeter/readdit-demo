@@ -1,0 +1,1346 @@
+[
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/001_duplicate_disclosed_index.json",
+    "sha256": "03f98035328186565dbc0e9088b16de9395711dd4cf5dd74c7fecc627dfd159d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/002_unsorted_disclosed_indexes.json",
+    "sha256": "c0391494eac43598d068ec025a15a6fc38f98f2685203550ba85e7e52028ccc0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/003_intersecting_disclosed_and_committed_indexes.json",
+    "sha256": "827354c2a0f7617b47b2f94246e87e3c3ac31aa0fb27f1d328b308211be59dec"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/004_noninteger_committed_index.json",
+    "sha256": "7f029845bf4754b749ac521df0410316e59368e13001d4ed335cb5bf78bad146"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/005_out_of_range_committed_index.json",
+    "sha256": "15140dd3baef29c1b414f629785cf7a2548e67410f2f50ff0eb0336e7ce9b471"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofGen/006_duplicate_committed_index.json",
+    "sha256": "1a618c3787c90bf647db08da139059dc39a92ad6a28807e578fcc0ea28f7f748"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/001_valid_mixed_proof.json",
+    "sha256": "f881862d7aca17e7955c2abcb352b585c2c7862bedd3db12bb684bb177af9f86"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/002_unsorted_disclosed_indexes.json",
+    "sha256": "a95b6f01511cc74bf87e21d77ff700c78ac6ad3bbadbc351103cf860f75e32fc"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/003_duplicate_disclosed_index.json",
+    "sha256": "63fc8b2d74838db1716dba3ad711c1773769152b519ee707c17263bf062eb300"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/004_intersecting_disclosed_and_committed_indexes.json",
+    "sha256": "dc3aa08b14c1c30f7d3894a29cadbc45c1aa040feadf3dbade5b827656643b22"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/005_noninteger_disclosed_index.json",
+    "sha256": "748dcbbe259c32d221e706a0e35be993979e0f8faf05340e6df966ad624e7b63"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreProofVerify/006_out_of_range_committed_index.json",
+    "sha256": "d2db14d2fa2da1e049f9f988bf8b674797d49a6e277147d1f96e5fb23ad8a7fe"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreSign/001_bbs_12_api_id_and_scalars_reproduce_the_bbs_multi_message_signature.json",
+    "sha256": "7eeb31ce3aa2a6603843b85be5886c4d0fa7b25b05f7576b6952159d104eb6e7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreSign/002_profile_api_id_explicit_scalars_0_r_1_5_5_empty_header.json",
+    "sha256": "9d90268b65e2fe41bbf8ec4cff4698e9223db8ec5c65eb5016d176da88ad3666"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreSign/003_generators_include_p1.json",
+    "sha256": "b677f885c4cb0fd5c5828ce96f37bf4e717ff7b9dc196898833f93523150fd67"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreSign/004_duplicate_generators.json",
+    "sha256": "57f0ab9d7ff359c673ae37ae42d93e702f5ba2d617ede2ab0f54b363b8788c8b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreSign/005_pk_does_not_match_sk.json",
+    "sha256": "44567ed468382d6835e5ecc83f7beb2cf5a72bee851ee5ccd596b5bcd5ae0588"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreVerify/001_bbs_12_multi_message_signature.json",
+    "sha256": "4cd923ccc0aa34cb96fa0697d3346e7d6cfd18dcd2e666ceb2e77efe1d54832c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CoreVerify/002_profile_api_id_explicit_scalars.json",
+    "sha256": "7dea965c59875b99493faa8a9a3c6f7a794d0b51c2117b01e4eb1405ed3aa1cd"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CreateGenerators/001_commitment_generators_y_0_y_1.json",
+    "sha256": "94e2128cced3fd0c11f8184612288014a63ae07c56870950f8320e065571ccf1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/CreateGenerators/002_signature_generators_count_9.json",
+    "sha256": "77c43aefa7327bcb1d409dd90f5c5124bb5a88528361a0ca611531f10b034301"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/HashToScalar/001_map_dst.json",
+    "sha256": "f8fda8d5c5bfbe1160b19665039e9a6d1735e9daf39990ab1b754e8327a9bcf2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/HashToScalar/002_255_octet_dst.json",
+    "sha256": "decad08bb7f3db9348330efdb2e42f670833898fe4af4406e0dab684c817777e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/HashToScalar/003_256_octet_dst.json",
+    "sha256": "2a1a96b9203518dcdb4fc42ea9a1dfd2ba5c1947cb77ad9faf1a194908b45474"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/KeyGen/001_fixture_key_pair.json",
+    "sha256": "6059c9228314c5c8f3a8acd00fa6aebd6f4622aea5193bd89aae0734f65d5e52"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/MessagesToScalars/001_mixed_octets_and_scalars.json",
+    "sha256": "11dd4dd7b5f1152ff8d86c1622747d9e3030dd73c5d78447a214232c8e34c9a3"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/MessagesToScalars/002_cross_branch_equal_outputs.json",
+    "sha256": "d5e07e71fbd289a4f674ad27b9c50e33b4f6abd7890c8fe92f1a0a8935071a8a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/MessagesToScalars/003_empty_vector.json",
+    "sha256": "9f00bb80213badfe38d22b99e488b08db4ad9aafcb5d48ff8969d912ea4ef419"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/MessagesToScalars/004_out_of_range_scalar.json",
+    "sha256": "90341fb18528533c5d28c9377b4b487554587e3e55d3820f9065b89bf1c26e79"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/MessagesToScalars/005_unknown_type.json",
+    "sha256": "49eeffc82e39dd6d63939249445567ed3bdd86d02941a85057f6237c9f57eb4a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/001_round_trip_mixed_proof_n_3_u_5.json",
+    "sha256": "61e13e1c4876eb1433c0d15ecb150fdfdca7d26f0580fef2c9090b67ae87995a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/002_round_trip_l_0_proof_n_0_u_0.json",
+    "sha256": "bf4c92aa82af9ce156ab7cb40f5254fcb247732cdf710d7ca520e6f9ddc848db"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/003_truncated.json",
+    "sha256": "356a969eaf3e8986956a9aa6f0fc1d07bab7e4d5fc6ec697ea32b3a98e255236"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/004_trailing_octet.json",
+    "sha256": "5f1d022ee81c3b4877bf98634a5619fdfe855253f564ffeda7c1352d7805e6cf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/005_inconsistent_count_n_1.json",
+    "sha256": "9caf1de72624c8d89f1cffbbbf838d9210bc067c5f4238e406aeda34f08e3b4e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/006_count_n_2_64_1.json",
+    "sha256": "e75a75a7b8b8d051538f1f006ee57bee1dc5e48c4d4207c36f5e16da6ae5f877"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/007_count_n_u.json",
+    "sha256": "06d8d17e0c29e5f29ba1e2364cb1b79f7d1049df8746477ebf0e8f699ae844b2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/008_noncanonical_e_hat_r.json",
+    "sha256": "5d188e21461eda435cf3a8eff0bc47cdb1bb28c80b6c0c7efe884df04e708ebc"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/009_zero_e_hat.json",
+    "sha256": "6fcd89804ee3b5a27202761bcb831acce50876c632ed0e8553e57500e65ae077"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/010_zero_m_hat.json",
+    "sha256": "f4700273381e69adb834096aa17572910c33eb613138ab3b29fef3ff83f0b4a9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/011_zero_s_hat.json",
+    "sha256": "b3442afc412711a6850dff664c449369634fa2ce7c5555eb6e0a89e8e6a44980"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/012_zero_challenge.json",
+    "sha256": "0970c211ea590a95d2c47f7684284e3085aa23c61cd264c364d7d9d17231e957"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/013_identity_a_bar.json",
+    "sha256": "1dc4ab8aaaf243d26e44fe37af9dda1dcfcf8b20680d2f4a7cad1c9aa4438a83"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/014_identity_commitment.json",
+    "sha256": "d9ed41f515d4272ce9d6d90f33a0481f49d71f5732e5a8f199350f5e6719b79f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/015_b_bar_off_the_curve.json",
+    "sha256": "f14fa664513f09b4712480b37462ad270ea8b525ec753002c73c8fdfc8f92e2c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/016_d_outside_g1.json",
+    "sha256": "e13c122791234ef37d3859738994c879bb205b74329dc6b532dd24cc4ebf1012"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/OctetsToProof/017_a_bar_with_uncompressed_flag.json",
+    "sha256": "d15e1f5101d883e32c9304ca99d79489f5feeb3caaf0986161b91fdbae1b7612"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/001_commitments_for_indexes_1_3_6.json",
+    "sha256": "54daa3c76542bda52142c6590e19b63c1df3fd44441ab750d12698f689ad9ab5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/002_subset_with_original_indexes_1_and_3_subset_positions_0_and_1_have_other_types.json",
+    "sha256": "7e3a7d74cbc0ab5f8be139b7014e606dbd31d32baffaa25deb7251347cd9af00"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/003_committed_octet_strings_at_indexes_0_and_7.json",
+    "sha256": "6bca79df20e6dd9723de28808c94e3be5e11536a5fdf2dbbcfadece4a370dde2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/004_repeated_mapped_values_at_indexes_1_and_6.json",
+    "sha256": "f9c9b4f2ec78d82738fe32cf3ab9601936878b395045d193e603b53b79c6eedb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/005_empty_selection.json",
+    "sha256": "90318db5d66bf8f679edf0ae52a67ca281104ce7321a67e90e0a1ec52a093065"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/006_wrong_ordering.json",
+    "sha256": "ebc531c8b152c5486a82bc31facfb87fbd973317596d5d7f46f3d2a87f549a57"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/007_count_mismatch.json",
+    "sha256": "a21ee770ccb5e57b2244499e4dbdd78382403c47de71e00e1b92e7816572210c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/008_type_mismatch_at_original_index.json",
+    "sha256": "85a0351974beaac44a4055aaffc289a9026f631db79a77924532b1517e60cf77"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/009_unknown_type_at_an_unselected_position.json",
+    "sha256": "dd80aca3db1eeb715ff072c46c57f9fe48275ed7951badec1a0f238fcbe4772b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/010_unknown_type_with_an_empty_selection.json",
+    "sha256": "72a03f0f1eb75277e1abb9a61cd3d73f532bd01c49284d60857e1d56cb412213"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/011_out_of_range_scalar.json",
+    "sha256": "002ad889511ece2d5858c48d1be6d24cdabbb9684f7b4a9702ff0e183b637eb7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PrecomputeCommitment/012_index_beyond_wrong_length_message_types.json",
+    "sha256": "1c878dc4d43f2ea3d3831b504dec2061027c7d0a325778a8f8183efc085aa68c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/001_three_commitments_the_first_and_third_identical.json",
+    "sha256": "19f69b4940d8162fafd7d6f9703fac510743853c54a53e25503fc3314b6f4c63"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/002_changed_ph.json",
+    "sha256": "0f4a6890e6a4300d6ce26292dd502ad964ebfbebdc7221b594da73be521afeeb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/003_a_commitment_replaced_by_a_different_valid_point.json",
+    "sha256": "61f583efbc0d3cffbaff3e0dcd7e4aa978d02e3474a8671ff3614d53c50deb17"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/004_distinct_commitments_reordered.json",
+    "sha256": "6b35d5e43f65d2819d01d8be3a7c2294abb4d8890dbd5061075be76822884adf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/005_identical_commitments_swapped_unchanged_ctx.json",
+    "sha256": "0333f51804ec6b5c69f104dc7cdb7ca30f7dd85fe36f1c8bfbb2609a6a404e61"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/006_empty_ph_and_n_0_keep_their_length_fields.json",
+    "sha256": "478ee1e36a75cccad0e0826d72419b3605594a990ec5e84cf4b1da61ed9b2e76"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/PresentationContext/007_identity_commitment.json",
+    "sha256": "b8fd50adedcae7bb1a87e6cc8cb578516a1a01e96231362fda787242c0aa33b4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofFinalize/001_injected_value_making_a_message_response_zero.json",
+    "sha256": "1333a15676b98c5a13d9e07877cf97571ac6fe3a646e2b5fe1c8d8082ea65642"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofFinalize/002_same_inputs_without_the_zero_response.json",
+    "sha256": "d24666779d954d5ca08237cd25824f7c75ff90495992339207fa04cc78a30604"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/001_mixed_committed_scalars_separated_by_disclosed_indexes.json",
+    "sha256": "b66ad534786aacf3068e7d0da682520b659527e0296d85fabfccfe1cbb03ab18"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/002_all_hidden.json",
+    "sha256": "34d1ae90b0339dbabe6a30f33944e63135383a0dffa48e184dd7a37bd9987e80"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/003_all_disclosed_u_0_n_0.json",
+    "sha256": "e5586f8dbf26926e431fc4dba74f78562c22c60eeb457b4fe01777152fc421ef"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/004_all_committed_repeated_scalar_19700101_at_indexes_1_and_6_zero_and_r_1.json",
+    "sha256": "ebd39f2ae01f8a9e2ce6d60c8da72288d5bcbb24543c9ff5283dd405ab32400e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/005_no_commitments_n_0.json",
+    "sha256": "fc9a748b3b954d87b6c6ea95e36a1085554792160e22c4e2c8663dea76bf8c5f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/006_empty_message_vector_l_0.json",
+    "sha256": "2e04f53b3495ea5e3f4c38c3d28264da6a8c81388a9ab7c394cdad3253fae690"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/007_single_committed_scalar_at_index_0.json",
+    "sha256": "86f36e53ad278cffbda40433cfbf2259f26e40d9b5e21c79d5ed0e37bb2693aa"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/008_single_committed_scalar_at_the_final_index_disclosed_messages_before_it.json",
+    "sha256": "fca53123040f0c6866ba6814161f96fb29004323fb31316a38edcd6fc8faf668"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/009_committed_scalars_at_the_first_and_last_index.json",
+    "sha256": "8f75ae26c0db828a7aa5ea0eefa4a02575ef13ee8e9bd604780b04e7b81c603f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/010_committed_octet_string_messages_at_the_first_and_last_index.json",
+    "sha256": "9c05e5aedeb9f07dbb252260e1bca871f4d0da833f7e73c00f7dbfb2cccd9933"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/011_repeated_mapped_values_at_different_committed_indexes.json",
+    "sha256": "845fba4d52bf942183a6d0bfdb4a7e6eb786a704f7633f90237447ff9acaac7b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/012_cross_branch_equal_outputs_committed_at_two_positions.json",
+    "sha256": "9128632f9df71733dd261e1340984617be667379efcdfda518948065f2299594"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/013_empty_header_nonempty_presentation_header.json",
+    "sha256": "da210bd73e853e26033eb615b0800b2971f76670b5c0617d5c07010e6fbd22d3"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/014_empty_presentation_header.json",
+    "sha256": "21d905edd36eb7ca6dd549a265684a3ce733eb2b84d0b8c2c45268fbdf5027f5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/015_precomputed_openings_for_indexes_1_3_6.json",
+    "sha256": "cc2ab1cb6dd0893c2660a8f07501c38edb04f308e809584c681ed9c49ee3b890"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/016_wrong_number_of_precomputed_openings.json",
+    "sha256": "a26bd124e09c3577f15f13d846073f0727507c135a1f07bd13d58284bee58ae7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/017_precomputed_opening_out_of_range.json",
+    "sha256": "926dd95122074ac53adc6d9de4552df8ddac7c1782bda56e873057cf7d4dfddc"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/018_unknown_type_at_a_hidden_position.json",
+    "sha256": "5a66e9af170a2599e1b07a65745d4480b6339fcb0a37785f571d66b4e782a4f1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/019_type_mismatch.json",
+    "sha256": "6bafe02a6ca79df3d867d5fd2a0faa20a9c6ccb466fe80428f62aab7ddec6bc1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/020_wrong_length_message_types.json",
+    "sha256": "b94d97408814a1687968687fc19ca54121f825daeb98817ba75970febd6e0cca"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/021_wrong_length_message_disclosures.json",
+    "sha256": "8f20d065240112ca00ee24b2c135102265fadf77056b8afe66824c1fa19db9a1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/022_unknown_disclosure_state.json",
+    "sha256": "ba125b17292887224fd27bcebd53c5f3a3e17f08da1503cb71172d1d1ada285e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/023_out_of_range_scalar_message.json",
+    "sha256": "effd511e201c46049d468c0b95e70baf0e9903865a7f3accc83ffe14752c7450"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/024_signature_does_not_verify_changed_header.json",
+    "sha256": "85b174341cd5676f4f031981860281f297d231e0b1d3dfa107f4318c1e2bbd74"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/025_injected_exceptional_randomness_r1_0.json",
+    "sha256": "16ffceef9c1ea8585fbd34e3d3835154234b3275c3218b931ef509a82e29f4b5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/026_injected_exceptional_randomness_r2_0.json",
+    "sha256": "cc7c4ee740faac831b9c1663c6cefe54f0c923299fc33c9b83d25330bb6ebe99"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofGen/027_all_hidden_for_the_empty_subset_type_check.json",
+    "sha256": "a13f8e18259332974585007bcafb5ac12370787aad3bd8bc737a5f28ca1c7928"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofInit/001_valid_initialization.json",
+    "sha256": "02075ea4ad9ad78576bc2252e56e547115863d636b64213458cbcb9d59a83fa2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofInit/002_unsorted_undisclosed_indexes.json",
+    "sha256": "b8a456d6641a3a31cb15d9a6334c2f0e6deb02500c27be8d84527e61435e2ff7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofInit/003_commitment_index_not_undisclosed.json",
+    "sha256": "a1b6ffb889d6602ac5143b291600db87f5929a2b6d78becf7cbe52cc9f01f8f3"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/001_mixed_committed_scalars_separated_by_disclosed_indexes_verify.json",
+    "sha256": "d86689df3c518f130489e7a2a201b1771ce92862a1e399a4e0788ea9aa1d9ae9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/002_all_hidden_verify.json",
+    "sha256": "5d0e640ee7233ab8b7559fde4aa89d4841a011618d69003a842a725fbd9c3154"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/003_all_disclosed_u_0_n_0_verify.json",
+    "sha256": "37c8394d4cdd719277de2fadb34a275caa88d90780494112f93210a227fc05ce"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/004_all_committed_repeated_scalar_19700101_at_indexes_1_and_6_zero_and_r_1_verify.json",
+    "sha256": "390ab1a8e004ccb8c9d4b44e6a45f1ad27df5d7825be1d2a216bc9416b102190"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/005_no_commitments_n_0_verify.json",
+    "sha256": "153b2be9d0a5a046138ccf8a5f80a7fd54dafda7818ed39bd0de5b24bfda45de"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/006_empty_message_vector_l_0_verify.json",
+    "sha256": "11fa50b86236a3a2e15538b65341f54902129b1ed83799a0f00d411d8cc88960"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/007_single_committed_scalar_at_index_0_verify.json",
+    "sha256": "cd1c861daccfcc29e76d7ce2ebddf1a7ab89d7f4a1d2f383d4558e2361979a9c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/008_single_committed_scalar_at_the_final_index_disclosed_messages_before_it_verify.json",
+    "sha256": "9538216fb3acbcf12a19b8523eb108bcf9f5cfd7007610d122711c88fc915973"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/009_committed_scalars_at_the_first_and_last_index_verify.json",
+    "sha256": "6b986f1dc866d730bd4318d298f26d753acc2da355b33cc884f42e2339a78e4b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/010_committed_octet_string_messages_at_the_first_and_last_index_verify.json",
+    "sha256": "044434c666411740d85fdff89eafdf029796d67ed6f733a9904cf2a9eaa8d3f9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/011_repeated_mapped_values_at_different_committed_indexes_verify.json",
+    "sha256": "09b4fcdc6841a232d76f0a48fc254c8b12abf872b9f9289e2a1bd0550c02e6b0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/012_cross_branch_equal_outputs_committed_at_two_positions_verify.json",
+    "sha256": "17d81dd4f3a4e1fc4841f9adb3806f998e98eb75d78df4dd979f4ee4292545cc"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/013_empty_header_nonempty_presentation_header_verify.json",
+    "sha256": "7c4f78c37f00034325b53b18568666eaac20918ffd10fb2ca59b34990c2ac906"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/014_empty_presentation_header_verify.json",
+    "sha256": "4db765383de7d0d273279b396fe9bcfc41a56fa2a75e3c1c7b8c1c406bfbde02"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/015_precomputed_openings_for_indexes_1_3_6_verify.json",
+    "sha256": "5e74f654e6b6299ec979d85fcba9218e45d73503959a1cbd88a7632f4c5fa3a2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/016_changed_presentation_header.json",
+    "sha256": "19ca4c63c58ef86b27432991909b538f28907492f704b248c23bc63cff7e1785"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/017_empty_presentation_header.json",
+    "sha256": "77925bbaf5c3184b8db80c10664b31b30842d134d9a51a38e10993e56e432f11"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/018_changed_expected_commitment_different_valid_point.json",
+    "sha256": "d44b6f985553e9aec5548c1aa4a6b6b062f59391acbb2816ec6e8eef08d8cde1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/019_reordered_distinct_expected_commitments.json",
+    "sha256": "a76b55bfe2957702b8ad8b46d9b311cd99f657d9eff4fb840ac82f2321c15967"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/020_changed_committed_index_assignment_same_disclosed_set_and_n.json",
+    "sha256": "58ec56e96030b02344a80a1961872d8885c04a3a900547f54cc68d1fe71c4ea9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/021_changed_disclosure_choice.json",
+    "sha256": "9b39c0826d04ab844d02fce043ed7c6cf49cd0e6347cfbb23d4253994456b058"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/022_changed_disclosed_message.json",
+    "sha256": "13c15aef38080eb802bdce8a19713bf7910a7e4b3af16c7a8268f8634b3cbfad"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/023_changed_header.json",
+    "sha256": "3ce9121fe76efad1e07ab296ecf9ae475acffcd922fa646cca488fb266c036d2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/024_changed_public_key.json",
+    "sha256": "0f98ef26c90a6eada12e596f7f0d6706e1f680498f83425b699e88bf99e12fff"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/025_fewer_expected_commitments.json",
+    "sha256": "79ee48dd20790479200e55b498f34704bf7023af68373718fa116bff53582e73"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/026_expected_commitment_is_the_identity.json",
+    "sha256": "2dc35a8acd3b873414dc792222c2402f613d2a07e142ade2b2fdf2159b3c55c0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/027_expected_commitment_outside_g1.json",
+    "sha256": "8a160d7d950ec96e5dbd70a5f4e2f011ea1a6d6ab5d1e5a8002e4430e83d04a4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/028_unknown_type_at_a_hidden_position.json",
+    "sha256": "97c54a031fed4b4aff0ee90f1381c3ac0bdb332d7c43ac60deb04b3d984e6b19"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/029_type_mismatch_at_a_disclosed_position.json",
+    "sha256": "bbfcfff0040e7849cd9ce0985dd763a37bc4bc6d3e64dcb546563b153aa7f58d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/030_wrong_length_message_types.json",
+    "sha256": "5700a12fd20f572f51ed8612ded2b9a208cbf77d25a57bbdf2d7dd083909de13"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/031_public_key_undecodable.json",
+    "sha256": "05a25e35dcab9c16133d0522a41cfaa97b7ab20f43bb38f7d109dcbcce3b1839"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/032_changed_commitment_response_s_hat.json",
+    "sha256": "3258e7b8736ece9cf8b14422b3a43a63388b2001ce15219a131228648b53e03c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/033_changed_message_response_m_hat.json",
+    "sha256": "3e2581ae92449ff08f2215c5d32f83d0d892bb657e57a0bdbc42f608d6ad6e3d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/034_proof_with_identity_a_bar.json",
+    "sha256": "ab031f0f01eb77a59652aea28127bcfce581b1465801890b46a9efc71221847a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/ProofVerify/035_unknown_type_with_an_empty_disclosed_subset.json",
+    "sha256": "f346dee691b2f1ce00c941d97ed75beae4daac7d5fecb37148e0ce1c303d528f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/001_mixed_octets_and_scalars_l_8.json",
+    "sha256": "3091466ea7ef2c4f3a0a6d4a5abed08f70159559099d174890e32eda6f67bc57"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/002_mixed_messages_empty_header.json",
+    "sha256": "682144e2e9c4118170b989cc2a93e0d6bedaab9c53e39f4bd7e2f41187cad4e0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/003_scalars_at_first_and_last_index_l_5.json",
+    "sha256": "be9d410a83f5ed805345d1800ceafd9cf90e44db0848274ea5f469ee028884cf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/004_empty_message_vector_l_0.json",
+    "sha256": "292bb7648170a2decde56ac593aeac6c5155d757923223dbedeb5f79c92c1464"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/005_cross_branch_equal_outputs_octet_string_and_its_hash_as_a_scalar.json",
+    "sha256": "6f78ede0b5b3dbbb14d0af2533d6301eeca93871c97fd0a11514ac7c3bcc8dcb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/006_unknown_type_entry.json",
+    "sha256": "5bb430d3c289ac68a3fa69fbf77f2e6371d667b98f342e76bb2e725c2a4b3963"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/007_type_mismatch_octet_string_at_a_scalar_position.json",
+    "sha256": "d191ae9c7dd89d913071020eafd73fb259d7c58ae1e2676095a30e611bc076db"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/008_wrong_length_message_types.json",
+    "sha256": "cdfd1e82cf7d498a8b63c20b385e9c87d5327555b25f796d9eadaa6bcc3bcf9a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/009_out_of_range_scalar_r.json",
+    "sha256": "5cf72e547fa3ab7d6ff3665bf2403190544ace3343baf9c9774d9c6ba987b007"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Sign/010_out_of_range_scalar_2_256_1.json",
+    "sha256": "70c3d3b0d7d71002dc4b48a5d8413c2021731486bbd3e7e68f4c870ef62e8747"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/001_mixed_messages.json",
+    "sha256": "673aab46930b9c52891c901086bbeda3821a58dfe61a6de1f7ae5616848a20d7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/002_mixed_messages_empty_header.json",
+    "sha256": "c019c109b296c0ffb372c2d5cba4f2eb675394e6b56c26c450f1aa5f7930175b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/003_scalars_at_first_and_last_index.json",
+    "sha256": "7b29a1c41c72a702de4ec2254d703e470fb31061355df60b424c5dafa86ee0f6"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/004_l_0.json",
+    "sha256": "c769640261d4db6a89b212947d735a00cdc36a6738c51ee6c868c005b913357d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/005_cross_branch_equal_outputs.json",
+    "sha256": "34e61c887cbd681a5aa2d8151c7595f3780c0a02db192dd16f37e0944f192a5d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/006_modified_message.json",
+    "sha256": "ecb304fb003c9efb0c2bf42efb6e1bcdc895c1418b64424667a4a6e7e9bbd91e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/007_modified_scalar_message.json",
+    "sha256": "9af6d27dae6b4def281298340cda1440b024ec2d0a18b86f3af73af977b69838"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/008_reordered_messages.json",
+    "sha256": "fe2d1fa77f9172e4749c78f0506148b88cfdc21b1b296a34bf273b2f19e361aa"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/009_missing_message.json",
+    "sha256": "92407f2b91ae1dd9a4924355893713cb69e205a837bf892a3c2a4827b06b8dee"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/010_different_header.json",
+    "sha256": "974a5b4dbdf774b595ca2c68b749da3508f47ea5554468955c43c6f3b738f66a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/011_wrong_public_key.json",
+    "sha256": "80667ed6ad4101fc218640c06532cb2604f6b2c724d0cb6cd8f7439bb0c2b37d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/012_unknown_type_entry.json",
+    "sha256": "abf9b44962849d6da60ac9f701e3b13f0ce21151613a0595a8d8ff683447a1e1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/013_type_mismatch.json",
+    "sha256": "4b39076d3d0b9b928b37786a04a84c5fb858ef4d306ee03741245a1c22380a39"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/014_wrong_length_message_types.json",
+    "sha256": "92955146febcba5da5c572c88b77a6479cd612f56776133a60c8f7ab979c0fd3"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/015_out_of_range_scalar.json",
+    "sha256": "4fd078bf4fb5a3c15c39ad13fe8079ffcb8ba5e96e2a79393e29c4edc40f1607"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/016_signature_identity_a.json",
+    "sha256": "79e179e1b6ba2fa5838d4b27466f19e90a260988aa1e1c6bdd6e4408a7afaf92"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/017_signature_a_off_the_curve.json",
+    "sha256": "ffb30db5ee9e2417d7fefb73b5507d3b22ba507210f467b05c776c6742bf2035"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/018_signature_a_outside_g1.json",
+    "sha256": "9b8522861a0b47019ea6ab3d75fded6e61e330535d4bd177353b3cd88891ac4c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/019_signature_e_0.json",
+    "sha256": "4792183e894450373bcd709a29126e9ed83c8579313fc09f7e5a0b271a097876"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/020_signature_e_r.json",
+    "sha256": "2f0cbdefab866e62e70e8978c6d89667fa20707e01f5c5cdaf6d8a739768fd83"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/021_signature_truncated.json",
+    "sha256": "ab21ee9ab45d0f0ad27f3f09dcdc8dfcbc85d90c6db483baf8dafadf36e2bdc8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/022_signature_uncompressed_flag.json",
+    "sha256": "50ec3087488ece94ee5a225a6b4b2b94d15db2a6a56fad81ec048740a3dee5c2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/023_public_key_wrong_length.json",
+    "sha256": "a281022f779f40771c9b0c504feb60d2aabb07b54a001b5c99755acba9baca60"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/024_public_key_identity.json",
+    "sha256": "95c3107231d9f2a0f1fb190f13da72b04bcf2388686a281ccf3308895d229159"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHA-256/Verify/025_public_key_outside_g2.json",
+    "sha256": "32ebfb46abf60530730de96ce2f34b0ebcf2e76bb5848b4358ed00e4f2e169ac"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/001_duplicate_disclosed_index.json",
+    "sha256": "088506eff6101f2249b4c461e5e6598830de94f947b845e3e23fd0a05a030b10"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/002_unsorted_disclosed_indexes.json",
+    "sha256": "0f7b126a2f2f24460a226a02d8d90f1b0f5a3c3e5cb06c3ae6877ebd21864d38"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/003_intersecting_disclosed_and_committed_indexes.json",
+    "sha256": "3625fc97cfdd416c9d1856ae4ccb085919f919de0dce987d1551e8e95308bfae"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/004_noninteger_committed_index.json",
+    "sha256": "d0029afb174610446b10bdb5436028117f4baae3a15c441a4a6c5016f7f287e9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/005_out_of_range_committed_index.json",
+    "sha256": "a4294e7d89beffddf06907c03f89a4aaa4540005d93fd727095e360750b236f4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofGen/006_duplicate_committed_index.json",
+    "sha256": "84444eb753d22ae52cde853e7ca64e984eb4f504fd803a3a5d344f8ce4b89481"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/001_valid_mixed_proof.json",
+    "sha256": "ac400fcc0d682f21625482dbc895ffaf0d38b80f06e858f3afe5ab0a13ef9dcf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/002_unsorted_disclosed_indexes.json",
+    "sha256": "9d51357ba82ba79c677f7883e3ef27ca78588f4a452c1f25db2f75df7c0161da"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/003_duplicate_disclosed_index.json",
+    "sha256": "1ffb206ebf9c46be5f1a8ece512fdecd077385b26a5987f5d285c25508516560"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/004_intersecting_disclosed_and_committed_indexes.json",
+    "sha256": "3a5918455ae04aa480cd2d70d89e0ff090ca6bd7ee8655302c0cb765862d78b9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/005_noninteger_disclosed_index.json",
+    "sha256": "df1ded9e86379a2bec7a1a4b9d9574a3f31efe2dcfeb92f983d1fc349de574df"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreProofVerify/006_out_of_range_committed_index.json",
+    "sha256": "fa5b87065263c16cd424c1ce1ca9c90ea80afaf246ce36cb82f5118a4e9248c1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreSign/001_bbs_12_api_id_and_scalars_reproduce_the_bbs_multi_message_signature.json",
+    "sha256": "734b1cd163f593ee38ff1169f045334198651fb91f52acc3134071f2dfc49c67"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreSign/002_profile_api_id_explicit_scalars_0_r_1_5_5_empty_header.json",
+    "sha256": "d023ddc8f911df0b9a7e6a10945b1f70906e0a1be7fc4087cba3150b2f6ca62e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreSign/003_generators_include_p1.json",
+    "sha256": "2dd999d249b5dc1ad22feeff14dfd9505759a61fe6c3f7dc68ee3f7c843cdd42"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreSign/004_duplicate_generators.json",
+    "sha256": "8a02d29dd45ff61b866e76b42e26aa8f238a1d25d357e7fc007bdbab47c95129"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreSign/005_pk_does_not_match_sk.json",
+    "sha256": "dcf3278d7a81f9d6e696b8674d2c36da927b3d4ce9854c51e18e1c5f5dc7d634"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreVerify/001_bbs_12_multi_message_signature.json",
+    "sha256": "f655679e823def2e366c3dcdf54666407c7b4846252e0a59a22fef15dfb84e4d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CoreVerify/002_profile_api_id_explicit_scalars.json",
+    "sha256": "94d10e79ba611b9653183fa6ccbd252a9e0fcac34ef794c7b08e2e84e9a19553"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CreateGenerators/001_commitment_generators_y_0_y_1.json",
+    "sha256": "ad29afc13b2891b03c60dd4f275dd645e9dd51bea18e3c981e2449784351415b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/CreateGenerators/002_signature_generators_count_9.json",
+    "sha256": "e6496f70d1f88abce9fd2eea14a5c0614d8671c7ced943f3e713458433e730be"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/HashToScalar/001_map_dst.json",
+    "sha256": "4474ff64d25caec86cf76f06599510016ebfe9bba72e684f8ea2e91404f7d44e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/HashToScalar/002_255_octet_dst.json",
+    "sha256": "02721b7c92237bfb529920ba1ce985602d3754925e843627bd89d59d9e0b8ef1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/HashToScalar/003_256_octet_dst.json",
+    "sha256": "f0ea4106fcf48d33685d1c824f599ed89f33f5415deca41ad813059cc3deff0f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/KeyGen/001_fixture_key_pair.json",
+    "sha256": "2f7c8b0f945512b2f1afcc7c3e4de7342e9fbe8d031dee14791e35f12fe3696f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/MessagesToScalars/001_mixed_octets_and_scalars.json",
+    "sha256": "cac24c7dcf455b89c3ed81c3b6161f266ccb1b739b54fc2fb37fe05404c37c8a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/MessagesToScalars/002_cross_branch_equal_outputs.json",
+    "sha256": "cd58a026c6af0db32e83c35133a809e42b28777322412869aa055733e0efdfde"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/MessagesToScalars/003_empty_vector.json",
+    "sha256": "61ceeac11b5c341d415741edf6d6e3847f12e7ea6d6088d3e45934ad464e6071"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/MessagesToScalars/004_out_of_range_scalar.json",
+    "sha256": "832f6e1e3ba8713af95eafd589dc6d05ef1f584ad5061dedb8877ee5f1a39036"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/MessagesToScalars/005_unknown_type.json",
+    "sha256": "002a781a2f4643f23c7a1c70da77f8a688381791c892183410a700fea097f351"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/001_round_trip_mixed_proof_n_3_u_5.json",
+    "sha256": "e09f3b7d3ae6da4a016631b3feb5913b4a68e05c5c3b967b081fe982171beaa1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/002_round_trip_l_0_proof_n_0_u_0.json",
+    "sha256": "9e3a6cc69be80ee7170ac94ddab33593bb27412b79542b97e41a622e02402b42"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/003_truncated.json",
+    "sha256": "5ae5004732a2da45fa39490af626487e3709be67d906dbb997a10b62b9fa2d90"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/004_trailing_octet.json",
+    "sha256": "49d03a502aba3f16b1f07c2a2cbf0b8798732a0be1482cfedbcf68aca2294f24"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/005_inconsistent_count_n_1.json",
+    "sha256": "628a6d9e9a7190f5634b1c71fca33abe2e7b356d609f751444b7fc80bdb11a19"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/006_count_n_2_64_1.json",
+    "sha256": "6f130e03c0440b8136b4822d499ec2b89b77a0b11223d38ca9510e2e447cd927"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/007_count_n_u.json",
+    "sha256": "7e6f56db340ef420cc2b620c6358ee597964fb481491cca830e85cdbbb931e3f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/008_noncanonical_e_hat_r.json",
+    "sha256": "a403a9763fe1f55e8bfc3963186c2d7121ac5582c7cbf37454e60bf37095e782"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/009_zero_e_hat.json",
+    "sha256": "3f06feb2a035b42d2aee20181de6052cd0ff6344dc79fcc56154027d9264128f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/010_zero_m_hat.json",
+    "sha256": "a624b0d55ae8b7418dde9b77119d7bd103638afd122023f09f40bad3087e67bf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/011_zero_s_hat.json",
+    "sha256": "7736c09b9c6a55fcf85bd6e0d35bd07e47d8a67208f120d5bcf3e26f90f7e76e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/012_zero_challenge.json",
+    "sha256": "c0e0ab38ca1b3a6ea3aa1b7fd9afc39340ce25353ef72c9fa0c02c511e38b800"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/013_identity_a_bar.json",
+    "sha256": "c783d301931c9e71334fb18b093c89a184504304fe0c7d42a9120e3787d4a596"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/014_identity_commitment.json",
+    "sha256": "f283866389f733ff218d348bc9b8db5bc0a676c11d361a8dcc17d996e40cd4c1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/015_b_bar_off_the_curve.json",
+    "sha256": "08dd8629f8f88a52e52ff23e80e6ed2705c4b3f000b393424bfc222ca8c836a7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/016_d_outside_g1.json",
+    "sha256": "fe64194a0e20f3d99e4b4de937daa46b3ae10420ad207b92a17fe4cee814aa9f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/OctetsToProof/017_a_bar_with_uncompressed_flag.json",
+    "sha256": "ffae673a0fcf597e149955097517140bd55859bf513fae82b404ddf88d779c21"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/001_commitments_for_indexes_1_3_6.json",
+    "sha256": "9dc800bd2ac6aa8487ecfd8caf83f2822bce19c85c4becabfdba56c0bbd38ed7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/002_subset_with_original_indexes_1_and_3_subset_positions_0_and_1_have_other_types.json",
+    "sha256": "eb3012d052c1cdf05c1e2a0d3409f6da325daa8ee0492d7aac191ec942b3f7bb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/003_committed_octet_strings_at_indexes_0_and_7.json",
+    "sha256": "aa2571af096264483c0b15b5a019d436703b1184b8c157fa7e7f70b8c700b692"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/004_repeated_mapped_values_at_indexes_1_and_6.json",
+    "sha256": "27ef0fa428df54a49c8f80fea03f190e81923580f1f7b7a446ce45112745a7ff"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/005_empty_selection.json",
+    "sha256": "f36f1ba90f406f0690ed5b222d16ee2951dad19dc18a3391537b085a22413ae7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/006_wrong_ordering.json",
+    "sha256": "e98a781c26d835a3df156c6654256638ad04d4440325a555f36063a53066994c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/007_count_mismatch.json",
+    "sha256": "213793c4cfbedf69eb589c02e6d558e4ff8f826341538aaac6a0a3aea465a95e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/008_type_mismatch_at_original_index.json",
+    "sha256": "ddb4036a43d29d090ffe3ac55db1659a62e50f1e5abf87a0c8d42ee0c063549f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/009_unknown_type_at_an_unselected_position.json",
+    "sha256": "2d2946323936c4a622becc90f6a84c231ffb93c6a589d6a78095a4453e6d5926"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/010_unknown_type_with_an_empty_selection.json",
+    "sha256": "76309ec99012ecf71636c30d7cfd3c358a5caad94f293b49c7e7ab333095f3f6"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/011_out_of_range_scalar.json",
+    "sha256": "79800ff1cc84fcc163049a1f1a9548a765db1a3021ce03e6385544e39b009c0e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PrecomputeCommitment/012_index_beyond_wrong_length_message_types.json",
+    "sha256": "67f04c03f50692292376b13b6f038bb9ef69ba377df1d35b3840a72d1522403e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/001_three_commitments_the_first_and_third_identical.json",
+    "sha256": "05b1249139520e578dbd9250cf1c4f8c01114ae27a6a9729ec25d4f52a228f36"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/002_changed_ph.json",
+    "sha256": "392bdd6bcbb111425b14cf2e43a5cecb74177d9d42c67fa7828131c57dd9b0bb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/003_a_commitment_replaced_by_a_different_valid_point.json",
+    "sha256": "7cb1fc38db81c9736504b2e07b661c57eeb73c1257ee592dade98ca3dba9999e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/004_distinct_commitments_reordered.json",
+    "sha256": "9baf366784e99755f621d7aacd72314c6adf9c6bb9d2a2e8363672e57f3f1323"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/005_identical_commitments_swapped_unchanged_ctx.json",
+    "sha256": "d61f6a81e2fe7bea4f10bd5830cf5d6601cc1c0342a8ee884d6a584bd8ca32ae"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/006_empty_ph_and_n_0_keep_their_length_fields.json",
+    "sha256": "d02060f07a3c189b41bdd8046c76fbb35c9314353860d02d2c4e6db0e4d5f4f8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/PresentationContext/007_identity_commitment.json",
+    "sha256": "c0f06707dc65203c4d365c631f10923851ab33fb185cbc657e4464d8c2f78bb5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofFinalize/001_injected_value_making_a_message_response_zero.json",
+    "sha256": "72f9685249a028daee593d7f8b4060d59f109033cd9282d22548c28408775b0f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofFinalize/002_same_inputs_without_the_zero_response.json",
+    "sha256": "ff72d7a6fa07dcd7f6bb38f54465dbaefe39f9eaa4430da8deb614748369f854"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/001_mixed_committed_scalars_separated_by_disclosed_indexes.json",
+    "sha256": "dd8d90d3305781e429e6284b3df9e27e0175115c21a4480e804a98f66764e6d8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/002_all_hidden.json",
+    "sha256": "2cc305130f438fec1efabf32287a5de68b376115ca5372a8ce1eca98929e2091"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/003_all_disclosed_u_0_n_0.json",
+    "sha256": "7dd71306a873e5a2c84621953fcdeccc3ec8aec9b6e991ba4a83d8730757b1c4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/004_all_committed_repeated_scalar_19700101_at_indexes_1_and_6_zero_and_r_1.json",
+    "sha256": "1b0482171d281eb30c123924d888084e7a00475d8e6d0c5809222fe6b8d5d5c4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/005_no_commitments_n_0.json",
+    "sha256": "d38775a8b62fb5fe1a39f2e23a2d346e1fc8454e7458c124afe16448070b69bd"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/006_empty_message_vector_l_0.json",
+    "sha256": "819e1a341d910a97b7615119124ffe723b463302eb48789587121a4a71a583da"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/007_single_committed_scalar_at_index_0.json",
+    "sha256": "2ebbbff0fa012aa86da7cdba329bf456a0394029903d6070cdb027095b4d984b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/008_single_committed_scalar_at_the_final_index_disclosed_messages_before_it.json",
+    "sha256": "29c4f0792c761e97156387989c0128f68a34d888e40c518e6577e34c50e680f4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/009_committed_scalars_at_the_first_and_last_index.json",
+    "sha256": "3540fc5644db08f0131beaba79414b4a57279ba837af6b1651545db90e99ba3d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/010_committed_octet_string_messages_at_the_first_and_last_index.json",
+    "sha256": "3c3ddbbcd2681603f4eba03f3868c10686e088f2648e3145442e57403bb6378a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/011_repeated_mapped_values_at_different_committed_indexes.json",
+    "sha256": "3ebe6c141bc4bb5b7a64aea2b12101d48b78ab7cdca829705dccba6cc6552989"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/012_cross_branch_equal_outputs_committed_at_two_positions.json",
+    "sha256": "430bf6b0a3531002317c50a76ad8f88b2fd75187c9044e184224184ea1390b96"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/013_empty_header_nonempty_presentation_header.json",
+    "sha256": "72cc488d1f0369a18235810e2267a30564c0e4c0053bec12a699385ef9d9d2e0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/014_empty_presentation_header.json",
+    "sha256": "3290de1ac981d7515a5a0c485ee4aa4dcbb9aed69c36359fc1ec8b6deb7ab570"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/015_precomputed_openings_for_indexes_1_3_6.json",
+    "sha256": "e6232f63bded56df2bdb3f9bf3fdd429e43e81b432268087ba5db59edea4e96a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/016_wrong_number_of_precomputed_openings.json",
+    "sha256": "ee1a2e04ba27a2841db366a728c2e9730b1f06097a1bf1adf0f4bb89038c3589"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/017_precomputed_opening_out_of_range.json",
+    "sha256": "0b259d2c759b89ed4e7ca0a656ef8338c304d202333c097efc5c6b665ca37b02"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/018_unknown_type_at_a_hidden_position.json",
+    "sha256": "8dbb18676d1733c9afbca43a4db9f8e609999f25c3c3c47159e9470284eefea7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/019_type_mismatch.json",
+    "sha256": "96ee93893defdbacbbe526d11826d8bdf85ad5509a0493f2cbfe5381720131a5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/020_wrong_length_message_types.json",
+    "sha256": "f34f2e8dca842f455c4d1a16320b2bdab6be8b1a795f216859d9eee2187462ea"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/021_wrong_length_message_disclosures.json",
+    "sha256": "8729dd0c1368b7ab1751f8223318fcf816f3dcfcd98c53b69ecb2da3bb836dd1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/022_unknown_disclosure_state.json",
+    "sha256": "4d8e988192a8ad509553abbddc652930c1c77a3339834146a1ef72ece484c42a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/023_out_of_range_scalar_message.json",
+    "sha256": "d8a6abb998c19b85fab0ffb59c762d3b2430e64e103db97bf3f0806b63d6cfe1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/024_signature_does_not_verify_changed_header.json",
+    "sha256": "9bcb6b756e4aa36340a5ca6663987f79d7281e1de6448da627dfc3d90ffbdf1c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/025_injected_exceptional_randomness_r1_0.json",
+    "sha256": "85b2bf4ab0d8382baa90a5b5d4f3ed00e18f4acf76dd4368ff4ae8f679a07cee"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/026_injected_exceptional_randomness_r2_0.json",
+    "sha256": "be9f225df4f1ce6132c77bde13595e9308d4a609e67128173091b647481a19cb"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofGen/027_all_hidden_for_the_empty_subset_type_check.json",
+    "sha256": "9b83091da7c3685b90d5487c106f6314676097294220c044555115d836d641da"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofInit/001_valid_initialization.json",
+    "sha256": "33ac45c726dd8479fa987f2046d753047d52e2e1beba4ada39e6c728692ce0cd"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofInit/002_unsorted_undisclosed_indexes.json",
+    "sha256": "edb821c04667dd2c9b7501048168e54ae4545d3e9dfafdbb8deb431113042dcf"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofInit/003_commitment_index_not_undisclosed.json",
+    "sha256": "13732a3c1a7d28303bc4aea0f331273ac84b091d134db36c58ea06b5f9b19ab2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/001_mixed_committed_scalars_separated_by_disclosed_indexes_verify.json",
+    "sha256": "5259f22fd2db191dfd0a9b79fbe044faa18678f7116e941b80b7ceabea8773d2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/002_all_hidden_verify.json",
+    "sha256": "852fc89710fca4764daa79416551fe9ee8495562ee37deb3d998e90893a4dac8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/003_all_disclosed_u_0_n_0_verify.json",
+    "sha256": "11e33078b951ba316a02e4c817662a9a292adb798215dc4a6eae8243c14ca522"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/004_all_committed_repeated_scalar_19700101_at_indexes_1_and_6_zero_and_r_1_verify.json",
+    "sha256": "2085fe682a8797591c1f46698a4f0bbb52de603252e1735fbd2be9fa6db087a0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/005_no_commitments_n_0_verify.json",
+    "sha256": "25ff6584f939c217b5ee35b07ef8a09937db9083ab39de7f711b6de3b743d953"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/006_empty_message_vector_l_0_verify.json",
+    "sha256": "1a41f50dd985aae0a02e1c240db8109bcc87a1d97e450467b24f6354354da092"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/007_single_committed_scalar_at_index_0_verify.json",
+    "sha256": "1a4544a8a35ddbf2c4c6d663494e00f852b8b76b364d61cb4e372ee24036651e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/008_single_committed_scalar_at_the_final_index_disclosed_messages_before_it_verify.json",
+    "sha256": "82759a48910bb4a18f2213a0b09b0fc848b9b5613e6a90100541d9a68e592499"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/009_committed_scalars_at_the_first_and_last_index_verify.json",
+    "sha256": "0aa6abb4e51b118d0aa0616e255d1a27fe48db624dbf495797bde7d90fe64da2"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/010_committed_octet_string_messages_at_the_first_and_last_index_verify.json",
+    "sha256": "76595ff20a6f9ced080517310ea74b7e2ceaace1b41855b36a52a3f7d8f5d3e0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/011_repeated_mapped_values_at_different_committed_indexes_verify.json",
+    "sha256": "160c232c48c4ca24e72053dd1bf92c8daf0e45cb8e8eaf5d63430a511c705df7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/012_cross_branch_equal_outputs_committed_at_two_positions_verify.json",
+    "sha256": "62563bc635e0b9a98a25c48c3e1416712006627e719e9c8f8577d2e112f8cac6"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/013_empty_header_nonempty_presentation_header_verify.json",
+    "sha256": "d54d73975a1c8c03335605142a6fe288eec019d2978142dd0c86b91c4f53a930"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/014_empty_presentation_header_verify.json",
+    "sha256": "47916bba570ebd8ca5548b5ad28ad2b857357f55216620ccc300735d175203b1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/015_precomputed_openings_for_indexes_1_3_6_verify.json",
+    "sha256": "4c23e9e4dfeb8a85f252ddfef77bafd1c66f6e8308df4c2f5acd389eaa8581da"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/016_changed_presentation_header.json",
+    "sha256": "ffc04a020aca8a9632f076b0f9bd573c30cd181e1f8b3728de71cca65602d76a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/017_empty_presentation_header.json",
+    "sha256": "8195dc5ea83d35924e3e318427167a3179be3843b67702bd0b6751e298454426"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/018_changed_expected_commitment_different_valid_point.json",
+    "sha256": "fba11aed0de607d451aa8188e10217ad9d1ec6441c0a00f88b132c70ccfd2cfa"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/019_reordered_distinct_expected_commitments.json",
+    "sha256": "e0b73d9aea01bf858e6ed6926f5389f3669ed545cbc1906c786b19fb0e8359ad"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/020_changed_committed_index_assignment_same_disclosed_set_and_n.json",
+    "sha256": "1b5d338953ee3b306a4215633d1f462d5639687824d8eb965df27f4e8cc048d4"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/021_changed_disclosure_choice.json",
+    "sha256": "c37a40968fe55f42875cab0fd5a8daf2cd645d68971cfbb79ed7149837780a88"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/022_changed_disclosed_message.json",
+    "sha256": "e878b9f469b426a5a21763f2d1c7c28e84265f826898a88efb797a4fd5be3b8a"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/023_changed_header.json",
+    "sha256": "6bce3b392c57982aa7202b3e72e2741038d44895f1ff195eb35a8bee604894ea"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/024_changed_public_key.json",
+    "sha256": "44e59c9c93a9ea28dd79bfe0af941c16a0eb0a6ddb7f6512d685201156d7f691"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/025_fewer_expected_commitments.json",
+    "sha256": "f5422ec872308003eae0bd2b436ad3679917e7eb5e877d375b381f0a8ccae25f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/026_expected_commitment_is_the_identity.json",
+    "sha256": "1497bb218f6b1fd7f4f6bece662d256dfa1e08609b94d8c7c8409dcd849445f9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/027_expected_commitment_outside_g1.json",
+    "sha256": "73c372816e48d2dc9eb17532b6dae01d9bcdbfc27e9264789158cf89a43af338"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/028_unknown_type_at_a_hidden_position.json",
+    "sha256": "f7a7131786bb1954792742a7c918d16cdfe02f5b3c9879415bf48c235ccfab7c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/029_type_mismatch_at_a_disclosed_position.json",
+    "sha256": "9860ce1cb005d61b3b7c9778f4607984e5fde77fef943d8864cd253ef1fe566c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/030_wrong_length_message_types.json",
+    "sha256": "d69a2b1e2a48f8691c386b6af72e7d80a6312c957903d315cb2c35dc01008cd3"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/031_public_key_undecodable.json",
+    "sha256": "e6b79c8c61b031963f8616b2eb8015352e2cf36fbf894efa18e1ebcff0b7e495"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/032_changed_commitment_response_s_hat.json",
+    "sha256": "90e5df12bdb92fe09c578a1b16a1db04850c02411d947feaf73b3a0ddbd9eb5d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/033_changed_message_response_m_hat.json",
+    "sha256": "4728aca512e6b3af86c3461b1ae3d1d9db7882c4ce4c4b2d44f0a21e1d5567a9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/034_proof_with_identity_a_bar.json",
+    "sha256": "cf525db40c4acaf1abf0641856d7dbd434c2b4ee41f772419dfcda9c5f339768"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/ProofVerify/035_unknown_type_with_an_empty_disclosed_subset.json",
+    "sha256": "b153de467aa469ed95c126e6a62257dd055476c1756afdc3877a9648b17ef1d8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/001_mixed_octets_and_scalars_l_8.json",
+    "sha256": "3019a8af889064d07267f1464672afb16aa4681fee200460d9e150f48f941b29"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/002_mixed_messages_empty_header.json",
+    "sha256": "db525002c9863cf72bd330d4528187d0f2e3220a2a7e058e62ad474d48d6a6f1"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/003_scalars_at_first_and_last_index_l_5.json",
+    "sha256": "52fefabf44b28b254242555cd9409a18472eb2f29c87242d7f1726bbe3f8ffce"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/004_empty_message_vector_l_0.json",
+    "sha256": "81fbb7010ae317710265e9536bb8907505b91ef2372c4d5c5fcdaf8040ad6dc9"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/005_cross_branch_equal_outputs_octet_string_and_its_hash_as_a_scalar.json",
+    "sha256": "ca81feeef84ec26ae1ff18e234a58a5935cc208ec49d470c8802fb1c0e62dc3e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/006_unknown_type_entry.json",
+    "sha256": "111f115ed8182fd820f5f768eab3742e03966ba3f020c8c1898664f2599dec7d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/007_type_mismatch_octet_string_at_a_scalar_position.json",
+    "sha256": "133aaa0db3803830b7061f309ae449c87ca2aeff3a9b5740c62ef83f64d41f22"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/008_wrong_length_message_types.json",
+    "sha256": "dade586f8b1a4f0c4f9352353813eac80ef4e20b933d3ad226ea1a07bcad318c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/009_out_of_range_scalar_r.json",
+    "sha256": "1fa1afac97f59e0aed924b35c40982a21314cde663b36e8ef5622e6d9d1e1f43"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Sign/010_out_of_range_scalar_2_256_1.json",
+    "sha256": "e7db6fd4da2999bcfb24efd31766eba4fc90dcbde48ca0622186f6acecc4d8c7"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/001_mixed_messages.json",
+    "sha256": "8fa7cf0fb5723d5e0edb3f5c591f67661d1b4026687f2ea3523c696ea932cb54"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/002_mixed_messages_empty_header.json",
+    "sha256": "4b881bba3808233f3a9a8d87eea96d6ca08bca03d62b6862d2745e2a2359cf61"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/003_scalars_at_first_and_last_index.json",
+    "sha256": "cd50d5125014fc8d9e5e12018609d7ae2880b3f2539e6c1b79cb69f607f322fe"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/004_l_0.json",
+    "sha256": "e727597211aee816052c105c4e96843afd9dc2e9586ac51347f275372cfd04ad"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/005_cross_branch_equal_outputs.json",
+    "sha256": "b82ada0ef13f5cb502662142ef38b2cbb5c195ba99ec3d8e1db47ecc035054ed"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/006_modified_message.json",
+    "sha256": "058fb43ecd0d9b9347cde18ccf17e279d3bf7e183a0cd3bcb1646570427c8448"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/007_modified_scalar_message.json",
+    "sha256": "24f005df0e8e3e3d71ff08129f36ad1e87a3356758e2d96d7c4c1acae6b9c494"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/008_reordered_messages.json",
+    "sha256": "5f6c1c089a9af5d286a1fa04e64e340f7589770b98bff195803277a98e353fd6"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/009_missing_message.json",
+    "sha256": "020d4edceff7c435e155de32e8635419a224d4f7cf2a5f72dc0138c36db4bb13"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/010_different_header.json",
+    "sha256": "193c51eea6578f54239850045705079b7543ff06e5ad9c06288abad0db92efc5"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/011_wrong_public_key.json",
+    "sha256": "54ba80d8319767ef896cf0818c251ab74b39a55962d8a4ed26b0c343912e4976"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/012_unknown_type_entry.json",
+    "sha256": "658482941294c436fb4133d4a8a5faa585430884114dbb89c26450babd538491"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/013_type_mismatch.json",
+    "sha256": "20f3ac8089c8b16fbbbec8ead14dcfa13f7e97197ebae68855bfaa4dc12acf83"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/014_wrong_length_message_types.json",
+    "sha256": "46f8ae274f2a510d5d618c2af6690f97763f4a4f0d6616fcb57d35aff4077cc8"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/015_out_of_range_scalar.json",
+    "sha256": "06e589f717ab4dfdeba5efd9341fa42692fe9aa6e23ef155c8cc39be1dca0db0"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/016_signature_identity_a.json",
+    "sha256": "1f613cc4071454124631fc050cc7cfd51654111b2cfbe8809ab47375524ca61b"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/017_signature_a_off_the_curve.json",
+    "sha256": "f59a154aaa9cafda44e30946b2872449e4d8ac30dfc27ed93ed3e6a63ffbc4c6"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/018_signature_a_outside_g1.json",
+    "sha256": "18f17a848214874850087d7c54ea8bbbaee8c2e5e7e9ca4ccc906c9bb22d28ae"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/019_signature_e_0.json",
+    "sha256": "ada9e33ffd8247e4d3ddc0f4e21236a141795ee53e02a41035ebe9ca5b340e2d"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/020_signature_e_r.json",
+    "sha256": "ebf9b232d5357ccacf088829a0e893c0408ed6c4d35788c008c73ea78d73691e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/021_signature_truncated.json",
+    "sha256": "8d31e55ee21417645a22614d4364f2d3f1667930cfcd4000108b987fc7ab528f"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/022_signature_uncompressed_flag.json",
+    "sha256": "7b685be3f8641b80d64745aa7453f13b998533fb5b1bba139cfe46790cc3a922"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/023_public_key_wrong_length.json",
+    "sha256": "af16f7e6bf808c301aef5206b2e3cc79266ce0cec02a732cf82bf9af964cc09c"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/024_public_key_identity.json",
+    "sha256": "3b433e542d95ce9bcbf0859816ca9f86b3061b9428b16d43cd6390b521f09a5e"
+  },
+  {
+    "path": "fixtures/profile/BLS12-381-SHAKE-256/Verify/025_public_key_outside_g2.json",
+    "sha256": "078d68b23cdf023bc16dff4dc01c3524c32b81d8cf1b5bbdbaa9e902dd72bcee"
+  }
+]

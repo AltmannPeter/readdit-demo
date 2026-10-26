@@ -1,0 +1,41 @@
+{
+  "caseName": "out-of-range scalar",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "Verify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "signature": "ac9d9ee160d2ff1988225632945ff60a669ed5015aac1798d60ac504ae23523ec3e62976661768b99722d6e314209f7d3ab51740261e75a36d739a1870080e0300fe0881ecfd22faa5ac1c703913b794",
+    "header": "11223344556677889900aabbccddeeff",
+    "messages": [
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001"
+      },
+      "6e616d65",
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "",
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"
+      }
+    ],
+    "messageTypes": [
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f"
+  },
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "scalar not in [0, r-1]"
+    }
+  }
+}

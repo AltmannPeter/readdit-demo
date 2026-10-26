@@ -6,14 +6,16 @@ export interface ModAccountRow {
   handle: string
   joinedAt: string
   ageProofs: Array<{ label: string }>
-  /** A community account (a community with its own pseudonym), and the Readdit account it is linked to. */
+  /** A community account (a community with its own pseudonym), and the Community account it is linked to. */
   community: string | null
   linkedTo: string | null
+  /** The format of the presentation that created the account. */
+  format: 'mso_mdoc' | 'bbs_cd' | null
   banned: { at: string; reason: string } | null
   comments: number
 }
 
-/** One account in /mod. `nested`: a community account shown under the Readdit account it is linked to. */
+/** One account in /mod. `nested`: a community account shown under the Community account it is linked to. */
 const props = defineProps<{ account: ModAccountRow; nested?: boolean }>()
 const emit = defineEmits<{ ban: [pseudonym: string]; unban: [pseudonym: string] }>()
 const a = computed(() => props.account)
@@ -39,9 +41,13 @@ const a = computed(() => props.account)
         <dt class="w-20 shrink-0 text-muted">Joined</dt>
         <dd>{{ a.joinedAt }}</dd>
       </div>
+      <div v-if="a.format" class="flex gap-2">
+        <dt class="w-20 shrink-0 text-muted">Credential</dt>
+        <dd>{{ a.format === 'bbs_cd' ? 'BBS (bbs_cd)' : 'mdoc (mso_mdoc)' }}</dd>
+      </div>
       <div v-if="a.community && !props.nested" class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Linked to</dt>
-        <dd>{{ a.linkedTo ? `u/${a.linkedTo}` : 'No Readdit account' }}</dd>
+        <dd>{{ a.linkedTo ? `u/${a.linkedTo}` : 'No Community account' }}</dd>
       </div>
       <div v-if="!a.community" class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted">Age checks</dt>

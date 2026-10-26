@@ -101,9 +101,16 @@ impl TrustAnchors {
     Ok(TrustAnchors(anchors))
   }
 
-  /// Validates a Document Signer certificate at `now`: it is a trust anchor and valid then.
-  pub fn validate(&self, der: &[u8], now: i64) -> Result<DocumentSigner, String> {
-    let anchor = self.0.iter().find(|a| a.der == der).ok_or("the Document Signer certificate is not a trust anchor")?;
+  /// Validates a Document Signer certificate at `now`: it is a trust anchor, or one of the
+  /// `learned` certificates (DER; issuers `/tech` added from earlier presentations, any P-256
+  /// Document Signer, self-signed or not), and valid then.
+  pub fn validate(&self, der: &[u8], now: i64, learned: &[Vec<u8>]) -> Result<DocumentSigner, String> {
+    let anchor = match self.0.iter().find(|a| a.der == der) {
+      Some(a) => a.clone(),
+      None if learned.iter().any(|l| l == der) => parse(der)?,
+      None => return Err("the Document Signer certificate is not a trust anchor".into()),
+    };
+    let anchor = &anchor;
     if now < anchor.not_before || now > anchor.not_after {
       return Err(format!("the Document Signer certificate {} is not valid now", anchor.subject));
     }

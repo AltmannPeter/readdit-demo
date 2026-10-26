@@ -1,0 +1,15 @@
+{
+  "caseName": "empty ph and N = 0 keep their length fields",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "PresentationContext",
+  "input": {
+    "presentationHeader": "",
+    "commitments": []
+  },
+  "trace": {},
+  "expected": {
+    "output": "00000000000000000000000000000000"
+  }
+}

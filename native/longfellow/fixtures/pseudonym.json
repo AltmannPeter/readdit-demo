@@ -1,0 +1,41 @@
+{
+  "function": "pseudonym-v1-sha256",
+  "config": "known-offender-matching-ssc",
+  "dst": "nym_auth/v1/known-offender-matching-ssc",
+  "prover_input": "0000000000000000000000000000000000000000000000000000000000000000",
+  "holder": {
+    "secret_seed": "4a8f9c1d2e3f4a5b6c7d8e9f0a1b2c3d"
+  },
+  "verifiers": [
+    {
+      "client_id": "x509_san_dns:verifier.example",
+      "origin": "https://verifier.example",
+      "nonce": "pOA0oqEAhLnqug2r7Ve4tQ",
+      "verifier_input": "6eae85a0b2dfcd7d8b716291e54a004da798f93a26a248c265becd33a04a6bab",
+      "pseudonym": "155f433796d1f282268a87100cd08510893f97f6e5607bc5e4c66afadb71aad1",
+      "mdoc": {
+        "challenge_digest": "7eea0f8e073961c3e82e9562e0f79edaa66dbfc17eaf0ac0596a987733516dd9",
+        "device_signature": "610ac8c0dddb465931a9f4fdb2038dd698117c90534bcd56b58f41a7ab71e17e6b7d05162bbbae4c4e43f6a7d004bc4ef764d897d5eb0174cdb5863ef1c5c658"
+      },
+      "sdjwt": {
+        "challenge_digest": "ebc9ac479fef0bec895d4b426f76d988e24f796007c7ea39b2f5ee071f0419da",
+        "device_signature": "5f7107341bed7842d1aef23193a87a5dea5d53ecba34c8d50f57b7fe5a4a616d1bff918cf110d917047e8767a4ee9a60fed324fc30e29c944d6ce84e442a6736"
+      }
+    },
+    {
+      "client_id": "x509_san_dns:other-verifier.example",
+      "origin": "https://other-verifier.example",
+      "nonce": "6YfsJcysIReLorHGvKlsFQ",
+      "verifier_input": "5ff3c35cfed806981de9ad610c4a7fe100867aee4530485aed3a0cc6e71f22b1",
+      "pseudonym": "eefc129a09b735ea4ea6a5bc8278dc664c9849499f354d80aa37614fe8caec6b",
+      "mdoc": {
+        "challenge_digest": "eadaee812dc8e402826de50dc020634bc92bbac24bf25fbbd479c98cec9e1784",
+        "device_signature": "da2d479d4aa6a514374d7d157012f3f444903b8c1efe50dab3bf2cee9e47175829883290f558439c2abfcb5a410cf79dca0e8d4c0f2d1999bc9650701b82a3db"
+      },
+      "sdjwt": {
+        "challenge_digest": "02f37c3b1d19ec1be9cfae9f745bfc11b98d8ded204e3863860ef5af83f1b79d",
+        "device_signature": "52c2760b0db434120b747e5fbd4f749c305d587505038c12408e774699ded42b537a0943a8a2b3a929c6117742d848bbfd190cbe4ecf349144d08c729b9106de"
+      }
+    }
+  ]
+}

@@ -17,11 +17,11 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
-const addon = require(`${root}native/vega/readdit-vega.node`)
+const addon = require(`${root}native/vega/community-vega.node`)
 const [teen, adult] = JSON.parse(readFileSync(`${root}app/wallet/demo-wallet.json`, 'utf8')).holders
 const SHAPES = `${root}native/vega/circuits/mdoc/shapes.zst`
 const ANCHORS = readFileSync(`${root}native/vega/demo/document-signer.pem`, 'utf8')
-const HOST = 'readdit.example'
+const HOST = 'community.example'
 const CLIENT_ID = `x509_san_dns:${HOST}`
 const CIRCUIT = 'urn:circuits:vega:nym_auth:v1'
 const DOCTYPE = 'eu.europa.ec.eudi.nym_auth.1'
@@ -46,8 +46,8 @@ const TEEN = { ge: plusDays(minusYears(today, 18), 1), le: minusYears(today, 13)
 const ADULT = { le: minusYears(today, 18) }
 
 function request(age, nonce = randomBytes(16).toString('hex')) {
-  const req = [{ id: 'pseudonym-v1-sha256', return: 'nym', params: { config: 'known-offender-matching-ssc', verifier_id_type: 'x509_san_dns' } }]
-  if (age) req.push({ id: 'age_check', return: 'age', params: { ...age } })
+  const _req = [{ fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } }]
+  if (age) _req.push({ fn_id: 'age_check', return: 'age', params: { ...age } })
   const session = randomBytes(16).toString('hex')
   return {
     aud: 'https://self-issued.me/v2',
@@ -57,8 +57,8 @@ function request(age, nonce = randomBytes(16).toString('hex')) {
     client_id: CLIENT_ID,
     nonce,
     state: randomBytes(16).toString('hex'),
-    dcql_query: { credentials: [{ id: 'nym_attestation', format: 'circuit_zk', meta: { doctype_value: DOCTYPE }, req }] },
-    client_metadata: { client_name: 'Readdit', vp_formats_supported: { circuit_zk: { circuit_proof_system_values: ['vega-v1'], circuit_id_values: [CIRCUIT] } } },
+    dcql_query: { credentials: [{ id: 'nym_attestation', format: 'zkp_req', meta: { source_format: 'mso_mdoc', doctype_value: DOCTYPE }, _req }] },
+    client_metadata: { client_name: 'Community', vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [CIRCUIT] } } },
   }
 }
 const handoverOf = (r) => ({ client_id: r.client_id, nonce: r.nonce, response_uri: r.response_uri, jwk_thumbprint: null })
@@ -80,7 +80,7 @@ async function present(r, wallet = teen, extra = {}) {
   const s = await sign(r, wallet, extra)
   if (!s.ok) return s
   const w = await prover.witness(JSON.stringify({
-    circuit_id: CIRCUIT, credential_query_id: 'nym_attestation', request: r, handover: handoverOf(r),
+    system_id: CIRCUIT, credential_query_id: 'nym_attestation', request: r, handover: handoverOf(r),
     credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.device_signature,
   }))
   if (typeof w === 'string') return JSON.parse(w)
@@ -165,7 +165,7 @@ expectRefusal('G3d proof_time changed by one second (within tolerance)', await v
 // e. other age bounds than the request's: the same session (nonce, response_uri) asking for another range.
 const withAge = (req, age) => {
   const q = req.dcql_query.credentials[0]
-  return { ...req, dcql_query: { credentials: [{ ...q, req: [q.req[0], { id: 'age_check', return: 'age', params: age }] }] } }
+  return { ...req, dcql_query: { credentials: [{ ...q, _req: [q._req[0], { fn_id: 'age_check', return: 'age', params: age }] }] } }
 }
 expectRefusal('G3e other age bound ge (one day later)', await verify(withAge(r, { ge: plusDays(TEEN.ge, 1), le: TEEN.le }), p.presentation), 'public_input', 'age_check.ge')
 expectRefusal('G3e other age bound le (one day earlier)', await verify(withAge(r, { ge: TEEN.ge, le: plusDays(TEEN.le, -1) }), p.presentation), 'public_input', 'age_check.le')

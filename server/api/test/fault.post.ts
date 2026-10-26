@@ -1,6 +1,6 @@
 import { FAULT_STEPS, type FaultStep, armFault, testFaultsEnabled } from '../../utils/test-faults'
 
-/** Test only (READDIT_TEST_FAULTS=1): arm one failure of the next addon call of `step`. 404 otherwise. */
+/** Test only (COMMUNITY_TEST_FAULTS=1): arm one failure of the next addon call of `step` (or `issuer.read`, server/utils/test-faults.ts). 404 otherwise. */
 export default defineEventHandler(async (event) => {
   if (!testFaultsEnabled()) throw createError({ statusCode: 404 })
   const body = (await readBody<{ step?: string }>(event)) ?? {}

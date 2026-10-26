@@ -5,7 +5,7 @@ import { loadCredentials } from '~/wallet/holder'
 import type { GuideStep } from '~/guide/steps'
 import { STAGES, guideStep } from '~/guide/steps'
 
-// The presenter's guide, docked beside the product. It is not part of Readdit or the wallet: it
+// The presenter's guide, docked beside the product. It is not part of Community or the wallet: it
 // follows the flow state and says, for the current step, what the step is about
 // (app/guide/steps.ts).
 const guide = useGuidePanel()
@@ -41,7 +41,8 @@ const step = computed(() =>
     siteHost: String(config.siteHost),
     today: today.value,
     dialog: { ...dialogFlow.value, open: wallet.state.value.open, purpose: wallet.state.value.purpose },
-    wallet: walletFlow.value,
+    // The demo phone is named only while it is on screen: otherwise a real phone answers.
+    wallet: wallet.state.value.open && !dialogFlow.value.demoPhone ? { ...walletFlow.value, phone: '' } : walletFlow.value,
     last: last.value,
     page: community.value ? { kind: 'community', community: community.value } : route.path === '/' ? { kind: 'home' } : { kind: 'other' },
     access: community.value ? access.value : null,
@@ -200,8 +201,8 @@ watch(shownKey, () => (detailsOpen.value = false))
       </div>
 
       <footer class="flex shrink-0 gap-5 border-t border-white/10 px-5 py-3 text-xs">
-        <a href="/tech" target="readdit-tech" class="text-[#8b939e] hover:text-white">Technical view ↗</a>
-        <a href="/mod" target="readdit-mod" class="text-[#8b939e] hover:text-white">Moderation ↗</a>
+        <a href="/tech" target="community-tech" class="text-[#8b939e] hover:text-white">Technical view ↗</a>
+        <a href="/mod" target="community-mod" class="text-[#8b939e] hover:text-white">Moderation ↗</a>
       </footer>
     </template>
 

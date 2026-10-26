@@ -1,16 +1,20 @@
 // Runs the presentation order headlessly against the running site and saves a screenshot of each
 // step, in flow order, to ./demo-shots (or the directory given as the second argument). Every
-// screenshot is the browser viewport as the person sees it: Readdit, the phone in the wallet
+// screenshot is the browser viewport as the person sees it: Community, the phone in the wallet
 // dialog, and the guide panel.
 // Needs the site with its proof backend (npm run build:native, then npm run dev).
 // Usage: node scripts/demo-flow.mjs [baseUrl] [outDir]
 //        (needs: npm i --no-save playwright && npx playwright install chromium)
 //
-// Order: sign-up on the teen's phone (QR, credential, scan, consent, PIN, proving, success), an
+// Order: the operator switches Vega on in /tech (the site accepts no proof system at the start),
+// sign-up on the teen's phone (QR, credential, scan, consent, PIN, proving, success), an
 // open community, c/afterdark (requirement not met; then the adult's phone swapped in at the QR
 // code, refused with "Pseudonym does not match"), c/teenspace (age range granted), c/afterdark
 // refused by the site, c/france joined with its own pseudonym (linked), a comment, the ban from
-// /mod, the second sign-up ending in "Account banned", and /tech.
+// /mod, the second sign-up ending in "Account banned", /tech, then BBS only (switched in /tech
+// after a reset): sign-up on the teen's BBS phone and c/teenspace with the date-range plugin, and
+// then Longfellow only, over the same mdoc as Vega: sign-up, c/afterdark tried first and refused
+// by the wallet, c/teenspace granted.
 // At each step it checks that the guide panel shows the matching step.
 // Exits 1 on a console error or when a step does not reach its expected state.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
@@ -26,6 +30,9 @@ for (const f of readdirSync(OUT)) if (f.endsWith('.png')) rmSync(join(OUT, f))
 
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5 })
+// The site dialog hides the demo phone at first (the main flow scans with a real phone); this run
+// drives the demo phone, so it is shown, as Show demo phone does.
+await context.addInitScript(() => localStorage.setItem('community-demo-phone', '1'))
 const page = await context.newPage()
 const errors = []
 const watch = (p) => {
@@ -35,18 +42,41 @@ const watch = (p) => {
 }
 watch(page)
 
-// What the phone sends: the prover routes' statuses and what it posts to response_uri.
+// What the phone sends: the prover routes' statuses and what it posts to response_uri. The response
+// is a JWE; the phone's "Response encrypted" report, sent just before it, says what it holds.
 const net = []
+let lastEncrypted = 'vp_token'
+page.on('request', (r) => {
+  if (!r.url().includes('/api/wallet/trace')) return
+  try {
+    const b = r.postDataJSON()
+    if (b?.step === 'encrypt') lastEncrypted = b.data?.error ? `error=${b.data.error}` : 'vp_token'
+  } catch {
+    /* not JSON */
+  }
+})
 page.on('response', (r) => {
   const u = new URL(r.url())
   const req = r.request()
   if (u.pathname.startsWith('/api/wallet/sign') || u.pathname.startsWith('/api/wallet/prove')) net.push(`${u.pathname} ${r.status()}`)
   if (u.pathname.startsWith('/api/vp/response/')) {
     const form = new URLSearchParams(req.postData() ?? '')
-    net.push(`response_uri ${form.get('error') ? `error=${form.get('error')}` : 'vp_token'} ${r.status()}`)
+    const sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'unencrypted vp_token'
+    net.push(`response_uri ${sent} ${r.status()}`)
   }
 })
 
+/** The page's Sign up (the header has none since 2026-10-23). Where the page has none (a gated
+ *  community, a post), the logo goes home first, without a reload, so the phone on screen stays. */
+async function signUpButton() {
+  const b = page.getByRole('main').getByRole('button', { name: 'Sign up', exact: true }).first()
+  if (!(await b.isVisible().catch(() => false))) {
+    await page.getByRole('banner').locator('a[data-home]').click()
+    await page.waitForURL((u) => u.pathname === '/')
+    await b.waitFor({ timeout: 10_000 })
+  }
+  return b
+}
 const phone = page.locator('[role=dialog] section').nth(1)
 const guidePanel = page.getByRole('complementary', { name: 'Guide' })
 let n = 0
@@ -88,14 +118,18 @@ const scan = async () => {
   await phone.getByText('Scan the QR Code').waitFor()
 }
 const readRequest = async () => phone.getByText(/Request to Share Data|Requirement Not Met|Unsupported Request/).waitFor({ timeout: 20_000 })
-/** Swap to the named phone while the QR code is on screen ("Teen's phone", "Adult's phone"). */
+/** Swap to the named phone while the QR code is on screen ("Teen's phone", "Adult's phone",
+ *  "Teen's BBS phone"); Swap phone hands over to the next of the three. */
 const usePhone = async (name) => {
   const label = page.locator('[data-phone-label]')
-  if ((await label.innerText()).startsWith(name)) return
-  await page.getByRole('button', { name: 'Swap phone' }).click()
-  await label.filter({ hasText: name }).waitFor()
-  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
-  await page.waitForTimeout(400) // the swap animation
+  for (let k = 0; k < 3 && !(await label.innerText()).startsWith(name); k++) {
+    const was = await label.innerText()
+    await page.getByRole('button', { name: 'Swap phone' }).click()
+    await page.waitForFunction((w) => document.querySelector('[data-phone-label]')?.innerText !== w, was)
+    await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+    await page.waitForTimeout(400) // the swap animation
+  }
+  if (!(await label.innerText()).startsWith(name)) throw new Error(`no phone named ${name}`)
 }
 const enterPin = async (pin) => {
   for (const d of pin) await phone.getByRole('button', { name: d, exact: true }).click()
@@ -105,12 +139,23 @@ const enterPin = async (pin) => {
 try {
   await page.request.post(`${BASE}/api/demo/reset`)
 
+  // 0. The site accepts no proof system at the start: the operator switches Vega on in /tech.
+  step('0. /tech: accept Vega')
+  const tech = await context.newPage()
+  watch(tech)
+  await tech.goto(`${BASE}/tech`)
+  await ready(tech)
+  await tech.locator('[data-none-accepted]').waitFor()
+  await tech.locator('[data-accept="vega-v1"]').check()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'vega-v1')
+  await page.bringToFront()
+
   // 1. Sign up: QR, the credential, scan, consent, PIN, proving, success.
   step('1. sign up')
   await page.goto(BASE)
   await ready(page)
   await guide('start')
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's phone")
   await phone.getByText('Age and pseudonym').first().waitFor()
@@ -175,12 +220,12 @@ try {
   await guide('unmet')
   await shot('afterdark-requirement-not-met')
   await phone.getByRole('button', { name: 'Close' }).click()
-  await page.getByText('Not completed').waitFor()
+  await page.getByText('Not completed').first().waitFor()
   await guide('not-completed')
   await shot('afterdark-not-completed')
 
   // 3b. Borrowing the adult's phone: swapped in at the QR code, it proves 18+, but its pseudonym
-  // is not the logged-in account's, so Readdit rejects the presentation.
+  // is not the logged-in account's, so Community rejects the presentation.
   step('3b. c/afterdark with the adult\'s phone')
   await page.getByRole('button', { name: 'Try again' }).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
@@ -194,7 +239,7 @@ try {
   await guide('age-consent')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await page.getByText('Pseudonym does not match').waitFor({ timeout: 30_000 })
+  await page.getByText('Pseudonym does not match').first().waitFor({ timeout: 30_000 })
   await guide('mismatch')
   await shot('afterdark-pseudonym-does-not-match')
   await page.keyboard.press('Escape')
@@ -228,12 +273,12 @@ try {
   await page.getByText("You can't enter").waitFor()
   await guide('age-refused')
   await openDetails()
-  await shot('afterdark-refused-by-readdit')
+  await shot('afterdark-refused-by-the-site')
 
   // 5b. c/france: its own pseudonym, one account per person, linked to the logged-in account.
   step('5b. c/france')
   await page.click('a[href="/c/france"]')
-  const joinAndLink = page.getByRole('button', { name: /^Join and link to u\// })
+  const joinAndLink = page.getByRole('button', { name: /^Link to u\// })
   await joinAndLink.waitFor()
   await guide('community-join')
   await openDetails()
@@ -267,9 +312,7 @@ try {
   await page.getByText('Anyone want to swap phone numbers?').waitFor()
   await shot('comment')
 
-  const tech = await context.newPage()
-  watch(tech)
-  await tech.goto(`${BASE}/tech`)
+  await tech.reload()
   await ready(tech)
   await tech.getByText('Capability negotiation').waitFor()
 
@@ -281,14 +324,14 @@ try {
   await mod.getByText('Banned', { exact: true }).first().waitFor()
 
   await page.bringToFront()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await guide('banned')
   await openDetails()
   await shot('user-banned')
 
   // 7. The same wallet signs up again: the same pseudonym, so "Account banned".
   step('7. second sign-up')
-  await page.getByRole('banner').getByRole('button', { name: 'Sign up' }).click()
+  await (await signUpButton()).click()
   await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
   await usePhone("Teen's phone")
   await guide('signin-qr')
@@ -298,7 +341,7 @@ try {
   await guide('consent')
   await phone.getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
-  await page.getByText('Account banned').waitFor({ timeout: 30_000 })
+  await page.getByText('Account banned').first().waitFor({ timeout: 30_000 })
   await guide('signup-refused')
   await openDetails()
   await shot('signup-again-account-banned')
@@ -308,6 +351,100 @@ try {
   await tech.bringToFront()
   await tech.getByRole('button', { name: /Age check, c\/teenspace/ }).click()
   await tech.getByText('Proof verified').first().waitFor()
+
+  // 9. BBS: the operator resets the demo and has Community accept only BBS (bbs_cd) in /tech. The
+  // teen's BBS phone answers: a new pseudonym and account (the same seed as the teen's mdoc, another
+  // PRF), an age range with the date-range plugin, and c/afterdark refused by the site.
+  step('9. BBS only')
+  await tech.request.post(`${BASE}/api/demo/reset`)
+  await tech.reload()
+  await ready(tech)
+  await tech.locator('[data-accept="bbs-cd-plugins-v0.1"]').check()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'bbs-cd-plugins-v0.1')
+  await page.bringToFront()
+  await page.goto(BASE)
+  await ready(page)
+  await (await signUpButton()).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's BBS phone")
+  await scan()
+  await readRequest()
+  await guide('consent')
+  await openDetails()
+  await guidePanel.getByText('hashdh-bls12381g1').first().waitFor()
+  await shot('bbs-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText(/^Account created: u\//).waitFor({ timeout: 30_000 })
+  await guide('account-created')
+  await openDetails()
+  await shot('bbs-account-created')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.click('a[href="/c/teenspace"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Age proof: 13–17').waitFor()
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText('Age verified').first().waitFor({ timeout: 30_000 })
+  await openDetails()
+  await shot('bbs-age-granted')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+
+  // 10. Longfellow: reset, and Community accepts only Longfellow, the other circuit over the mdoc. The
+  // teen's phone answers with its mdoc, as for Vega: the same pseudonym function, so a new account
+  // only because the demo was reset. c/afterdark first (refused by the wallet), then c/teenspace.
+  step('10. Longfellow only')
+  await tech.request.post(`${BASE}/api/demo/reset`)
+  await tech.reload()
+  await ready(tech)
+  await tech.locator('[data-accept="longfellow-libzk-v1"]').check()
+  await tech.waitForFunction(async () => (await (await fetch('/api/tech/overview')).json()).acceptedProofSystems.join() === 'longfellow-libzk-v1')
+  await page.bringToFront()
+  await page.goto(BASE)
+  await ready(page)
+  await (await signUpButton()).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await usePhone("Teen's phone")
+  await scan()
+  await readRequest()
+  await guide('consent')
+  await openDetails()
+  await guidePanel.getByText('Longfellow nym_auth v1 (longfellow-libzk-v1)').first().waitFor()
+  await shot('longfellow-consent')
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText(/^Account created: u\//).waitFor({ timeout: 30_000 })
+  await guide('account-created')
+  await openDetails()
+  await guidePanel.getByText('the Longfellow addon').first().waitFor()
+  await shot('longfellow-account-created')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.click('a[href="/c/afterdark"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Requirement Not Met').waitFor()
+  await phone.getByRole('button', { name: 'Close' }).click()
+  await page.getByText('Not completed').first().waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
+  await page.click('a[href="/c/teenspace"]')
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone.getByRole('button', { name: 'Scan QR code' }).waitFor()
+  await scan()
+  await readRequest()
+  await phone.getByText('Age proof: 13–17').waitFor()
+  await phone.getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await page.getByText('Age verified').first().waitFor({ timeout: 30_000 })
+  await openDetails()
+  await shot('longfellow-age-granted')
+  await phone.getByRole('button', { name: 'Close', exact: true }).click()
+  await tech.request.post(`${BASE}/api/demo/reset`)
 } catch (e) {
   // Leave the state the run stopped in.
   await page.screenshot({ path: join(OUT, 'failure.png') })
@@ -320,10 +457,11 @@ console.log(`phone traffic:\n  ${net.join('\n  ')}`)
 // The use cases, as the phone's traffic shows them.
 const count = (line) => net.filter((l) => l === line).length
 const expect = [
-  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 5],
-  ["c/afterdark on the teen's phone: the wallet answers access_denied, once", count('response_uri error=access_denied 200') === 1],
-  ["five presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up", count('/api/wallet/prove 200') === 5],
-  ['five vp_token responses', count('response_uri vp_token 200') === 5],
+  ['any PIN signs: no sign call is refused (no 401)', net.filter((l) => l.startsWith('/api/wallet/sign ') && l !== '/api/wallet/sign 200').length === 0 && count('/api/wallet/sign 200') === 7],
+  ["c/afterdark on the teen's phone: the wallet answers access_denied, with Vega and with Longfellow", count('response_uri error=access_denied 200') === 2],
+  ["nine presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, with BBS sign-up and c/teenspace, and with Longfellow sign-up and c/teenspace", count('/api/wallet/prove 200') === 9],
+  ['nine vp_token responses', count('response_uri vp_token 200') === 9],
+  ['every response encrypted (direct_post.jwt)', !net.some((l) => l.includes('unencrypted'))],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)

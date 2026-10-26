@@ -22,7 +22,7 @@ const feed = computed(() => rank(posts.filter((p) => visible(p.community))))
       </template>
       <LoginNotice v-else title="Log in to see posts" />
     </div>
-    <aside class="hidden w-80 shrink-0 space-y-4 @7xl:block">
+    <aside v-if="account" class="hidden w-80 shrink-0 space-y-4 @7xl:block">
       <HomeAside />
     </aside>
   </div>

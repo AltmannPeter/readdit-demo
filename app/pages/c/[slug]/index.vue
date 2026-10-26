@@ -7,7 +7,7 @@ const community = computed(() => findCommunity(String(route.params.slug)))
 const { access } = useCommunityAccess(community)
 const list = computed(() => rank(posts.filter((p) => p.community === community.value?.slug)))
 
-useHead(() => ({ title: community.value ? `${COMMUNITY_PREFIX}${community.value.slug} · Readdit` : 'Readdit' }))
+useHead(() => ({ title: community.value ? `${COMMUNITY_PREFIX}${community.value.slug} · Community` : 'Community' }))
 </script>
 
 <template>

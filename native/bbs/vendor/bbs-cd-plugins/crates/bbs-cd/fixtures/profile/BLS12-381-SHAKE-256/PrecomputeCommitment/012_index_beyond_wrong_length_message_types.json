@@ -1,0 +1,36 @@
+{
+  "caseName": "index beyond wrong-length message_types",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "PrecomputeCommitment",
+  "input": {
+    "committedMessages": [
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      }
+    ],
+    "commitmentIndexes": [
+      6
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS"
+    ]
+  },
+  "mockedRng": {
+    "seed": "332e313431353932363533353839373933323338343632363433333833323739",
+    "dst": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f434f4d5f4449535f4d4f434b5f52414e444f4d5f5343414c4152535f4453545f"
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "index out of range for message_types"
+    }
+  }
+}

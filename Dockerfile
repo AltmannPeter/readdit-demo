@@ -1,30 +1,63 @@
-# Readdit site (Nuxt) with the Vega prover and verifier compiled in as a Node addon (Rust).
+# Community site (Nuxt) with its three proof backends compiled in as Node addons (Rust): Vega and
+# Longfellow (circuits over mso_mdoc, native/vega and native/longfellow) and BBS (bbs_cd, native/bbs).
 #   docker compose up -d --build        then http://localhost:3000
 
-# 1. The addon: native/vega/node, built against the vendored vega-age and its locked dependencies.
+# Each addon also takes native/nym-profile (/tech's sampling profiler), at ../../nym-profile from
+# its node crate, so at /nym-profile here.
+
+# 1. The Vega addon: native/vega/node, built against the vendored vega-age and its locked dependencies.
 FROM rust:1-bookworm AS native
 # Optional: --build-arg JOBS=4 limits Cargo's parallel jobs on a shared machine.
 ARG JOBS
 WORKDIR /native
 COPY native/vega ./
+COPY native/nym-profile /nym-profile
 RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
- && cargo build --release --locked -p readdit-vega-node \
- && cp target/release/libreaddit_vega_node.so readdit-vega.node
+ && cargo build --release --locked -p community-vega-node \
+ && cp target/release/libcommunity_vega_node.so community-vega.node
 
-# 2. The site.
+# 2. The BBS addon: native/bbs/node, built against the vendored bbs-cd-plugins and its locked dependencies.
+FROM rust:1-bookworm AS native-bbs
+ARG JOBS
+WORKDIR /native
+COPY native/bbs ./
+COPY native/nym-profile /nym-profile
+RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
+ && cargo build --release --locked -p community-bbs-node \
+ && cp target/release/libcommunity_bbs_node.so community-bbs.node
+
+# 3. The Longfellow addon: native/longfellow/node, built against the vendored longfellow-zk crates
+#    and its locked dependencies. native/longfellow/.cargo/config.toml enables carry-less multiply
+#    (PCLMULQDQ on x86-64, PMULL on arm64), which Google's GF(2^128) code needs.
+FROM rust:1-bookworm AS native-longfellow
+ARG JOBS
+WORKDIR /native
+COPY native/longfellow ./
+COPY native/nym-profile /nym-profile
+RUN if [ -n "$JOBS" ]; then export CARGO_BUILD_JOBS="$JOBS"; fi \
+ && cargo build --release --locked -p community-longfellow-node \
+ && cp target/release/libcommunity_longfellow_node.so community-longfellow.node
+
+# 4. The site.
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY . .
 RUN npm install --no-audit --no-fund && npm run build
 
-# 3. Runtime: the built site, the addon, the circuits as data and the verifier's trust anchor, at the
-#    paths runtimeConfig expects relative to /app (nuxt.config.ts: vegaAddon, vegaShapes, vegaTrustAnchors).
+# 5. Runtime: the built site, the addons, the circuits as data and the verifiers' trust anchors, at
+#    the paths runtimeConfig expects relative to /app (nuxt.config.ts: vegaAddon, vegaShapes,
+#    vegaTrustAnchors, longfellowAddon, longfellowCircuits, longfellowTrustAnchors, bbsAddon,
+#    bbsIssuerParams).
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY --from=build /app/.output ./.output
-COPY --from=native /native/readdit-vega.node ./native/vega/readdit-vega.node
+COPY --from=native /native/community-vega.node ./native/vega/community-vega.node
+COPY --from=native-longfellow /native/community-longfellow.node ./native/longfellow/community-longfellow.node
+COPY --from=native-bbs /native/community-bbs.node ./native/bbs/community-bbs.node
 COPY native/vega/circuits/mdoc/shapes.zst ./native/vega/circuits/mdoc/shapes.zst
 COPY native/vega/demo/document-signer.pem ./native/vega/demo/document-signer.pem
+COPY native/longfellow/circuits/mdoc/circuits.zst native/longfellow/circuits/mdoc/params.tsv native/longfellow/circuits/mdoc/hash-semantic.tsv ./native/longfellow/circuits/mdoc/
+COPY native/bbs/demo/issuer-params.bin ./native/bbs/demo/issuer-params.bin
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 EXPOSE 3000
 CMD ["node", ".output/server/index.mjs"]

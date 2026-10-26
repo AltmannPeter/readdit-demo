@@ -28,10 +28,10 @@ use vega_age::table::sha256;
 use crate::circuit::{BIRTH_DATE, CIRCUIT_ID, DOC_TYPE, PROOF_SYSTEM, PUBLIC_INPUTS, SSC};
 use crate::error::Refusal;
 use crate::handover::{self, Handover};
-use crate::measure::{Peak, ms};
+use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, Statement, statement};
-use crate::{dates, hex, keys, mdoc, unb64url, unhex, x509};
+use crate::{dates, hex, keys, mdoc, threads, unb64url, unhex, x509};
 
 /// The device key as the wallet holds it: a P-256 JWK with its private part.
 #[derive(Clone, Debug, Deserialize)]
@@ -70,7 +70,7 @@ pub struct Credential {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct WitnessInput {
-  pub circuit_id: String,
+  pub system_id: String,
   pub credential_query_id: String,
   pub request: RequestObject,
   pub handover: Handover,
@@ -79,6 +79,9 @@ pub struct WitnessInput {
   pub secret_seed: String,
   /// r ‖ s, hex, from [`Prover::sign`].
   pub device_signature: String,
+  /// One thread per core for the witness and the proof; one thread when false or absent.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -87,6 +90,10 @@ pub struct WitnessData {
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
+  /// The heap held before the witness step, and the most it held during it (measure::Heap).
+  heap_base: usize,
+  witness_high: usize,
+  parallel: bool,
   /// What the witness step reports: its time, sizes and the public values it claims.
   pub summary: Json,
 }
@@ -95,6 +102,8 @@ pub struct Prover {
   pk: ProverKey,
   pub shapes_sha256: [u8; 32],
   pub load_ms: f64,
+  /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
+  pub keys_mb: Option<f64>,
 }
 
 fn bad(e: impl std::fmt::Display) -> Refusal {
@@ -127,8 +136,10 @@ fn public_inputs(values: &[String]) -> Json {
 impl Prover {
   /// Builds the prover key from `shapes.zst`.
   pub fn load(shapes: &Path) -> Result<Self, String> {
+    let _one = crate::measure::exclusive()?;
+    let heap = Heap::start();
     let loaded = keys::prover_key(shapes)?;
-    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms })
+    Ok(Prover { pk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, keys_mb: mb(heap.held()) })
   }
 
   pub fn info(&self) -> Json {
@@ -138,13 +149,14 @@ impl Prover {
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
       "circuits": [{
-        "circuit_id": CIRCUIT_ID,
+        "system_id": CIRCUIT_ID,
         "proof_system": PROOF_SYSTEM,
         "shapes_sha256": hex(&self.shapes_sha256),
         "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
       }],
       "load_ms": self.load_ms,
-      "threads": rayon::current_num_threads(),
+      "keys_mb": self.keys_mb,
+      "max_threads": threads::cores(),
     })
   }
 
@@ -179,8 +191,9 @@ impl Prover {
   /// Step 2: takes the credential apart, makes every holder-side check, and computes the witness.
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
-    if input.circuit_id != CIRCUIT_ID {
-      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.circuit_id)));
+    let heap = Heap::start();
+    if input.system_id != CIRCUIT_ID {
+      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
     let s: Statement = statement(&input.request, &input.credential_query_id, &input.handover)?;
     if input.credential.format != "mso_mdoc" || input.credential.doctype != DOC_TYPE {
@@ -258,7 +271,9 @@ impl Prover {
       presentation: Some(CorePresentation { public, device_signature }),
       nym: Some(NymPublic { verifier_input: s.verifier_input, pseudonym: nym }),
     };
-    let assignment = app::witness(&app::steps(&table), &core).map_err(|e| bad(format!("witness: {e:?}")))?;
+    let assignment = threads::pool(input.parallel)
+      .install(|| app::witness(&app::steps(&table), &core))
+      .map_err(|e| bad(format!("witness: {e:?}")))?;
     let witness_ms = ms(t);
 
     let mut results = Map::new();
@@ -274,11 +289,11 @@ impl Prover {
       "results": results,
       "public_inputs": public_inputs(&assignment.core.public_values.iter().map(|v| hex(&to_be(v))).collect::<Vec<_>>()),
       "counts": { "shared": shared, "precommitted": precommitted, "rest": rest, "public": public_count },
-      "metrics": { "witness_ms": witness_ms },
+      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads::pool(input.parallel).current_num_threads() },
     });
     Ok(WitnessData {
       presentation: Presentation {
-        circuit_id: CIRCUIT_ID.into(),
+        system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
         issuer_key_set: vec![m.document_signer.clone()],
         proof_time: now.text(),
@@ -287,6 +302,9 @@ impl Prover {
       assignment,
       results,
       witness_ms,
+      heap_base: heap.base(),
+      witness_high: heap.high(),
+      parallel: input.parallel,
       summary,
     })
   }
@@ -294,28 +312,43 @@ impl Prover {
   /// Step 3: prepares and proves from the witness, and encodes the presentation.
   pub fn prove(&self, w: WitnessData) -> Result<Json, String> {
     let peak = Peak::start();
+    let heap = Heap::start();
     let t = Instant::now();
     let (steps, core) = (w.assignment.steps(), w.assignment.core());
-    let prepared = app::prepare(&self.pk, &steps, &core).map_err(|e| format!("prepare: {e:?}"))?;
-    let (proof, _) = app::prove(&self.pk, &steps, &core, prepared).map_err(|e| format!("prove: {e:?}"))?;
+    let pool = threads::pool(w.parallel);
+    let (proof, _) = pool.install(|| {
+      let prepared = app::prepare(&self.pk, &steps, &core).map_err(|e| format!("prepare: {e:?}"))?;
+      app::prove(&self.pk, &steps, &core, prepared).map_err(|e| format!("prove: {e:?}"))
+    })?;
     let prove_ms = ms(t);
     let peak_mb = peak.read();
+    // The proof's working memory: the most the witness and prove steps held at once, above what
+    // was held before the witness step (the witness itself stays held between the two).
+    let heap_mb = mb(heap.high().max(w.witness_high).saturating_sub(w.heap_base));
+    // The proof's parts by field (two levels), when they add up to the bytes bincode writes.
+    let parts = crate::sizes::breakdown(&proof, 2).ok();
     let proof = bincode::serialize(&proof).map_err(|e| format!("serializing the proof: {e}"))?;
     let proof_bytes = proof.len();
+    let proof_parts = parts.filter(|(total, _)| *total == proof_bytes as u64).map(|(_, nodes)| crate::sizes::to_json(&nodes));
     let presentation = Presentation { proof, ..w.presentation }.encode()?;
     Ok(json!({
-      "circuit_id": CIRCUIT_ID,
+      "system_id": CIRCUIT_ID,
       "presentation": crate::b64url(&presentation),
       "results": w.results,
       "metrics": {
         "load_ms": self.load_ms,
+        "keys_mb": self.keys_mb,
         "witness_ms": w.witness_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
+        "heap_mb": heap_mb,
+        // The witness held from the witness step into the prove step (part of heap_mb).
+        "witness_mb": mb(heap.base().saturating_sub(w.heap_base)),
         "peak_memory_mb": peak_mb,
         "proof_bytes": proof_bytes,
+        "proof_parts": proof_parts,
         "presentation_bytes": presentation.len(),
-        "threads": rayon::current_num_threads(),
+        "threads": pool.current_num_threads(),
       },
     }))
   }

@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = ["crates/bbs-cd", "crates/bbs-cd-plugin", "crates/cd-tom256", "crates/cd-ecdsa-pop", "crates/cd-date-range", "crates/cd-pseudonym"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+repository = "https://github.com/sirosfoundation/bbs-cd-plugins"
+
+[workspace.dependencies]
+bbs-cd = { path = "crates/bbs-cd" }
+bbs-cd-plugin = { path = "crates/bbs-cd-plugin" }
+cd-tom256 = { path = "crates/cd-tom256" }
+cd-ecdsa-pop = { path = "crates/cd-ecdsa-pop" }
+cd-date-range = { path = "crates/cd-date-range" }
+cd-pseudonym = { path = "crates/cd-pseudonym" }
+bls12_381 = { version = "=0.9.0", default-features = false, features = ["groups", "pairings", "alloc", "experimental"] }
+p256 = { version = "0.13", features = ["ecdsa", "arithmetic"] }
+ark-ff = { version = "0.5", default-features = false }
+ark-ec = { version = "0.5", default-features = false }
+ark-std = { version = "0.5", default-features = false }
+num-bigint = "0.4"
+sha2 = "0.10"
+sha3 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand_chacha = "0.3"
+rayon = "1.10"
+serde_json = "1.0"
+
+[profile.release]
+debug = false
+
+# The proofs are compute-heavy: optimize dependencies even in test builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

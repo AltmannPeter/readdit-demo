@@ -1,0 +1,48 @@
+{
+  "caseName": "single committed scalar at the final index, disclosed messages before it (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "proof": "0000000000000001b5b332e884ef00752f67ac9b54b190fa73012a19fa082d2467fac750ad4dce5915fe308d9596bfe8510e23b75350d4788bff683a2a07b7f12ae2df23c1f2c9e833d6bf761a1683e96d61b549fbd8f233ddc50d465154b9f39843c0e061984c76a553cef481fb26cfaedbcf98066a01037698a4bfc86c67d9cffb40bca2466702887ca3365d894768bb95e274693006581c8c60fbfea88bcd0488e6c66b196aa975e8d912eb05c91cc1db5cb3212c00132c44be2e3d4e5a254063e09e322a8fe4a17cb2c801840622309accc55bd3b2756cb37c9be6a43626a8a9a9b487a5eee38b5d5c4cfea5e791ecf8466b0f5ab15752a8a0ca3824ffa2ea9be9f1784a56434224d4fdacfabd3eadc20a96c78a15963fff1e8f5d16f512474c7e6217953d4675c5f0f76b8f438405e2b4db66e17be8aaf7279fe0b7bfb7db419219c6a6c9cf0a77e6b2fedcca9b4cf744d3a52172543fd6da1f9858d6b8172e2a0bdc9268c1508d9ed2b4feec0378d1a9eb2af241ac9172a8d018bac5c8f1c6e28b489a6a5901b9c039f5d03591b7a750024c3287c32fdb53c30fe66335dcf8454cb107376e",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "6e616d65",
+      ""
+    ],
+    "commitments": [
+      "aaf7279fe0b7bfb7db419219c6a6c9cf0a77e6b2fedcca9b4cf744d3a52172543fd6da1f9858d6b8172e2a0bdc9268c1"
+    ],
+    "messageTypes": [
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "DISCLOSE",
+      "HIDE",
+      "DISCLOSE",
+      "COMMIT"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "2b9b5184c39c18c9f38055c280a3d16f5ab42389164a2e2e5f4a5414ed566061",
+    "challenge": "01b9c039f5d03591b7a750024c3287c32fdb53c30fe66335dcf8454cb107376e"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

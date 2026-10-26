@@ -1,0 +1,38 @@
+{
+  "caseName": "cross-branch equal outputs: octet string and its hash as a scalar",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "Sign",
+  "input": {
+    "SK": "0c6f4edb00958e883d9d821d937c33bedb65fa9c9b691f1a52298223a3e2a271",
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "header": "11223344556677889900aabbccddeeff",
+    "messages": [
+      "616263",
+      {
+        "scalar": "628c004658c4eef7b42fe563a5e5670e1805e7e052960ab1a38616e908a9d321"
+      },
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000005"
+      }
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "SCALAR"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "messageScalars": [
+      "628c004658c4eef7b42fe563a5e5670e1805e7e052960ab1a38616e908a9d321",
+      "628c004658c4eef7b42fe563a5e5670e1805e7e052960ab1a38616e908a9d321",
+      "0000000000000000000000000000000000000000000000000000000000000005"
+    ],
+    "domain": "2ff769d193168b67e9722e259242b398fa86c8140c62120275167f327e1b0582"
+  },
+  "expected": {
+    "output": "b8cb62f4cf9d75fbc2c2052b23a7d6aa509b1228931f6cbdabefab703a6ff40aed58baa03dfe249c3a319664ba81698b637aa29a525abdf210176d1500af7eb1ed2e14df4271ce96e94fafa8cf8ba4c6"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "caseName": "fixture key pair",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "KeyGen",
+  "input": {
+    "keyMaterial": "455453492d4242532d43442d56312066697874757265206b6579206d6174657269616c2c2033322b206f6374657473",
+    "keyInfo": "455453492d4242532d43442d5631206669787475726573"
+  },
+  "trace": {},
+  "expected": {
+    "output": {
+      "SK": "0c6f4edb00958e883d9d821d937c33bedb65fa9c9b691f1a52298223a3e2a271",
+      "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16"
+    }
+  }
+}

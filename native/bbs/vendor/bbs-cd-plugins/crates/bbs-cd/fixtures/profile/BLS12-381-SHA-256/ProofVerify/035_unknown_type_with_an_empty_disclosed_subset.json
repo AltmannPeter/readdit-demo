@@ -1,0 +1,42 @@
+{
+  "caseName": "unknown type with an empty disclosed subset",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "proof": "0000000000000000872f8391297209396f68cefb855197aed8eedab5deca55e66a0f244f2dbb11fe693a763bc745a671b6a691a28d6331e1852f9fafb369b6fe0c0a79884d4793ebc2cfdb9ae0e50543a285ddc9514d1e940ae9903e5dcbf01669a4a45606d80759a5755072f4cc20cb1e58c49f4549f171285dc8cbee54923d518e45e9f387f98bfa6d4da154174677c89e462d5233eeee6dfaa41e469c25d9ec902aafa68420da6d6a589969d9ede2195efb9e6441de6841665cd6a83bf3f79d1cc4cc15d00f3a078c46f6fcfba076625758dde279649219e5c778375160f7f21899d8ac4b565380f0a53c5d03712f68bf56d22ad84433133993f9b7d6b4cf6a760ba55bdb638bd114e8f3e4179c1debc03c94f9562e141dc5d6d4f48182c6175d9f22192f5e2f15f8e95df1b4cd68b152ac49cd9f822e1cf3acd7bc70016cbd8deea8ee15668d2be5577694365bfd561a5c920659849e0dba682e0e79a2a4899fb398bd007473d4747b90152a168877bf1b49eeafaed341140626d03907b2307a7fbf0dda563fb237cdb3bce1d8eac9165c25e2a4d97f341dbf41685caaad78086f4d43314f64f2139b2fe306b5082b53e49e12fc4014123a121fc956a3cd231849a419d2113c7e9d214247a587bdf3e9ac976969e82e209f2ee6911126f10a1815127a17086c7661dd3281de2e3c3fc324318bd657a252239cc5a50650255924b8ecf6830a693253d788e04e917620990dd47a5effbf",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [],
+    "commitments": [],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "UNKNOWN",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "HIDE",
+      "HIDE",
+      "HIDE",
+      "HIDE",
+      "HIDE",
+      "HIDE",
+      "HIDE",
+      "HIDE"
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "unknown type"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "comment": "Demo holder material for the mocked SIROS ID wallet: the nym_auth attestation in its bbs_cd encoding (docs/bbs_cd.md), issued by native/bbs/issuer (bbs-issuer). The device key and secret_seed are those of the mdoc holder it was issued for; the credential's secret_seed attribute is hash_to_scalar(secret_seed, \"nym_auth/v1/bbs-seed\"). Not secret: demo only.",
+  "holders": [
+    {
+      "credential": {
+        "format": "bbs_cd",
+        "issuer_params": "YKl9oi8H0CXjeH1OWiKeRsQJkVvO5in-ZNhysVu4dHaIwpSNKjh5u37TRscW_UEgIw4TEhlpnDSuKhXc4mYaX48eEgJmBKxpsyhJMdiDTBK9i6xjTj0CL7foT7uMedDt1ACTIGV1LmV1cm9wYS5lYy5ldWRpLm55bV9hdXRoLmJicy4xAwpkZXZpY2Vfa2V5ARpwMjU2LXBvaW50LXh5LmVjZHNhLXNoYTI1NgAGAGAACmJpcnRoX2RhdGUBC2RhdGUtcGFja2VkAAEAEQALc2VjcmV0X3NlZWQBFW55bS1zZWVkLmlzc3Vlci1rbm93bgABAP8A",
+        "messages": [
+          "00000000000000000000000000000000000000004144ac49731cfa3991c2b4ec",
+          "00000000000000000000000000000000000000007e68c51cf76843436540ce16",
+          "0000000000000000000000000000000000000000000000007e6f8bd7edebf045",
+          "000000000000000000000000000000000000000019d154c25260eac9e32c11c9",
+          "0000000000000000000000000000000000000000ae102c8902ad1ca04b378843",
+          "00000000000000000000000000000000000000000000000024e13ba96758ae34",
+          "000000000000000000000000000000000000000000000000000000000000a197",
+          "4b52ae3ee7311e419f62f666cc3359daf1d60b3cb8487ef6340ae10f6ef8d863"
+        ],
+        "schema_id": "eu.europa.ec.eudi.nym_auth.bbs.1",
+        "signature": "koJyYRzATFfTvzJk3kd7WNXzTBNR_fjdVxp1kAjicEfNST19InNqsNuuhbUOsCNQSWp_-JOk360d-7ZDG-BobFttvlwimie4eGxtSMpjx5U"
+      },
+      "device_key": {
+        "crv": "P-256",
+        "d": "-kIPShCJOixF-0VqWGTR-1WAcB_OQZQ401JiJyODC_c",
+        "kty": "EC",
+        "x": "fm-L1-3r8EV-aMUc92hDQ2VAzhZBRKxJcxz6OZHCtOw",
+        "y": "JOE7qWdYrjSuECyJAq0coEs3iEMZ0VTCUmDqyeMsEck"
+      },
+      "device_of": 0,
+      "secret_seed": "9835b2fa5fff78a12a2331813612c95a"
+    }
+  ]
+}

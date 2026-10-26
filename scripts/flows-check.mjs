@@ -6,29 +6,42 @@
 // error that is not one of the deliberate ones (ALLOWED, by status and route).
 // scripts/demo-flow.mjs stays the presentation order and its screenshots.
 //
-// Two phones, one person each (app/wallet/holder.ts, PHONES): the teen's phone holds the teen's
-// credential (born 2011), the adult's phone the adult's (born 1990). The dialog shows one at a time;
+// Three phones, one credential each (app/wallet/holder.ts, PHONES): the teen's phone holds the
+// teen's mdoc (born 2011), the adult's phone the adult's mdoc (born 1990), and the teen's BBS
+// phone the teen's BBS credential (bbs_cd, with the teen's device key and seed; group M). Every
+// request is the rulebook's zkp_req (v0.4): one query per source format, mso_mdoc and bbs_cd.
+//
+// The site accepts no proof system after a demo reset (the demo's start). resetDemo() switches
+// Vega on again, which every group but L and M assumes; group L runs Longfellow, group M BBS. The dialog shows one at a time;
 // Swap phone hands over while the QR code is on screen. Every dialog here picks its phone
 // explicitly (open). Any PIN unlocks the wallet.
 //
 // The server is started for this run with two settings; the run checks them first:
 //   NUXT_VP_SESSION_TTL_S=40        requests expire after 40 s, so the expiry paths take a minute
-//   READDIT_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
-// For example:
-//   NUXT_VP_SESSION_TTL_S=40 READDIT_TEST_FAULTS=1 PORT=3000 node .output/server/index.mjs > /tmp/server.log 2>&1 &
+//   COMMUNITY_TEST_FAULTS=1           the test-only hook that fails one addon call (server/utils/test-faults.ts)
+// and scratch measurements and profiles files, since every verified presentation of the run is
+// measured and group P clears both (NUXT_MEASUREMENTS_FILE, NUXT_PROFILES_FILE; the defaults are the
+// demo's own .data/measurements.jsonl and .data/profiles.jsonl). Group N adds and removes its own
+// test issuer in the trusted issuers (NUXT_TRUSTED_ISSUERS_FILE) and leaves the others. For example:
+//   NUXT_MEASUREMENTS_FILE=/tmp/community-measurements.jsonl NUXT_PROFILES_FILE=/tmp/community-profiles.jsonl \
+//   NUXT_VP_SESSION_TTL_S=40 COMMUNITY_TEST_FAULTS=1 PORT=3000 \
+//     node .output/server/index.mjs > /tmp/server.log 2>&1 &
 //   node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log \
 //     [--startup .output/server/index.mjs] [--shots demo-shots]
 //
 // --server-log  the server's output: each refused presentation must be logged with its rule
-// --startup     also starts the built server without the addon and checks that it refuses to run
-// --shots       saves the screenshots of this run (19-29) there
+// --startup     also starts the built server without the addons and checks that it refuses to run,
+//               and that it starts with any one of them
+// --shots       saves the screenshots of this run (19-33) there
+// --only        runs only the named self-contained groups, for example --only M
 // (needs: npm i --no-save playwright && npx playwright install chromium)
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, request as httpRequest } from 'playwright'
+import { CompactEncrypt, importJWK } from 'jose'
 
 const argv = process.argv.slice(2)
 const opt = (name) => {
@@ -38,14 +51,34 @@ const opt = (name) => {
 const SERVER_LOG = opt('--server-log')
 const STARTUP = opt('--startup')
 const SHOTS = opt('--shots')
+// --only K,M: run only these groups (E F H I J K L M N P V G), after the preconditions, in the full run's
+// order whatever the order given. G needs a session from a group before it (P, V or K, say).
+const ONLY = opt('--only')?.split(',')
 const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
 const anyPin = () => String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
 const root = fileURLToPath(new URL('../', import.meta.url))
 const [teen, adult] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet.json'), 'utf8')).holders
+// The teen's BBS credential (bbs_cd, docs/bbs_cd.md), with the teen's device key and seed.
+const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs.json'), 'utf8')).holders
+// A teen's mdoc from another issuer, a Document Signer the site does not trust at start (group N).
+const otherIssuer = JSON.parse(readFileSync(join(root, 'scripts/fixtures/other-issuer-wallet.json'), 'utf8'))
+const [otherTeen] = otherIssuer.holders
+// The teen's BBS credential from another BBS issuer (scripts/fixtures/other-issuer-wallet-bbs.json).
+const [otherTeenBbs] = JSON.parse(readFileSync(join(root, 'scripts/fixtures/other-issuer-wallet-bbs.json'), 'utf8')).holders
+const otherBbsKey = Buffer.from(otherTeenBbs.credential.issuer_params, 'base64url').subarray(1, 97)
+const otherBbsFingerprint = createHash('sha256').update(otherBbsKey).digest('hex')
+const otherFingerprint = createHash('sha256')
+  .update(Buffer.from(otherIssuer.document_signer_pem.replace(/-----[A-Z ]+-----|\s/g, ''), 'base64'))
+  .digest('hex')
+const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
+const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:vega:nym_auth:v1'
 const LONGFELLOW = 'urn:circuits:longfellow:nym_auth:v1'
-const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_proof_system_values: ['vega-v1'], circuit_id_values: [VEGA] } } })
+const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
+const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } } })
+/** The zkp_req query over `source` (mso_mdoc or bbs_cd) in a request. */
+const queryOf = (request, source) => request.dcql_query.credentials.find((q) => q.meta.source_format === source)
 if (SHOTS) mkdirSync(SHOTS, { recursive: true })
 
 // ---------------------------------------------------------------------------------------------
@@ -94,22 +127,56 @@ async function newSession(ctx, body) {
   return r.body
 }
 /** The wallet's request_uri POST; returns the decoded Request Object. */
-async function fetchRequest(ctx, session) {
-  const r = await call(ctx, 'POST', requestUriOf(session.authorizationUrl), { form: { wallet_nonce: randomUUID(), wallet_metadata: WALLET_METADATA } })
+async function fetchRequest(ctx, session, walletMetadata = WALLET_METADATA) {
+  const r = await call(ctx, 'POST', requestUriOf(session.authorizationUrl), { form: { wallet_nonce: randomUUID(), ...(walletMetadata && { wallet_metadata: walletMetadata }) } })
   if (r.status !== 200) throw new Error(`request_uri ${answer(r)}`)
   return payloadOf(r.text.trim())
 }
 /** The phone's native steps for `wallet`, through the site's /api/wallet routes. */
-async function present(ctx, request, wallet) {
-  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, device_key: wallet.device_key } })
+async function present(ctx, request, wallet, circuit = VEGA) {
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
   if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
-    data: { request, circuit_id: VEGA, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
+    data: { request, system_id: circuit, credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s.body.device_signature },
   })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
-const respond = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
+/** bbs_cd: one prove call with the BBS credential and its device key. */
+async function presentBbs(ctx, request, wallet = teenBbs) {
+  const q = queryOf(request, 'bbs_cd')
+  const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key } })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
+const bbsForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [queryOf(request, 'bbs_cd').id]: [presentation] }) })
+/** The site's accepted proof systems (/tech's switches). */
+const accept = async (proofSystem, yes) => {
+  const ctx = await client()
+  const r = await call(ctx, 'POST', '/api/tech/accept', { data: { proof_system: proofSystem, accept: yes } })
+  await ctx.dispose()
+  return r
+}
+/** direct_post.jwt, as the wallet does it: the form's parameters as the payload of a JWE to the
+ *  request's key (vp_token as a JSON object, when it parses). `to`: the request whose key to use. */
+async function encryptForm(request, form, to = request) {
+  const jwk = to.client_metadata.jwks.keys[0]
+  const payload = { state: form.state }
+  if (form.error !== undefined) payload.error = form.error
+  if (form.vp_token !== undefined) {
+    try {
+      payload.vp_token = JSON.parse(form.vp_token)
+    } catch {
+      payload.vp_token = form.vp_token
+    }
+  }
+  const key = await importJWK(jwk, jwk.alg)
+  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(payload))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
+  return { response: jwe }
+}
+const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, form) })
+/** Unencrypted direct_post form fields. */
+const respondPlain = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
 const vpForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [request.dcql_query.credentials[0].id]: [presentation] }) })
 const poll = (ctx, id) => call(ctx, 'GET', `/api/vp/session/${id}`)
 const complete = (ctx, id) => call(ctx, 'POST', `/api/vp/session/${id}/complete`)
@@ -127,11 +194,20 @@ async function accounts() {
   await ctx.dispose()
   return o.body.accounts
 }
-async function resetDemo() {
+/** Resets the demo, then switches on `accepted` (Vega unless said otherwise). */
+async function resetDemo(accepted = ['vega-v1']) {
   const ctx = await client()
   await call(ctx, 'POST', '/api/demo/reset')
+  for (const id of accepted) await call(ctx, 'POST', '/api/tech/accept', { data: { proof_system: id, accept: true } })
   await ctx.dispose()
 }
+const overview = async () => {
+  const ctx = await client()
+  const o = (await call(ctx, 'GET', '/api/tech/overview')).body
+  await ctx.dispose()
+  return o
+}
+const acceptedNow = async () => (await call(page.request, 'GET', '/api/tech/overview')).body.acceptedProofSystems
 async function armFault(step) {
   const ctx = await client()
   const r = await call(ctx, 'POST', '/api/test/fault', { data: { step } })
@@ -167,7 +243,7 @@ const TAMPER = {
     out[at] = out[at] === 0x30 ? 0x31 : out[at] - 1
     return out
   },
-  'another circuit_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
+  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -191,14 +267,21 @@ const consoleErrors = []
 const allowedSeen = new Set()
 /** Sign calls the server refused with 401 over the whole run: none, since any PIN unlocks. */
 let signRefused = 0
+let lastEncrypted = 'vp_token'
 let ctxBrowser
 let page
 let net = []
 const sessionIds = []
 
-async function openPage() {
+/** A fresh browser page. The site dialog hides the demo phone at first (the main flow scans with a
+ *  real phone); the flows here drive the demo phone, so it is shown unless `demoPhone` is false. */
+async function openPage({ demoPhone = true } = {}) {
   if (ctxBrowser) await ctxBrowser.close()
   ctxBrowser = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.5, baseURL: BASE })
+  if (demoPhone)
+    await ctxBrowser.addInitScript(() => {
+      if (localStorage.getItem('community-demo-phone') == null) localStorage.setItem('community-demo-phone', '1')
+    })
   page = await ctxBrowser.newPage()
   net = []
   page.on('console', (m) => {
@@ -216,6 +299,17 @@ async function openPage() {
     else consoleErrors.push(`[${flow}] ${m.text()} at ${path || m.location().url}`)
   })
   page.on('pageerror', (e) => consoleErrors.push(`[${flow}] page error: ${e.message}`))
+  // The response is a JWE; the phone's "Response encrypted" report, sent just before it, says
+  // whether it holds a vp_token or an error.
+  page.on('request', (r) => {
+    if (!r.url().includes('/api/wallet/trace')) return
+    try {
+      const b = r.postDataJSON()
+      if (b?.step === 'encrypt') lastEncrypted = b.data?.error ? `error=${b.data.error}` : 'vp_token'
+    } catch {
+      /* not JSON */
+    }
+  })
   page.on('response', async (r) => {
     const u = new URL(r.url())
     if (!u.pathname.startsWith('/api/')) return
@@ -223,7 +317,8 @@ async function openPage() {
     if (entry.path === '/api/wallet/sign' && entry.status === 401) signRefused++
     if (u.pathname.startsWith('/api/vp/response/')) {
       const form = new URLSearchParams(r.request().postData() ?? '')
-      entry.sent = form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.encrypted = !!form.get('response')
     }
     net.push(entry)
     if (entry.method === 'POST' && entry.path === '/api/vp/session' && entry.status === 200) {
@@ -306,13 +401,18 @@ async function expectVerification() {
 
 const TEEN = "Teen's phone"
 const ADULT = "Adult's phone"
+const TEEN_BBS = "Teen's BBS phone"
 const phoneLabel = async () => ((await page.locator('[data-phone-label]').innerText()) ?? '').split('\n')[0].trim()
-/** Swap to the named phone if another is on screen, while the QR code is shown. */
+/** Swap to the named phone if another is on screen, while the QR code is shown: Swap phone hands
+ *  over to the next of the three phones. */
 async function usePhone(name) {
-  if ((await phoneLabel()) === name) return
-  await page.getByRole('button', { name: 'Swap phone' }).click()
-  await page.locator('[data-phone-label]', { hasText: name }).waitFor()
-  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  for (let k = 0; k < 3 && (await phoneLabel()) !== name; k++) {
+    const was = await phoneLabel()
+    await page.getByRole('button', { name: 'Swap phone' }).click()
+    await page.waitForFunction((w) => document.querySelector('[data-phone-label]')?.innerText.split('\n')[0].trim() !== w, was)
+    await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  }
+  if ((await phoneLabel()) !== name) throw new Error(`no phone named ${name}`)
 }
 /** Opens a wallet dialog with `button`, on the named phone. */
 async function open(button, phoneName = TEEN) {
@@ -320,7 +420,22 @@ async function open(button, phoneName = TEEN) {
   await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
   await usePhone(phoneName)
 }
+/** A button in the header (it has no Sign up or Log in since 2026-10-23). */
 const headerButton = (name) => page.getByRole('banner').getByRole('button', { name, exact: true })
+/** The page's Sign up or Log in (the home page's and the open communities' notice). On a page
+ *  without them (a gated community, a post) the logo goes home first, without a reload, so the
+ *  phone on screen stays. */
+async function siteButton(name) {
+  const b = page.getByRole('main').getByRole('button', { name, exact: true }).first()
+  if (!(await b.isVisible().catch(() => false))) {
+    await page.getByRole('banner').locator('a[data-home]').click()
+    await page.waitForURL((u) => u.pathname === '/')
+    await b.waitFor({ timeout: 10_000 })
+  }
+  return b
+}
+/** Logged out: the header shows no account menu. */
+const waitLoggedOut = () => page.waitForFunction(() => !document.querySelector('header [data-user-menu]'), null, { timeout: 10_000 })
 /** The id of the session the dialog created after `before`. */
 async function newSessionId(before) {
   for (let i = 0; i < 100 && lastSession() === before; i++) await page.waitForTimeout(100)
@@ -357,7 +472,7 @@ async function closeDialog(how = 'escape') {
 }
 /** Sign up or log in through the dialog, start to end, without screenshots. */
 async function signIn(name, expectText, phoneName = TEEN) {
-  await open(headerButton(name), phoneName)
+  await open(await siteButton(name), phoneName)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -379,38 +494,59 @@ const me = async () => (await call(page.request, 'GET', '/api/me')).body
 
 // ---------------------------------------------------------------------------------------------
 
-async function startupWithoutAddon() {
-  begin('S16', 'the server refuses to start without the addon')
-  const child = spawn(process.execPath, [STARTUP], {
-    env: { ...process.env, PORT: '0', NUXT_VEGA_ADDON: '/nonexistent/readdit-vega.node' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+/** Starts the built server with `env`; resolves with its exit code (or 'running' once `until` shows in its output) and the output. */
+function startServer(env, until) {
+  const child = spawn(process.execPath, [STARTUP], { env: { ...process.env, PORT: '0', ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
-  child.stdout.on('data', (d) => (out += d))
-  child.stderr.on('data', (d) => (out += d))
-  const code = await new Promise((r) => {
+  return new Promise((resolve) => {
     const t = setTimeout(() => {
       child.kill()
-      r('timeout')
-    }, 30_000)
+      resolve({ code: 'timeout', out })
+    }, 60_000)
+    const seen = () => {
+      if (until && until.every((x) => out.includes(x))) {
+        clearTimeout(t)
+        child.kill()
+        resolve({ code: 'running', out })
+      }
+    }
+    child.stdout.on('data', (d) => ((out += d), seen()))
+    child.stderr.on('data', (d) => ((out += d), seen()))
     child.on('exit', (c) => {
       clearTimeout(t)
-      r(c)
+      resolve({ code: c, out })
     })
   })
-  eq('exit code', code, 1)
-  check('says why and what to run', out.includes('Readdit cannot start without its proof backend') && out.includes('npm run build:native'), out.trim().split('\n').slice(0, 2).join(' | '))
+}
+
+async function startupWithoutAddon() {
+  begin('S16', 'the server refuses to start without any proof backend')
+  const none = { NUXT_VEGA_ADDON: '/nonexistent/community-vega.node', NUXT_LONGFELLOW_ADDON: '/nonexistent/community-longfellow.node', NUXT_BBS_ADDON: '/nonexistent/community-bbs.node' }
+  let r = await startServer(none)
+  eq('exit code', r.code, 1)
+  check('says why and what to run', r.out.includes('Community cannot start without a proof backend') && r.out.includes('npm run build:native'), r.out.trim().split('\n').slice(-2).join(' | '))
+  begin('S16b', 'the server starts with one backend')
+  for (const [name, env] of [['vega', 'NUXT_VEGA_ADDON'], ['longfellow', 'NUXT_LONGFELLOW_ADDON'], ['bbs', 'NUXT_BBS_ADDON']]) {
+    const only = { ...none }
+    delete only[env]
+    r = await startServer(only, [`[${name}] prover and verifier ready`, ...['vega', 'longfellow', 'bbs'].filter((x) => x !== name).map((x) => `[${x}] not loaded`)])
+    eq(`with the ${name} addon only: running`, r.code, 'running')
+  }
 }
 
 async function preconditions() {
   begin('pre', 'the server is started for this run')
   const ctx = await client()
+  await resetDemo([])
+  const nothing = await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'signin', intent: 'signup' } })
+  expectAnswer('nothing accepted after a reset: no request', nothing, 503, 'none_accepted')
+  await resetDemo()
   const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   const fault = await call(ctx, 'POST', '/api/test/fault', { data: { step: 'none' } })
   await ctx.dispose()
   const ok = [
     check('requests expire within a minute (NUXT_VP_SESSION_TTL_S)', s.expiresIn <= 60, `expiresIn ${s.expiresIn}`),
-    check('the test fault hook is on (READDIT_TEST_FAULTS=1)', fault.status === 400, answer(fault)),
+    check('the test fault hook is on (COMMUNITY_TEST_FAULTS=1)', fault.status === 400, answer(fault)),
   ]
   if (ok.includes(false)) throw new Error('start the server as the header of scripts/flows-check.mjs says')
   return s.expiresIn
@@ -436,7 +572,7 @@ async function groupA() {
   await goto('/')
   m = mark()
   await open(page.getByRole('main').getByRole('button', { name: 'Log in', exact: true }))
-  await visible('dialog: "Log in to Readdit"', site().getByRole('heading', { name: 'Log in to Readdit' }))
+  await visible('dialog: "Log in to Community"', site().getByRole('heading', { name: 'Log in to Community' }))
   await guideIs('signin-qr')
   await guideSays('Log-in')
   const voteSession = await newSessionId(undefined)
@@ -450,7 +586,7 @@ async function groupA() {
   m = mark()
   await goto('/c/teenspace')
   await pageShows('c/teenspace is for ages 13 to 17')
-  await pageShows('The same step logs you in to Readdit with a pseudonym.')
+  await pageShows('The same step logs you in to Community with a pseudonym.')
   check('no "Log in to view"', !(await page.getByText(/Log in to view/).count()))
   check('one button: Verify age with wallet', (await page.getByRole('button', { name: 'Verify age with wallet' }).count()) === 1)
   await guideIs('age-signin')
@@ -463,7 +599,7 @@ async function groupA() {
   begin('S1', 'log-in with no account')
   m = mark()
   await goto('/')
-  await open(headerButton('Log in'))
+  await open(await siteButton('Log in'))
   await guideIs('signin-qr')
   await scan()
   await readRequest()
@@ -471,7 +607,7 @@ async function groupA() {
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('No account', 30_000)
-  await dialogShows('There is no Readdit account for this wallet. Sign up to create one.')
+  await dialogShows('There is no Community account for this wallet. Sign up to create one.')
   await phoneShows('Success!')
   await guideIs('no-account')
   check('the presentation was verified (vp_token 200)', has(m, 'POST', '/api/vp/response/:id', 200, 'vp_token'))
@@ -494,7 +630,7 @@ async function groupA() {
   await phoneShows('Sharing Cancelled')
   await phoneShows('You cancelled sharing your credentials.')
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('declined')
   check('the wallet answered access_denied (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=access_denied'))
   check('no native step ran', count(m, 'POST', '/api/wallet/sign') === 0 && count(m, 'POST', '/api/wallet/prove') === 0)
@@ -528,7 +664,7 @@ async function groupA() {
   await phone().getByRole('button', { name: 'Cancel' }).click()
   await phoneShows('Sharing Cancelled')
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('pin-cancelled')
   check('the wallet answered access_denied (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=access_denied'))
   check('the device key did not sign', count(m, 'POST', '/api/wallet/sign') === 0)
@@ -562,8 +698,9 @@ async function groupA() {
   begin('H2', 'log-out')
   await page.getByRole('banner').getByText(`u/${created.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
-  check('header shows Sign up and Log in', await headerButton('Sign up').isVisible())
+  await waitLoggedOut()
+  check('no Sign up or Log in in the header', !(await headerButton('Sign up').count()) && !(await headerButton('Log in').count()))
+  check('the page offers Sign up and Log in', await (await siteButton('Sign up')).isVisible() && await (await siteButton('Log in')).isVisible())
   check('server: no account for this browser', (await me()).account === null)
   await guideIs('start')
 
@@ -578,8 +715,8 @@ async function groupA() {
   begin('S2', 'sign-up when the pseudonym already has an account')
   await page.getByRole('banner').getByText(`u/${created.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Sign up').waitFor()
-  await open(headerButton('Sign up'))
+  await waitLoggedOut()
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -760,7 +897,7 @@ async function groupC(created) {
   await mod.getByRole('button', { name: 'Ban user' }).first().click()
   await mod.getByText('Banned', { exact: true }).first().waitFor()
   await page.bringToFront()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await guideIs('banned')
   check('the login ended', (await me()).account === null)
   const comments = (await call(page.request, 'GET', '/api/comments?postId=p10')).body
@@ -768,7 +905,7 @@ async function groupC(created) {
   check('the proven age stays with the account', !!(await accounts())[0].birthDateRange?.ge)
 
   begin('S3', 'a banned account at log-in')
-  await open(headerButton('Log in'))
+  await open(await siteButton('Log in'))
   await guideIs('signin-qr')
   await guideSays('Log-in after the ban')
   await scan()
@@ -783,7 +920,7 @@ async function groupC(created) {
   await closeDialog('button')
 
   begin('S4', 'a banned account at sign-up')
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await guideIs('signin-qr')
   await guideSays('Sign-up after the ban')
   await scan()
@@ -830,6 +967,7 @@ async function groupD(ttl) {
   await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
   await usePhone(ADULT)
   await guideComesToSay('The phones were swapped')
+  for (let k = 0; k < 30 && !has(m, 'POST', '/api/vp/session/:id/phone', 200); k++) await page.waitForTimeout(100)
   check('the swap is recorded for the technical view (200)', has(m, 'POST', '/api/vp/session/:id/phone', 200))
   await shot('30-afterdark-phone-swapped')
   await scan()
@@ -854,7 +992,7 @@ async function groupD(ttl) {
   await readRequest()
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: (await accounts())[0].pseudonym } })
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows('Account banned', 30_000)
@@ -964,22 +1102,22 @@ async function groupE() {
   begin('W6', 'a request the wallet cannot satisfy: no circuit in common')
   // The wallet's capabilities, as a wallet without the Vega circuit would report them.
   await page.route('**/api/wallet/capabilities', (route) =>
-    route.fulfill({ json: { circuits: [{ circuit_id: LONGFELLOW, proof_system: 'longfellow-libzk-v1' }] } }),
+    route.fulfill({ json: { circuits: [{ system_id: LONGFELLOW, proof_system: 'longfellow-libzk-v1' }], schemes: [] } }),
   )
   let m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
   await phoneShows('This type of request is not supported.')
   await guideIs('unsupported')
-  await guideSays('no circuit in common')
+  await guideSays('no circuit or scheme in common')
   await openDetails()
   await guideSays(`the wallet runs ${LONGFELLOW}`)
   await shot('21-unsupported-request')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('not-completed')
   await guideSays('invalid_request')
   check('the wallet answered invalid_request (200)', has(m, 'POST', '/api/vp/response/:id', 200, 'error=invalid_request'))
@@ -988,11 +1126,13 @@ async function groupE() {
   await page.unroute('**/api/wallet/capabilities')
 
   // A verifier at the same host asking for a pseudonym configuration the wallet does not support:
-  // the real request, changed and signed again by a certificate for readdit.example.
-  const signer = await testSigner('readdit.example')
+  // the real request, changed and signed again by a certificate for community.example.
+  const signer = await testSigner('community.example')
   const variants = [
-    ['verifier_id_type semantic', (r) => ({ ...r, params: { ...r.params, verifier_id_type: 'semantic' } }), 'verifier_id_type semantic'],
-    ['account-recovery-ssc without verifier_context', (r) => ({ ...r, params: { config: 'account-recovery-ssc', verifier_id_type: 'x509_san_dns' } }), 'verifier_context is required by account-recovery-ssc'],
+    ['pseudonym ver 2', (r) => ({ ...r, params: { ...r.params, ver: 2 } }), 'pseudonym ver 2: the rulebook defines 1'],
+    ['the BBS prf over the mdoc', (r) => ({ ...r, params: { ...r.params, prf: 'hashdh-bls12381g1' } }), 'prf hashdh-bls12381g1 is not defined for mso_mdoc'],
+    ['verifier_id_type, which v0.4 leaves to the trust framework', (r) => ({ ...r, params: { ...r.params, verifier_id_type: 'x509_san_dns' } }), 'pseudonym parameter verifier_id_type is not defined by the rulebook'],
+    ['account-recovery-ssc without verifier_context', (r) => ({ ...r, params: { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256' } }), 'verifier_context is required by account-recovery-ssc'],
   ]
   for (const [what, change, reason] of variants) {
     begin('W7', `an unsupported pseudonym request: ${what}`)
@@ -1000,12 +1140,12 @@ async function groupE() {
       const res = await route.fetch()
       const request = payloadOf((await res.text()).trim())
       const q = request.dcql_query.credentials[0]
-      q.req = q.req.map((r) => (r.id === 'pseudonym-v1-sha256' ? change(r) : r))
+      q._req = q._req.map((r) => (r.fn_id === 'pseudonym' ? change(r) : r))
       await route.fulfill({ status: 200, contentType: 'application/oauth-authz-req+jwt', body: await signer.sign(request) })
     })
     m = mark()
     const before = lastSession()
-    await open(headerButton('Sign up'))
+    await open(await siteButton('Sign up'))
     await expectFresh('signin-qr', before)
     await scan()
     await readRequest()
@@ -1027,7 +1167,7 @@ async function groupE() {
     await route.fulfill({ status: 200, contentType: 'application/oauth-authz-req+jwt', body: await stranger.sign(payloadOf((await res.text()).trim())) })
   })
   m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await phoneShows('Verifier is not Trusted')
   await guideIs('wallet-error')
@@ -1045,9 +1185,9 @@ async function groupE() {
   const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
   const request = await fetchRequest(ctx, s)
   const q = request.dcql_query.credentials[0]
-  q.req[0].params = { config: 'account-recovery-ssc', verifier_id_type: 'x509_san_dns', verifier_context: 'readdit' }
+  q._req[0].params = { config: 'account-recovery-ssc', ver: 1, prf: 'sha-256', verifier_context: 'community' }
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
-    data: { request, circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) },
+    data: { request, system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) },
   })
   expectAnswer('server: /api/wallet/prove', p, 400, 'unsupported_config')
   await ctx.dispose()
@@ -1112,13 +1252,29 @@ async function groupF() {
   const uri = requestUriOf(s.authorizationUrl)
   expectAnswer('request_uri: PUT', await call(ctx, 'PUT', uri), 405, 'method_not_allowed')
   expectAnswer('request_uri: wallet_metadata not JSON', await call(ctx, 'POST', uri, { form: { wallet_metadata: '{oops' } }), 400, 'invalid_wallet_metadata')
-  expectAnswer('request_uri: circuit_id_values not a list', await call(ctx, 'POST', uri, { form: { wallet_metadata: JSON.stringify({ vp_formats_supported: { circuit_zk: { circuit_id_values: 5 } } }) } }), 400, 'invalid_wallet_metadata')
+  expectAnswer('request_uri: system_id_values not a list', await call(ctx, 'POST', uri, { form: { wallet_metadata: JSON.stringify({ vp_formats_supported: { zkp_req: { system_id_values: 5 } } }) } }), 400, 'invalid_wallet_metadata')
   expectAnswer('request_uri: vp_formats_supported null', await call(ctx, 'POST', uri, { form: { wallet_metadata: '{"vp_formats_supported":null}' } }), 400, 'invalid_wallet_metadata')
   eq('request_uri: the session is still unused after the refusals', (await poll(ctx, s.id)).body.status, 'waiting')
   const request = await fetchRequest(ctx, s)
   expectAnswer('response_uri: no body', await call(ctx, 'POST', request.response_uri), 400, 'state_mismatch')
   expectAnswer('response_uri: JSON instead of a form', await call(ctx, 'POST', request.response_uri, { data: { state: request.state } }), 400, 'state_mismatch')
   expectAnswer('complete before an answer', await complete(ctx, s.id), 409, 'not_verified')
+  begin('S21', 'an unencrypted or undecryptable response (direct_post.jwt)')
+  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.jwt', 1, 'ECDH-ES'])
+  {
+    const p0 = await present(ctx, request, teen)
+    expectAnswer('response_uri: an unencrypted vp_token', await respondPlain(ctx, request, vpForm(request, p0.presentation)), 400, 'unencrypted')
+    expectAnswer('response_uri: response is not a JWE', await respondPlain(ctx, request, { response: 'not.a.jwe' }), 400, 'invalid_response')
+    const o = await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'signup' }))
+    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, vpForm(request, p0.presentation), o) }), 400, 'invalid_response')
+    eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
+    check('the server log names the unencrypted response', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused an unencrypted response`))
+    const d = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const rd = await fetchRequest(ctx, d)
+    expectAnswer('response_uri: an unencrypted error response is accepted', await respondPlain(ctx, rd, { state: rd.state, error: 'access_denied' }), 200)
+    eq('it ends the session as declined', (await sessionView(d.id)).outcome?.reason, 'denied')
+  }
+  begin('S14', 'malformed bodies at each route (continued)')
   expectAnswer('response_uri: vp_token null', await respond(ctx, request, { state: request.state, vp_token: 'null' }), 200)
   const nullView = await sessionView(s.id)
   eq('response_uri: vp_token null is refused, not a crash', [nullView.status, rejectedTrace(nullView)?.code], ['failed', 'vp_token'])
@@ -1132,8 +1288,8 @@ async function groupF() {
     ['sign: no body', '/api/wallet/sign', undefined],
     ['sign: no device key', '/api/wallet/sign', { request }],
     ['prove: no body', '/api/wallet/prove', undefined],
-    ['prove: no request', '/api/wallet/prove', { circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
-    ['prove: a request without a credential query', '/api/wallet/prove', { request: { ...request, dcql_query: {} }, circuit_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
+    ['prove: no request', '/api/wallet/prove', { system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
+    ['prove: a request without a credential query', '/api/wallet/prove', { request: { ...request, dcql_query: {} }, system_id: VEGA, credential: teen.credential, secret_seed: teen.secret_seed, device_signature: '00' }],
   ]
   for (const [what, path, data] of wallet) expectAnswer(what, await call(ctx, 'POST', path, data === undefined ? {} : { data }), 400, 'bad_request')
   expectAnswer('sign: any PIN signs', await call(ctx, 'POST', '/api/wallet/sign', { data: { request, pin: '000000', device_key: teen.device_key } }), 200)
@@ -1166,7 +1322,7 @@ async function groupF() {
     'a changed results.nym': ['public_input:results.nym'],
     'a results key that is not the request handle': ['results'],
     'proof_time changed by one second': ['public_input:proof_time'],
-    'another circuit_id': ['circuit'],
+    'another system_id': ['circuit'],
   }
   for (const [what, tamper] of Object.entries(TAMPER)) {
     const t = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -1205,13 +1361,13 @@ async function groupH() {
   begin('S15a', 'the verifier fails when a request starts')
   await armFault('verifier.info')
   let m = mark()
-  await headerButton('Sign up').click()
+  await (await siteButton('Sign up')).click()
   await dialogShows('Verification is not available right now. Try again later.')
   await dialogShows('Not completed')
   await guideIs('unavailable')
   await guideSays('could not start the request')
   check('session: 503', has(m, 'POST', '/api/vp/session', 503))
-  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[vega] verifier.info failed: test fault'))
+  check('the server log names the failure', !SERVER_LOG || serverLog().includes('[circuits] verifier.info failed: test fault'))
   await shot('25-backend-unavailable')
   await scan()
   await phoneShows('Unsupported QR code')
@@ -1223,14 +1379,14 @@ async function groupH() {
   await closeDialog('escape')
 
   begin('S15b', 'the prover fails when the phone loads (capabilities)')
-  // Twice: $fetch retries a GET that answers 503 once.
-  await armFault('prover.info')
-  await armFault('prover.info')
+  // Four times: the route asks both provers (Vega and BBS) and answers 503 only when neither
+  // answers, and $fetch retries a GET that answers 503 once.
+  for (let k = 0; k < 4; k++) await armFault('prover.info')
   m = mark()
-  await headerButton('Sign up').click()
+  await (await siteButton('Sign up')).click()
   await phoneShows('Connection Error')
   await guideIs('wallet-error')
-  await guideSays('could not reach the prover')
+  await guideSays('could not reach the provers')
   check('capabilities: 503', has(m, 'GET', '/api/wallet/capabilities', 503))
   await phone().getByRole('button', { name: 'Close' }).click()
   await scan()
@@ -1243,7 +1399,7 @@ async function groupH() {
     begin(id, `the prover fails at ${step}`)
     await armFault(step)
     m = mark()
-    await open(headerButton('Sign up'))
+    await open(await siteButton('Sign up'))
     await scan()
     await readRequest()
     await phone().getByRole('button', { name: 'Share' }).click()
@@ -1264,7 +1420,7 @@ async function groupH() {
   begin('S15e', 'the verifier fails at verification')
   await armFault('verifier.verify')
   m = mark()
-  await open(headerButton('Sign up'))
+  await open(await siteButton('Sign up'))
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1310,7 +1466,7 @@ async function groupI() {
   await guideIs('unmet')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed')
-  await dialogShows('Nothing was shared with Readdit.')
+  await dialogShows('Nothing was shared with Community.')
   await guideIs('not-completed')
   await guideSays('No account was created or logged in, and c/afterdark stays closed')
   check('access_denied, once', since(m).filter((e) => e.path === '/api/vp/response/:id' && e.sent === 'error=access_denied').length === 1)
@@ -1349,7 +1505,7 @@ async function groupI() {
   begin('G3', 'an existing account logs in with the age verified')
   await page.getByRole('banner').getByText(`u/${account.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/teenspace')
   await guideIs('age-signin')
   await open(page.getByRole('button', { name: 'Verify age with wallet' }))
@@ -1369,7 +1525,7 @@ async function groupI() {
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: account.pseudonym } })
   await ctx.dispose()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await goto('/c/teenspace')
   await guideIs('age-signin')
@@ -1393,19 +1549,20 @@ async function groupJ() {
   await resetDemo()
   await openPage()
 
-  begin('C0', 'two phones, one credential each')
-  await open(headerButton('Sign up'), TEEN)
+  begin('C0', 'three phones, one credential each')
+  await open(await siteButton('Sign up'), TEEN)
   check('the dialog names the phone', (await phoneLabel()) === TEEN, await phoneLabel())
   await phone().getByRole('button', { name: 'Change view' }).click()
   let cards = phone().getByRole('button', { name: /^Open Age and pseudonym details, birth date/ })
   await cards.first().waitFor()
   let labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
-  eq("the teen's phone holds the teen's credential only", labels.join(' | '), 'Open Age and pseudonym details, birth date 14/03/2011')
+  eq("the teen's phone holds the teen's mdoc", labels.join(' | '), 'Open Age and pseudonym details, birth date 14/03/2011')
+  check("and no BBS credential", !(await phone().getByRole('button', { name: /^Open Age and pseudonym \(BBS\) details/ }).count()))
   check('no card shows an expiry date (the credentials do not expire)', !(await phone().getByText(/Expiry Date/).count()))
   await cards.first().click()
   await phoneShows('14/03/2011')
   await guideIs('credential')
-  await guideSays('one Age and pseudonym credential')
+  await guideSays('The wallet holds one Age and pseudonym credential')
   await phone().getByRole('button', { name: 'Back' }).click()
   await phone().getByRole('button', { name: 'Change view' }).click()
   await usePhone(ADULT)
@@ -1416,16 +1573,28 @@ async function groupJ() {
   eq("the adult's phone holds the adult's credential only", labels.join(' | '), 'Open Age and pseudonym details, birth date 20/05/1990')
   await shot('27-adult-phone')
   await phone().getByRole('button', { name: 'Change view' }).click()
+  await usePhone(TEEN_BBS)
+  check('the third phone is named, with the age from its credential', (await page.locator('[data-phone-label]').innerText()).replace(/\s+/g, ' ').includes(`${TEEN_BBS} · 15`), await page.locator('[data-phone-label]').innerText())
+  await phone().getByRole('button', { name: 'Change view' }).click()
+  cards = phone().getByRole('button', { name: /^Open Age and pseudonym/ })
+  await cards.first().waitFor()
+  labels = await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
+  eq("the teen's BBS phone holds the teen's BBS credential only", labels.join(' | '), 'Open Age and pseudonym (BBS) details, birth date 14/03/2011')
+  await cards.first().click()
+  await guideIs('credential')
+  await guideSays('This is the BBS form of the Age and pseudonym credential')
+  await phone().getByRole('button', { name: 'Back' }).click()
+  await phone().getByRole('button', { name: 'Change view' }).click()
   await closeDialog('escape')
   await signIn('Sign up', 'Account created: u/', TEEN)
   const teenAccount = (await me()).account
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Sign up').waitFor()
+  await waitLoggedOut()
 
   begin('C1', "sign-up on the adult's phone")
   let m = mark()
-  await open(headerButton('Sign up'), ADULT)
+  await open(await siteButton('Sign up'), ADULT)
   await scan()
   await readRequest()
   await guideSays('born 20 May 1990')
@@ -1464,7 +1633,7 @@ async function groupJ() {
   // Logged out, the combined request lets the adult's phone try c/teenspace.
   await page.getByRole('banner').getByText(`u/${adultAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/teenspace')
   m = mark()
   await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
@@ -1498,15 +1667,15 @@ async function groupJ() {
   const ctx = await client()
   await call(ctx, 'POST', '/api/mod/ban', { data: { pseudonym: adultAccount.pseudonym } })
   await ctx.dispose()
-  await page.getByText('has been banned from Readdit').waitFor({ timeout: 10_000 })
+  await page.getByText('has been banned from Community').waitFor({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Dismiss' }).click()
   await goto('/')
   await signIn('Log in', `Logged in as u/${teenAccount.handle}`, TEEN)
   check('the teen account logs in', (await me()).account?.handle === teenAccount.handle)
   await page.getByRole('banner').getByText(`u/${teenAccount.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
-  await open(headerButton('Log in'), ADULT)
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), ADULT)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1522,10 +1691,21 @@ async function groupJ() {
 
 async function groupG() {
   begin('T', 'the technical view shows the sessions')
+  if (!ctxBrowser) await openPage()
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.waitForLoadState('networkidle')
-  await tech.getByText('Vega addon, in process').waitFor()
+  await tech.getByRole('heading', { name: 'Proof systems' }).waitFor()
+  check('no addon badge', !(await tech.getByText(/addons?, in process/).count()))
+  const icons = tech.getByRole('button', { name: /^(Vega|Longfellow|BBS) (prover|verifier)$/ })
+  eq('six service icons: a prover and a verifier per addon', await icons.count(), 6)
+  check('every service is up', (await tech.locator('[data-service] .bg-emerald-500').count()) === 6)
+  check('no service detail until an icon is clicked', !(await tech.locator('[data-service-detail]').count()))
+  await tech.getByRole('button', { name: 'Longfellow prover' }).click()
+  await tech.locator('[data-service-detail]', { hasText: 'Circuits read once at start' }).waitFor()
+  check('the Longfellow prover: its circuits and their memory', /Circuits read once at start: \d+ ms, [\d.]+ MB/.test(await tech.locator('[data-service-detail]').textContent()))
+  await tech.getByRole('button', { name: 'Longfellow prover' }).click()
+  check('a second click closes it', !(await tech.locator('[data-service-detail]').count()))
   await tech.getByText('Capability negotiation').waitFor()
   check('the technical view loads', true)
   await tech.close()
@@ -1547,20 +1727,22 @@ async function groupK() {
   await resetDemo()
   await openPage()
 
-  begin('K1', 'c/france logged out: join with its own pseudonym, without a Readdit account')
+  begin('K1', 'c/france logged out: join with its own pseudonym, without a Community account')
   await goto('/c/france')
-  await pageShows('c/france asks for proof of human')
+  await pageShows('c/france is fully anonymous')
+  await pageShows('Prove that you are a real person. Your pseudonym will be unique to /france. Association to your main account is optional. One account per person.')
   await guideIs('community-join')
-  await guideSays('No Readdit account is needed')
+  await guideSays('is fully anonymous. The person proves they are real with a pseudonym for france.community.example')
+  await guideSays('No Community account is needed')
   check('no c/france posts before joining', !(await page.locator('a[href^="/c/france/p"]').count()))
   let m = mark()
   await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
   await guideIs('community-qr')
-  await guideSays('x509_san_dns:france.readdit.example')
+  await guideSays('x509_san_dns:france.community.example')
   await scan()
   await readRequest()
-  await phoneShows('france.readdit.example')
-  await phoneShows('Specific to france.readdit.example')
+  await phoneShows('france.community.example')
+  await phoneShows('Specific to france.community.example')
   await guideIs('community-consent')
   await shot('31-france-consent')
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1574,7 +1756,7 @@ async function groupK() {
   await closeFromPhone()
   check('c/france posts shown', (await page.locator('a[href^="/c/france/p"]').count()) > 0)
   await guideIs('community-member')
-  check('no Readdit account', (await me()).account === null)
+  check('no Community account', (await me()).account === null)
   const frTeen = (await me()).communities.france
   eq('the c/france account', frTeen?.handle, done.handle)
   await visible('header: the c/france account', page.getByRole('banner').getByText(`u/${frTeen.handle}`))
@@ -1592,7 +1774,7 @@ async function groupK() {
   check('stored as a c/france account, not linked', frRecord?.community === 'france' && frRecord.linkedTo === null, JSON.stringify(frRecord))
   expectAnswer('server: a comment in c/france without a c/france account', await call(await client(), 'POST', '/api/comments', { data: { postId: 'p22', body: 'hi' } }), 403, 'registration_required')
 
-  begin('K3', 'logged in to Readdit, joining c/france is a choice: link, or log out first')
+  begin('K3', 'logged in to Community, joining c/france is a choice: link, or log out first')
   await goto('/')
   // The home page's Sign up: the header shows the c/france account instead of the buttons.
   await open(page.getByRole('main').getByRole('button', { name: 'Sign up', exact: true }), TEEN)
@@ -1604,22 +1786,22 @@ async function groupK() {
   await closeFromPhone()
   const teenMain = (await me()).account
   check('logged in: no c/france membership until linked', !(await me()).communities.france)
-  check('the Readdit pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
+  check('the Community pseudonym differs from the c/france one', teenMain.pseudonym !== frRecord.pseudonym)
   await goto('/c/france')
   await guideIs('community-join')
-  await guideSays('join and link the two, or log out and join separately')
-  await visible('page: logged in as …', page.getByText(`You are logged in as u/${teenMain.handle}.`))
+  await guideSays('or join separately, which logs out first')
+  await visible(`page: Link to u/${teenMain.handle}`, page.getByRole('button', { name: `Link to u/${teenMain.handle}` }))
   check('no plain Join with wallet while logged in', !(await page.getByRole('button', { name: 'Join with wallet' }).count()))
-  await visible('Log out and join separately', page.getByRole('button', { name: 'Log out and join separately' }))
+  await visible('Join separately', page.getByRole('button', { name: 'Join separately', exact: true }))
   await shot('32-france-link-choice')
   m = mark()
-  await open(page.getByRole('button', { name: `Join and link to u/${teenMain.handle}` }), TEEN)
+  await open(page.getByRole('button', { name: `Link to u/${teenMain.handle}` }), TEEN)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
   await enterPin(anyPin())
   await dialogShows(`In c/france as u/${frTeen.handle}`, 30_000)
-  await dialogShows('Linked to your Readdit account.')
+  await dialogShows('Linked to your Community account.')
   await guideIs('community-linked')
   done = (await complete(page.request, lastSession())).body
   check('server: logged in and linked', done.ok === true && done.kind === 'logged_in' && done.linked === true, JSON.stringify(done))
@@ -1627,56 +1809,56 @@ async function groupK() {
   check('linked', (await me()).communities.france?.linked === true)
   await guideIs('community-member')
 
-  begin('K4', 'one c/france account per Readdit account, one Readdit account per c/france account')
+  begin('K4', 'one c/france account per Community account, one Community account per c/france account')
   const ctx = await client()
   {
-    // Log in with the teen's Readdit account, linked in K3.
+    // Log in with the teen's Community account, linked in K3.
     const s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
     const request = await fetchRequest(ctx, s)
     const p = await present(ctx, request, teen)
     await respond(ctx, request, vpForm(request, p.presentation))
-    eq("the teen's Readdit account logs in", (await complete(ctx, s.id)).body.kind, 'logged_in')
+    eq("the teen's Community account logs in", (await complete(ctx, s.id)).body.kind, 'logged_in')
   }
   expectAnswer('server: logged in, a join must choose to link', await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'france' } }), 400, 'link_required')
   let r = await joinOverHttp(ctx, adult)
-  eq("the request's client_id", r.request.client_id, 'x509_san_dns:france.readdit.example')
+  eq("the request's client_id", r.request.client_id, 'x509_san_dns:france.community.example')
   eq("the adult's wallet for the teen's account", r.completion, { ok: false, kind: 'other_pseudonym', handle: frTeen.handle, community: 'france' })
   const ctx2 = await client()
   await signInOverHttp(ctx2, adult)
   r = await joinOverHttp(ctx2, teen)
-  check("the teen's c/france account for the adult's Readdit account: refused", r.completion.ok === false && r.completion.kind === 'linked_elsewhere', JSON.stringify(r.completion))
+  check("the teen's c/france account for the adult's Community account: refused", r.completion.ok === false && r.completion.kind === 'linked_elsewhere', JSON.stringify(r.completion))
   r = await joinOverHttp(ctx2, adult)
   check("the adult's own c/france account: created and linked", r.completion.ok === true && r.completion.kind === 'created' && r.completion.linked === true, JSON.stringify(r.completion))
   expectAnswer('server: a community without its own pseudonym', await call(ctx2, 'POST', '/api/vp/session', { data: { purpose: 'community', community: 'photography' } }), 400, 'bad_request')
   await ctx.dispose()
   await ctx2.dispose()
   list = await accounts()
-  eq('four accounts: two Readdit, two c/france', list.map((a) => (a.community ? 'c' : 'r')).sort().join(''), 'ccrr')
+  eq('four accounts: two Community, two c/france', list.map((a) => (a.community ? 'c' : 'r')).sort().join(''), 'ccrr')
   {
-    // /mod groups each c/france account under the Readdit account it is linked to.
+    // /mod groups each c/france account under the Community account it is linked to.
     const mod = await ctxBrowser.newPage()
     await mod.goto('/mod')
     const groups = mod.locator('section').filter({ has: mod.getByRole('heading', { name: 'Accounts' }) }).locator(':scope > ul > li')
     await groups.filter({ hasText: `u/${frTeen.handle}` }).waitFor()
     eq('/mod: two groups', await groups.count(), 2)
     const teenGroup = groups.filter({ hasText: `u/${teenMain.handle}` })
-    check("/mod: the teen's c/france account under the teen's Readdit account", (await teenGroup.count()) === 1 && (await teenGroup.getByText(`u/${frTeen.handle}`).count()) === 1)
+    check("/mod: the teen's c/france account under the teen's Community account", (await teenGroup.count()) === 1 && (await teenGroup.getByText(`u/${frTeen.handle}`).count()) === 1)
     await mod.close()
   }
 
-  begin('K5', 'a ban in c/france leaves the Readdit account')
+  begin('K5', 'a ban in c/france leaves the Community account')
   const mod = await client()
   await call(mod, 'POST', '/api/mod/ban', { data: { pseudonym: frRecord.pseudonym } })
   await mod.dispose()
   await goto('/c/france')
   await pageShows('Your c/france account is banned')
   await guideIs('community-banned')
-  eq('the Readdit account is still logged in', (await me()).account?.handle, teenMain.handle)
+  eq('the Community account is still logged in', (await me()).account?.handle, teenMain.handle)
   await goto('/c/france/p22')
   check('the banned account’s comment is hidden', !(await page.getByText('Same in our town.').count()))
   await page.getByRole('banner').getByText(`u/${teenMain.handle}`).click()
   await page.getByRole('button', { name: 'Log out' }).click()
-  await headerButton('Log in').waitFor()
+  await waitLoggedOut()
   await goto('/c/france')
   await open(page.getByRole('button', { name: 'Join with wallet' }), TEEN)
   await scan()
@@ -1689,7 +1871,7 @@ async function groupK() {
   const mod2 = await client()
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: frRecord.pseudonym } })
 
-  begin('K6', 'a ban of the Readdit account bans its linked c/france account; unbanning lifts both')
+  begin('K6', 'a ban of the Community account bans its linked c/france account; unbanning lifts both')
   list = await accounts()
   const adultMain = list.find((a) => !a.community && a.handle !== teenMain.handle)
   const adultFr = list.find((a) => a.community === 'france' && a.linkedTo === adultMain?.handle)
@@ -1697,21 +1879,21 @@ async function groupK() {
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: teenMain.pseudonym } })
   list = await accounts()
   const frBanned = list.find((a) => a.pseudonym === frRecord.pseudonym).banned
-  check('the linked c/france account is banned with it', frBanned?.cascade === true && frBanned.reason === `Readdit account u/${teenMain.handle} banned`, JSON.stringify(frBanned))
+  check('the linked c/france account is banned with it', frBanned?.cascade === true && frBanned.reason === `Community account u/${teenMain.handle} banned`, JSON.stringify(frBanned))
   check("the adult's accounts are untouched", !list.find((a) => a.handle === adultMain.handle).banned && !list.find((a) => a.handle === adultFr.handle).banned)
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultFr.pseudonym } })
-  check("a c/france ban leaves the adult's Readdit account", !(await accounts()).find((a) => a.handle === adultMain.handle).banned)
+  check("a c/france ban leaves the adult's Community account", !(await accounts()).find((a) => a.handle === adultMain.handle).banned)
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: teenMain.pseudonym } })
   list = await accounts()
-  check('unbanning the Readdit account lifts the cascaded ban', !list.find((a) => a.handle === teenMain.handle).banned && !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
+  check('unbanning the Community account lifts the cascaded ban', !list.find((a) => a.handle === teenMain.handle).banned && !list.find((a) => a.pseudonym === frRecord.pseudonym).banned)
   check("but not a c/france account's own ban", !!list.find((a) => a.handle === adultFr.handle).banned)
-  // A banned c/france account stays banned when its Readdit account is banned and unbanned.
+  // A banned c/france account stays banned when its Community account is banned and unbanned.
   await call(mod2, 'POST', '/api/mod/ban', { data: { pseudonym: adultMain.pseudonym } })
   await call(mod2, 'POST', '/api/mod/unban', { data: { pseudonym: adultMain.pseudonym } })
   check("the c/france account's own ban survives", (await accounts()).find((a) => a.handle === adultFr.handle).banned?.reason === 'Community rules')
   await mod2.dispose()
 
-  begin('K7', 'logged in, "Log out and join separately" joins without linking')
+  begin('K7', 'logged in, "Join separately" logs out and joins without linking')
   await resetDemo()
   await openPage()
   await goto('/')
@@ -1719,8 +1901,8 @@ async function groupK() {
   const teenMain2 = (await me()).account
   await goto('/c/france')
   await guideIs('community-join')
-  await open(page.getByRole('button', { name: 'Log out and join separately' }), TEEN)
-  check('logged out of Readdit', (await me()).account === null)
+  await open(page.getByRole('button', { name: 'Join separately', exact: true }), TEEN)
+  check('logged out of Community', (await me()).account === null)
   await scan()
   await readRequest()
   await phone().getByRole('button', { name: 'Share' }).click()
@@ -1731,9 +1913,930 @@ async function groupK() {
   check('server: created, not linked', done.ok === true && done.kind === 'created' && !done.linked, JSON.stringify(done))
   await closeFromPhone()
   const sep = await me()
-  check('a c/france member, not linked, not logged in to Readdit', sep.account === null && sep.communities.france?.linked === false, JSON.stringify(sep))
+  check('a c/france member, not linked, not logged in to Community', sep.account === null && sep.communities.france?.linked === false, JSON.stringify(sep))
   check('stored unlinked', (await accounts()).find((a) => a.handle === done.handle)?.linkedTo === null)
-  check('the Readdit account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
+  check('the Community account still exists', !!(await accounts()).find((a) => a.handle === teenMain2.handle))
+}
+
+// ---- M. BBS: zkp_req over bbs_cd next to mso_mdoc (rulebook v0.4; docs/bbs_cd.md) ----
+
+async function groupM() {
+  await resetDemo()
+  await openPage()
+
+  begin('M1', "the site's accepted proof systems, switched in /tech")
+  let o = (await call(page.request, 'GET', '/api/tech/overview')).body
+  eq('accepted: Vega (switched on by this run)', o.acceptedProofSystems, ['vega-v1'])
+  check('all three backends loaded', o.services.bbsProver.up && o.services.bbsVerifier.up && o.services.prover.up && o.services.verifier.up && o.services.lfProver.up && o.services.lfVerifier.up)
+  eq('server: turning off the last proof system is allowed', (await accept('vega-v1', false)).body.acceptedProofSystems, [])
+  await accept('vega-v1', true)
+  expectAnswer('server: an unknown proof system', await accept('vega-v2', true), 400, 'bad_request')
+  {
+    const ctx = await client()
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const req = await fetchRequest(ctx, s)
+    eq('Vega only: one zkp_req query, over mso_mdoc', req.dcql_query.credentials.map((q) => `${q.format}:${q.meta.source_format}`), ['zkp_req:mso_mdoc'])
+    eq('zkp_req metadata: Vega only', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } })
+    check('no credential_sets', !req.dcql_query.credential_sets)
+    await ctx.dispose()
+  }
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator(`[data-accept="${BBS_SYSTEM}"]`).check()
+  for (let k = 0; k < 30 && !(await call(page.request, 'GET', '/api/tech/overview')).body.acceptedProofSystems.includes(BBS_SYSTEM); k++) await page.waitForTimeout(100)
+  o = (await call(page.request, 'GET', '/api/tech/overview')).body
+  eq('/tech: BBS switched on', o.acceptedProofSystems, ['vega-v1', BBS_SYSTEM])
+  await tech.close()
+
+  begin('M2', "both accepted: the request offers both source formats as alternatives; the teen signs up on the teen's BBS phone")
+  let m = mark()
+  await open(await siteButton('Sign up'), TEEN_BBS)
+  await scan()
+  await readRequest()
+  const view = await sessionView(lastSession())
+  let req = view.request
+  eq('two zkp_req queries', req.dcql_query.credentials.map((q) => `${q.id}:${q.format}:${q.meta.source_format}`), ['nym_attestation:zkp_req:mso_mdoc', 'nym_attestation_bbs:zkp_req:bbs_cd'])
+  eq('their meta', req.dcql_query.credentials.map((q) => q.meta), [{ source_format: 'mso_mdoc', doctype_value: 'eu.europa.ec.eudi.nym_auth.1' }, { source_format: 'bbs_cd', schema_id_value: 'eu.europa.ec.eudi.nym_auth.bbs.1' }])
+  eq('credential_sets: one of them', req.dcql_query.credential_sets, [{ options: [['nym_attestation'], ['nym_attestation_bbs']] }])
+  eq('the mdoc _req: prf sha-256', req.dcql_query.credentials[0]._req, [{ fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } }])
+  eq('the BBS _req: prf hashdh-bls12381g1', req.dcql_query.credentials[1]._req, [{ fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'hashdh-bls12381g1' } }])
+  eq('the offer: Vega and BBS', view.offer, { zkp_req: { proof_system_values: ['vega-v1', BBS_SYSTEM], system_id_values: [VEGA, BBS_SCHEME] } })
+  eq("the BBS phone's wallet_metadata: the BBS scheme only", view.walletMetadata.vp_formats_supported, { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } })
+  eq('sent: tailored to the BBS scheme', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } })
+  check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
+  await phoneShows('Request to Share Data')
+  await phoneShows('Specific to community.example')
+  await guideIs('consent')
+  await openDetails()
+  await guideSays('hashdh-bls12381g1')
+  await guideSays('BBS nym_auth v1 (bbs-cd-plugins-v0.1)')
+  await shot('33-bbs-consent')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await guideIs('pin')
+  await guideSays('ecdsa-pop plugin proves')
+  await enterPin(anyPin())
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  await expectVerification()
+  await guideSays('the BBS addon')
+  check('one prove call, no sign call', has(m, 'POST', '/api/wallet/prove', 200) && !has(m, 'POST', '/api/wallet/sign', 200))
+  let sv = await sessionView(lastSession())
+  eq('the answered query', sv.answered, 'nym_attestation_bbs')
+  eq('the scheme used', sv.scheme?.system_id, BBS_SCHEME)
+  const proveTrace = sv.trace.find((t) => t.step === 'prove')?.data
+  check('the prove trace has each part', proveTrace?.format === 'bbs_cd' && proveTrace.metrics.ecdsa_pop_ms > 0 && proveTrace.metrics.parts?.bbs_proof > 0, JSON.stringify(proveTrace?.metrics?.parts))
+  check('the ZkpPresentation wraps the envelope', proveTrace?.metrics?.presentation_bytes > proveTrace?.metrics?.proof_bytes, `${proveTrace?.metrics?.presentation_bytes} > ${proveTrace?.metrics?.proof_bytes}`)
+  eq('plugins in the BBS request', proveTrace?.statement?.plugins, ['ecdsa-pop/0.1', 'pseudonym/0.1'])
+  await closeFromPhone()
+  const bbsAccount = (await me()).account
+  let list = await accounts()
+  eq('stored as a BBS account', list.find((a) => a.handle === bbsAccount.handle)?.format, 'bbs_cd')
+  check('keyed by the 48-byte G1 point', /^[0-9a-f]{96}$/.test(bbsAccount.pseudonym), bbsAccount.pseudonym)
+
+  begin('M3', "the teen's BBS phone stays on screen: c/teenspace proves 13–17 with date-range")
+  // A link, not a reload: the phone on screen stays until the page reloads.
+  await page.click('a[href="/c/teenspace"]')
+  m = mark()
+  await page.getByRole('button', { name: 'Verify age with wallet' }).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  eq('the same phone, without a swap', await phoneLabel(), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('answered with the BBS credential', sv.answered, 'nym_attestation_bbs')
+  eq('plugins, with date-range', sv.trace.find((t) => t.step === 'prove')?.data?.statement?.plugins, ['ecdsa-pop/0.1', 'pseudonym/0.1', 'date-range/0.1'])
+  await closeFromPhone()
+  check('the age range is recorded on the BBS account', !!(await me()).account?.birthDateRange, JSON.stringify((await me()).account?.birthDateRange))
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+
+  begin('M4', "the teen's mdoc gives another account: the same seed, another PRF")
+  await page.getByRole('banner').getByText(`u/${bbsAccount.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), TEEN)
+  await scan()
+  await readRequest()
+  check('one credential on this phone: no Switch credential', !(await phone().getByRole('button', { name: /Switch credential/ }).count()))
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('No account', 30_000)
+  eq('answered with the mdoc', (await sessionView(lastSession())).answered, 'nym_attestation')
+  await closeDialog('escape')
+
+  begin('M5', "BBS only: the mdoc phones cannot answer; the teen's BBS phone logs in to the same BBS account")
+  eq('server: Vega off', (await accept('vega-v1', false)).body.acceptedProofSystems, [BBS_SYSTEM])
+  m = mark()
+  await open(await siteButton('Log in'), ADULT)
+  await scan()
+  await readRequest()
+  await phoneShows('Unsupported Request')
+  await guideIs('unsupported')
+  await openDetails()
+  await guideSays('the request asks for zkp_req bbs_cd')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+  await open(await siteButton('Log in'), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Unsupported Request')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+  await open(await siteButton('Log in'), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows(`Logged in as u/${bbsAccount.handle}`, 30_000)
+  await closeFromPhone()
+
+  begin('M6', 'c/france with BBS: its own pseudonym, linked when chosen')
+  await goto('/c/france')
+  await open(page.getByRole('button', { name: `Link to u/${bbsAccount.handle}` }), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phoneShows('Specific to france.community.example')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Joined c/france as u/…"', site().getByText(/^Joined c\/france as u\//), 30_000)
+  await closeFromPhone()
+  const fr = (await me()).communities.france
+  check('linked, another pseudonym', fr?.linked === true && fr.handle !== bbsAccount.handle, JSON.stringify(fr))
+
+  begin('M7', 'a ban sticks to the BBS pseudonym (known-offender matching)')
+  const mod = await client()
+  await call(mod, 'POST', '/api/mod/ban', { data: { pseudonym: bbsAccount.pseudonym } })
+  await mod.dispose()
+  await goto('/')
+  await waitLoggedOut()
+  await open(await siteButton('Sign up'), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Account banned', 30_000)
+  await closeDialog('button')
+
+  begin('M8', 'over HTTP: the BBS verifier refuses replays and tampering')
+  const ctx = await client()
+  let s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+  req = await fetchRequest(ctx, s)
+  eq('BBS only: one zkp_req query over bbs_cd', req.dcql_query.credentials.map((q) => q.meta.source_format), ['bbs_cd'])
+  let p = await presentBbs(ctx, req)
+  check('prove: the pseudonym is a 48-byte G1 point', /^[0-9a-f]{96}$/.test(p.results.nym), p.results.nym)
+  eq('prove: the system', p.system_id, BBS_SCHEME)
+  expectAnswer('prove: without a device key', await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, credential_query_id: 'nym_attestation_bbs', credential: teenBbs.credential } }), 400, 'bad_request')
+  {
+    const other = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, credential_query_id: 'nym_attestation_bbs', credential: teenBbs.credential, device_key: adult.device_key } })
+    expectAnswer("prove: another phone's device key", other, 400, 'bad_credential')
+  }
+  // The ZkpPresentation: system_id, proof (the BCDP envelope), issuer_key_set (the 96-byte issuer
+  // key), results (the 48-byte pseudonym); each changed in place.
+  const envLen = p.metrics.proof_bytes
+  const issuerPk = Buffer.from(teenBbs.credential.issuer_params, 'base64url').subarray(1, 97)
+  const bbsTamper = [
+    ['a flipped byte in the BBS proof', (b) => b.indexOf(Buffer.from('BCDP')) + 40, ['proof_invalid', 'presentation']],
+    ['a flipped byte in the ecdsa-pop proof', (b) => b.indexOf(Buffer.from('BCDP')) + Math.floor(envLen / 2), ['proof_invalid', 'presentation']],
+    ['a flipped byte in the pseudonym proof', (b) => b.indexOf(Buffer.from('BCDP')) + envLen - 60, ['proof_invalid', 'presentation']],
+    ['another pseudonym in results', (b, q) => b.lastIndexOf(Buffer.from(q.results.nym, 'hex')) + 47, ['results']],
+    ['another key in issuer_key_set', (b) => b.lastIndexOf(issuerPk) + 50, ['issuer_key_set']],
+    ['another system_id', (b) => b.indexOf(Buffer.from(BBS_SCHEME)) + BBS_SCHEME.length - 1, ['scheme']],
+  ]
+  for (const [what, at, codes] of bbsTamper) {
+    const s2 = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r2 = await fetchRequest(ctx, s2)
+    const p2 = await presentBbs(ctx, r2)
+    const b2 = Buffer.from(p2.presentation, 'base64url')
+    b2[at(b2, p2)] ^= 1
+    await respond(ctx, r2, bbsForm(r2, b2.toString('base64url')))
+    const v = await sessionView(s2.id)
+    const refused = v.trace.find((t) => t.step === 'verify' && t.label === 'Proof rejected')?.data
+    check(`refused: ${what} (${codes.join(' or ')})`, v.status === 'failed' && codes.includes(refused?.code), refused ? `${refused.code}: ${refused.reason}` : v.status)
+  }
+  // The genuine presentation, for another request: refused (nonce and handover differ).
+  {
+    const s3 = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r3 = await fetchRequest(ctx, s3)
+    await respond(ctx, r3, bbsForm(r3, p.presentation))
+    const refused = (await sessionView(s3.id)).trace.find((t) => t.label === 'Proof rejected')?.data
+    eq('refused: a presentation made for another request', refused?.code, 'proof_invalid')
+  }
+  let r = await respond(ctx, req, bbsForm(req, p.presentation))
+  check('the genuine one: processed (200)', r.status === 200, answer(r))
+  check('verified', (await sessionView(s.id)).status === 'verified')
+  expectAnswer('a replay', await respond(ctx, req, bbsForm(req, p.presentation)), 400, 'already_answered')
+  // A vp_token that answers both queries, or the mso_mdoc one with a BBS presentation.
+  // Without wallet_metadata: one zkp_req offer holds both systems (a wallet that lists only Vega
+  // would be sent Vega only).
+  await accept('vega-v1', true)
+  s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+  req = await fetchRequest(ctx, s, null)
+  eq('both: one offer with both systems', req.client_metadata.vp_formats_supported, { zkp_req: { proof_system_values: ['vega-v1', BBS_SYSTEM], system_id_values: [VEGA, BBS_SCHEME] } })
+  p = await presentBbs(ctx, req)
+  await respond(ctx, req, { state: req.state, vp_token: JSON.stringify({ nym_attestation: [p.presentation], nym_attestation_bbs: [p.presentation] }) })
+  eq('refused: two answers', (await sessionView(s.id)).trace.find((t) => t.label === 'Proof rejected')?.data?.code, 'vp_token')
+  s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+  req = await fetchRequest(ctx, s, null)
+  p = await presentBbs(ctx, req)
+  await respond(ctx, req, { state: req.state, vp_token: JSON.stringify({ nym_attestation: [p.presentation] }) })
+  const wrong = (await sessionView(s.id)).trace.find((t) => t.label === 'Proof rejected')?.data
+  check('refused: a BBS presentation as the mdoc answer', !!wrong, wrong ? `${wrong.code}: ${wrong.reason}` : 'accepted')
+  await ctx.dispose()
+
+  begin('M10', "a switch in /tech applies to a QR code already on screen")
+  await accept(BBS_SYSTEM, false)
+  await goto('/')
+  await open(await siteButton('Log in'), ADULT)
+  eq('Vega only when the QR code appears', (await sessionView(lastSession())).offer.zkp_req.system_id_values, [VEGA])
+  await accept(BBS_SYSTEM, true)
+  await accept('vega-v1', false)
+  await scan()
+  await readRequest()
+  await phoneShows('Unsupported Request')
+  let sv10 = await sessionView(lastSession())
+  check('the request the wallet fetched offers BBS only', sv10.request.dcql_query.credentials.map((q) => q.meta.source_format).join() === 'bbs_cd', JSON.stringify(sv10.request.dcql_query.credentials.map((q) => q.meta.source_format)))
+  check('the trace says why', sv10.trace.some((t) => t.label === 'Offer updated: the accepted proof systems changed'))
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await closeDialog('escape')
+
+  begin('M11', 'a format switched off after the scan: its presentation is refused')
+  await accept('vega-v1', true)
+  {
+    const c = await client()
+    const s11 = await newSession(c, { purpose: 'signin', intent: 'signup' })
+    const r11 = await fetchRequest(c, s11)
+    const p11 = await present(c, r11, adult)
+    await accept('vega-v1', false)
+    await respond(c, r11, vpForm(r11, p11.presentation))
+    const v = await sessionView(s11.id)
+    const refused = v.trace.find((t) => t.label === 'Proof rejected')?.data
+    check('refused: mso_mdoc is no longer accepted', v.status === 'failed' && refused?.code === 'format', refused ? `${refused.code}: ${refused.reason}` : v.status)
+    await c.dispose()
+  }
+
+  begin('M9', 'a demo reset switches every proof system off')
+  await resetDemo([])
+  eq('accepted', await acceptedNow(), [])
+}
+
+// ---- L. Longfellow: the second circuit over the same mdoc (mso_mdoc; SPEC.md L) ----
+
+async function groupL() {
+  await resetDemo([])
+  await openPage()
+
+  begin('L1', 'nothing accepted (the demo\'s start): the dialog stops before the QR code')
+  let m = mark()
+  await (await siteButton('Sign up')).click()
+  await dialogShows('No proof accepted')
+  await dialogShows('Community does not accept any proof yet. Switch one on in the technical view, then try again.')
+  await guideIs('none-accepted')
+  check('session: 503', has(m, 'POST', '/api/vp/session', 503))
+  await closeDialog('escape')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await visible('/tech says nothing is accepted', tech.locator('[data-none-accepted]'))
+  check('/tech: three proof systems to tick', (await tech.locator('[data-accept]').count()) === 3)
+  await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).check()
+  for (let k = 0; k < 30 && !(await acceptedNow()).includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('/tech: Longfellow switched on', await acceptedNow(), [LONGFELLOW_SYSTEM])
+  await tech.close()
+
+  begin('L2', 'Longfellow only: the teen signs up; the request offers the Longfellow circuit')
+  m = mark()
+  await open(await siteButton('Sign up'), TEEN)
+  await scan()
+  await readRequest()
+  let sv = await sessionView(lastSession())
+  eq('zkp_req with the Longfellow circuit only', sv.request.client_metadata.vp_formats_supported.zkp_req, { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] })
+  eq('one zkp_req query, over mso_mdoc', sv.request.dcql_query.credentials.map((q) => `${q.format}:${q.meta.source_format}`), ['zkp_req:mso_mdoc'])
+  await phoneShows('Request to Share Data')
+  await guideIs('consent')
+  await openDetails()
+  await guideSays('Longfellow nym_auth v1 (longfellow-libzk-v1)')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  await expectVerification()
+  await guideSays('the Longfellow addon')
+  sv = await sessionView(lastSession())
+  eq('the circuit used', sv.circuit?.system_id, LONGFELLOW)
+  const proveTrace = sv.trace.find((t) => t.step === 'prove')?.data
+  check('proved by the Longfellow addon, about 344 kB', proveTrace?.backend === 'longfellow' && proveTrace.metrics.proof_bytes > 300_000, `${proveTrace?.backend}, ${proveTrace?.metrics?.proof_bytes} bytes`)
+  const witnessTrace = sv.trace.find((t) => t.step === 'witness')?.data
+  eq('the witness: both circuits', witnessTrace?.counts, { hash: { inputs: 97032, public: 586 }, signature: { inputs: 4765, public: 1155 } })
+  check('sign and prove went to /api/wallet', has(m, 'POST', '/api/wallet/sign', 200) && has(m, 'POST', '/api/wallet/prove', 200))
+  await closeFromPhone()
+  const lf = (await me()).account
+
+  begin('L3', 'the teen tries c/afterdark first, then proves 13–17 for c/teenspace with Longfellow')
+  await goto('/c/afterdark')
+  m = mark()
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Requirement Not Met')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed')
+  check('no proof was made', count(m, 'POST', '/api/wallet/prove') === 0)
+  await closeDialog('escape')
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.system_id, LONGFELLOW)
+  await closeFromPhone()
+  check('the age range is recorded', !!(await me()).account?.birthDateRange)
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+
+  begin('L4', 'Vega only: the same pseudonym, so the teen logs in to the same account')
+  await accept('vega-v1', true)
+  await accept(LONGFELLOW_SYSTEM, false)
+  await goto('/')
+  await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await signIn('Log in', `Logged in as u/${lf.handle}`)
+  eq('with Vega', (await sessionView(lastSession())).circuit?.system_id, VEGA)
+
+  begin('L5', 'both accepted: Vega first; a wallet that runs only Longfellow is sent Longfellow')
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('accepted, in order', await acceptedNow(), ['vega-v1', LONGFELLOW_SYSTEM])
+  const ctx = await client()
+  let s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  let req = await fetchRequest(ctx, s, null)
+  eq('without wallet_metadata: both circuits, Vega first', req.client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA, LONGFELLOW])
+  s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })
+  req = await fetchRequest(ctx, s, lfOnly)
+  eq('tailored to the wallet', req.client_metadata.vp_formats_supported.zkp_req, { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] })
+  let p = await present(ctx, req, teen, LONGFELLOW)
+  eq('prove: the Longfellow circuit', p.system_id, LONGFELLOW)
+  eq('the same pseudonym as the account', p.results.nym, lf.pseudonym)
+  expectAnswer('the response', await respond(ctx, req, vpForm(req, p.presentation)), 200)
+  let done = (await complete(ctx, s.id)).body
+  check('logged in to the same account', done.ok === true && done.kind === 'logged_in' && done.handle === lf.handle, JSON.stringify(done))
+  {
+    const r = await call(ctx, 'POST', '/api/wallet/prove', { data: { request: req, system_id: LONGFELLOW, credential: adult.credential, secret_seed: teen.secret_seed, device_signature: '00'.repeat(64) } })
+    expectAnswer("prove: another holder's seed", r, 400, 'bad_credential')
+  }
+
+  begin('L6', 'the adult signs up with Longfellow and proves 18+ for c/afterdark')
+  await accept('vega-v1', false)
+  await goto('/')
+  await page.getByRole('banner').getByText(`u/${lf.handle}`).click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await signIn('Sign up', 'Account created: u/', ADULT)
+  await goto('/c/afterdark')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), ADULT)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 18+')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  eq('with Longfellow', (await sessionView(lastSession())).circuit?.system_id, LONGFELLOW)
+  await closeFromPhone()
+
+  begin('L7', 'over HTTP: the Longfellow verifier refuses tampering and a presentation for another request')
+  const tampers = {
+    ...TAMPER,
+    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
+  }
+  const expected = {
+    'a flipped proof byte': ['proof_invalid:hash', 'proof_invalid:signature', 'proof_encoding'],
+    'a changed results.nym': ['proof_invalid:hash'],
+    'a results key that is not the request handle': ['results'],
+    'proof_time changed by one second': ['proof_invalid:hash'],
+    'another system_id': ['circuit'],
+  }
+  for (const [what, tamper] of Object.entries(tampers)) {
+    const t = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, t, lfOnly)
+    const pt = await present(ctx, r, teen, LONGFELLOW)
+    const changed = tamper(Buffer.from(pt.presentation, 'base64url'), pt).toString('base64url')
+    await respond(ctx, r, vpForm(r, changed))
+    const v = await sessionView(t.id)
+    const got = rejectedTrace(v)
+    const label = got ? (got.input ? `${got.code}:${got.input}` : got.code) : 'accepted'
+    check(`${what}: refused as ${expected[what].join(' or ')}`, v.status === 'failed' && expected[what].includes(label), `${v.status}, ${label}`)
+  }
+  {
+    const a = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const ra = await fetchRequest(ctx, a, lfOnly)
+    const pa = await present(ctx, ra, teen, LONGFELLOW)
+    const b = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const rb = await fetchRequest(ctx, b, lfOnly)
+    await respond(ctx, rb, vpForm(rb, pa.presentation))
+    const got = rejectedTrace(await sessionView(b.id))
+    check("another session's presentation: refused, proof_invalid", got?.code === 'proof_invalid', got ? `${got.code}:${got.input}` : 'accepted')
+  }
+
+  begin('L8', 'Longfellow switched off after the scan: its presentation is refused')
+  await accept('vega-v1', true)
+  s = await newSession(ctx, { purpose: 'signin', intent: 'login' })
+  req = await fetchRequest(ctx, s, lfOnly)
+  p = await present(ctx, req, teen, LONGFELLOW)
+  await accept(LONGFELLOW_SYSTEM, false)
+  await respond(ctx, req, vpForm(req, p.presentation))
+  const v8 = await sessionView(s.id)
+  const r8 = rejectedTrace(v8)
+  check('refused: format, Longfellow no longer accepted', v8.status === 'failed' && r8?.code === 'format', r8 ? `${r8.code}: ${r8.reason}` : v8.status)
+  await ctx.dispose()
+
+  begin('L9', 'a demo reset switches every proof system off')
+  await resetDemo([])
+  eq('accepted', await acceptedNow(), [])
+}
+
+// ---- P. The thread switch and the measurements of /tech ----
+
+async function groupP() {
+  await resetDemo(['vega-v1', BBS_SYSTEM])
+  await openPage()
+  const ctx = await client()
+  /** One sign-up over HTTP, verified: the session's prove and verify traces. */
+  const signUp = async (circuit) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const only = (system, id) => JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [system], system_id_values: [id] } } })
+    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? only(LONGFELLOW_SYSTEM, LONGFELLOW) : circuit === 'bbs' ? only(BBS_SYSTEM, BBS_SCHEME) : WALLET_METADATA)
+    if (circuit === 'bbs') {
+      const p = await presentBbs(ctx, r)
+      await respond(ctx, r, bbsForm(r, p.presentation))
+    } else {
+      const p = await present(ctx, r, teen, circuit)
+      await respond(ctx, r, vpForm(r, p.presentation))
+    }
+    const v = await sessionView(s.id)
+    const trace = (step) => v.trace.filter((t) => t.step === step).at(-1)?.data
+    return { status: v.status, prove: trace('prove')?.metrics?.threads, verify: trace('verify')?.metrics?.threads }
+  }
+
+  begin('P1', 'off by default: Vega and BBS on one thread; every verified presentation is measured')
+  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  let o = await overview()
+  eq('multithreading off after a reset', o.multithreading, false)
+  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
+  const cores = o.measurements.machine.cores
+  check('the machine is described', cores >= 1 && !!o.measurements.machine.cpu, JSON.stringify(o.measurements.machine))
+  eq('Vega: verified on 1 thread, proved on 1', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  eq('BBS: verified on 1 thread, proved on 1', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
+  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
+
+  begin('P2', `switched on in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-threads]').waitFor()
+  eq('/tech: off, 1 thread', (await tech.locator('[data-threads-text]').textContent()).trim(), '1 thread')
+  await tech.locator('[data-threads]').check()
+  for (let k = 0; k < 30 && !(await overview()).multithreading; k++) await page.waitForTimeout(100)
+  eq('server: on', (await overview()).multithreading, true)
+  await tech.locator('[data-threads-text]', { hasText: cores === 1 ? '1 thread' : `${cores} threads` }).waitFor()
+  check('/tech: the switch says how many', true)
+  eq(`Vega: ${cores} threads`, await signUp(VEGA), { status: 'verified', prove: cores, verify: cores })
+  eq(`BBS: ${cores} threads`, await signUp('bbs'), { status: 'verified', prove: cores, verify: cores })
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('Longfellow: 1 thread, whatever the switch', await signUp(LONGFELLOW), { status: 'verified', prove: 1, verify: 1 })
+
+  begin('P3', '/tech: the measured table, by proof system, statement and threads')
+  o = await overview()
+  eq('five runs', o.measurements.runs, 5)
+  const rows = o.measurements.rows.map((r) => `${r.proof_system}:${r.statement}:${r.threads}:${r.runs}`)
+  eq('rows', rows, [`vega-v1:pseudonym:1:1`, `vega-v1:pseudonym:${cores}:1`, `${LONGFELLOW_SYSTEM}:pseudonym:1:1`, `${BBS_SYSTEM}:pseudonym:1:1`, `${BBS_SYSTEM}:pseudonym:${cores}:1`].filter((x, i, a) => cores > 1 || a.indexOf(x) === i).map((x) => (cores > 1 ? x : x.replace(/:1:1$/, ':1:2'))))
+  const lf = o.measurements.rows.find((r) => r.proof_system === LONGFELLOW_SYSTEM)
+  check('Longfellow row: times and about 344 kB', lf?.prove?.median > 0 && lf.verify?.median > 0 && lf.proof_bytes?.median > 300_000, JSON.stringify(lf))
+  await tech.reload()
+  await tech.locator('[data-measured-row]').first().waitFor()
+  eq('/tech: one table row per group', await tech.locator('[data-measured-row]').count(), o.measurements.rows.length)
+  check('/tech: no estimates', !(await tech.getByText('Estimates per step').count()))
+  const mem = lf?.memory
+  check('Longfellow memory: the circuits, the witness and the proving work, prover and verifier', mem?.prove.keys_mb > 0 && mem.prove.witness_mb > 0 && mem.prove.work_mb > 0 && mem.verify.keys_mb > 0 && mem.verify.work_mb > 0, JSON.stringify(mem))
+  await tech.getByRole('heading', { name: 'Benchmark' }).waitFor()
+  check('/tech: no process peak column', !(await tech.getByText('Process peak').count()))
+  await tech.locator(`[data-measured-row="${LONGFELLOW_SYSTEM}"] [data-measured-memory="prove"]`).click()
+  const breakdown = tech.locator('[data-memory-breakdown]')
+  await breakdown.waitFor()
+  for (const t of ['Prover', 'Verifier', 'Circuits and keys loaded at start', 'Witness, held into the proof', 'Proving', 'Verifying']) check(`memory breakdown: ${t}`, (await breakdown.getByText(t, { exact: false }).count()) > 0)
+  if (o.measurements.file.startsWith('/')) eq('the file has a line per run', readFileSync(o.measurements.file, 'utf8').trim().split('\n').length, 5)
+
+  begin('P4', 'a demo reset switches multithreading off and keeps the measurements; Clear empties them')
+  await resetDemo([])
+  o = await overview()
+  eq('after a reset: off, measurements kept', [o.multithreading, o.measurements.runs], [false, 5])
+  await tech.reload()
+  await tech.locator('[data-clear-measurements]').click()
+  await tech.locator('[data-clear-measurements]', { hasText: 'Click again to clear' }).click()
+  for (let k = 0; k < 30 && (await overview()).measurements.runs; k++) await page.waitForTimeout(100)
+  eq('cleared from /tech (two clicks)', (await overview()).measurements.runs, 0)
+  if (o.measurements.file.startsWith('/')) eq('the file is empty', readFileSync(o.measurements.file, 'utf8'), '')
+
+  begin('P5', 'Profiling: the time by step, where it goes (samples, Vega phases), the bytes by part')
+  await resetDemo(['vega-v1', LONGFELLOW_SYSTEM, BBS_SYSTEM])
+  o = await overview()
+  eq('Profiling off after a reset', o.profiling, false)
+  expectAnswer('server: a profiling switch without a boolean', await call(ctx, 'POST', '/api/tech/profiling', { data: { on: 'yes' } }), 400, 'bad_request')
+  eq('Vega without profiling', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  await tech.reload()
+  const vegaRow = tech.locator('[data-measured-row="vega-v1"]')
+  await vegaRow.locator('[data-measured-time="prove"]').click()
+  const time = tech.locator('[data-time-breakdown]')
+  await time.waitFor()
+  for (const t of ['Device signature', 'Witness', 'Proof', 'Decode', 'Verify']) check(`time by step: ${t}`, (await time.getByText(t, { exact: false }).count()) > 0)
+  check('no profile before Profiling', (await time.locator('[data-no-profile]').count()) === 1)
+  await tech.locator('[data-profiling]').check()
+  for (let k = 0; k < 30 && !(await overview()).profiling; k++) await page.waitForTimeout(100)
+  eq('server: Profiling on', (await overview()).profiling, true)
+  eq('Vega profiled', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
+  eq('Longfellow profiled', await signUp(LONGFELLOW), { status: 'verified', prove: 1, verify: 1 })
+  eq('BBS profiled', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
+  o = await overview()
+  const row = (id) => o.measurements.rows.find((r) => r.proof_system === id)
+  eq('Vega row: the plain run only, and one profiled', [row('vega-v1')?.runs, row('vega-v1')?.profiled_runs], [1, 1])
+  eq('Longfellow and BBS rows: their profiled run', [row(LONGFELLOW_SYSTEM)?.profiled_runs, row(BBS_SYSTEM)?.profiled_runs], [1, 1])
+  const sum = (parts) => (parts ?? []).reduce((t, p) => t + p.bytes, 0)
+  for (const id of ['vega-v1', LONGFELLOW_SYSTEM, BBS_SYSTEM]) {
+    const r = row(id)
+    eq(`${id}: the proof's parts add up to the proof`, sum(r?.parts.proof), r?.proof_bytes?.median)
+    eq(`${id}: the presentation's fields add up to the presentation`, sum(r?.parts.presentation), r?.presentation_bytes?.median)
+  }
+  check('Longfellow parts: the tags and both circuits', ['MAC tags (6)', 'Hash circuit (GF(2^128))', 'Signature circuit (P-256)'].every((n) => row(LONGFELLOW_SYSTEM)?.parts.proof?.some((p) => p.name === n)))
+  check('BBS parts: the BBS proof by field', row(BBS_SYSTEM)?.parts.proof?.find((p) => p.name === 'BBS proof')?.children.some((c) => c.name === 'Challenge'))
+  const profile = (id) => call(ctx, 'GET', `/api/tech/profile?row=${encodeURIComponent(row(id).key)}`)
+  const vp = (await profile('vega-v1')).body
+  check('Vega profile: prover samples, rooted at its steps', vp.runs === 1 && vp.prove.samples > 0 && Object.keys(vp.prove.stacks).every((k) => /^(Device signature|Witness|Proof);/.test(k)), JSON.stringify({ runs: vp.runs, samples: vp.prove.samples }))
+  const phaseNames = (list) => (list ?? []).flatMap((p) => [p.name, ...phaseNames(p.children)])
+  check("Vega profile: vega-prover's phases", phaseNames(vp.prove.phases).includes('neutronnova_prove'), JSON.stringify(phaseNames(vp.prove.phases).slice(0, 8)))
+  for (const id of [LONGFELLOW_SYSTEM, BBS_SYSTEM]) {
+    const p = (await profile(id)).body
+    check(`${id} profile: prover samples`, p.runs === 1 && p.prove.samples > 0 && !p.prove.phases, JSON.stringify({ runs: p.runs, samples: p.prove.samples }))
+  }
+  expectAnswer('server: a profile without a row', await call(ctx, 'GET', '/api/tech/profile'), 400, 'bad_request')
+  await tech.reload()
+  await vegaRow.locator('[data-measured-time="prove"]').click()
+  await tech.locator('[data-grouped]').waitFor()
+  check('/tech: the samples by stage first', (await tech.locator('[data-profile-count]').textContent()).includes('1 run'))
+  for (const stage of ['Preparation', 'Proving']) check(`Vega stages: ${stage}`, (await tech.locator(`[data-group="${stage}"]`).count()) === 1)
+  const proving = tech.locator('[data-group="Proving"] button[aria-expanded]')
+  await proving.click()
+  await tech.waitForTimeout(2500) // a few of /tech's polls
+  eq('an opened group stays open while /tech polls', await proving.getAttribute('aria-expanded'), 'true')
+  await tech.locator('[data-profile-view="call"]').click()
+  await tech.locator('[data-flame]').waitFor()
+  check('/tech: the call tree as a flame graph', true)
+  await tech.locator('[data-profile-view="phases"]').click()
+  await tech.locator('[data-phases]', { hasText: 'neutronnova_prove' }).waitFor()
+  check('/tech: the phases', true)
+  const lfRow = tech.locator(`[data-measured-row="${LONGFELLOW_SYSTEM}"]`)
+  await lfRow.locator('[data-measured-time="prove"]').click()
+  await tech.locator('[data-grouped]').waitFor()
+  for (const stage of ['Sumcheck', 'Ligero commitment']) check(`Longfellow stages: ${stage}`, (await tech.locator(`[data-group="${stage}"]`).count()) === 1)
+  await tech.locator('[data-profile-view="field"]').click()
+  await tech.locator('[data-grouped-all]').click()
+  check('Longfellow stages × circuit: the hash and the signature circuit', (await tech.locator('[data-grouped]', { hasText: 'GF(2^128), hash circuit' }).count()) === 1 && (await tech.locator('[data-grouped]', { hasText: 'P-256, signature circuit' }).count()) === 1)
+  await tech.locator('[data-profile-view="operations"]').click()
+  await tech.locator('[data-group="Field and integer arithmetic"]').waitFor()
+  check('Longfellow operations: field arithmetic', true)
+  for (const v of ['libraries', 'functions']) {
+    await tech.locator(`[data-profile-view="${v}"]`).click()
+    check(`Longfellow ${v}: groups`, (await tech.locator('[data-grouped] [data-group]').count()) > 1)
+  }
+  await tech.locator('[data-profile-side="verify"]').click()
+  await tech.locator('[data-profile-view="stages"]').click()
+  check('Longfellow verifier stages: the Ligero check', (await tech.locator('[data-group="Ligero check"]').count()) === 1)
+  await lfRow.locator('[data-measured-size="proof_bytes"]').click()
+  await tech.locator('[data-size-bar="presentation"]').waitFor()
+  await tech.locator('[data-size-part="Hash circuit (GF(2^128))"]').click()
+  check("/tech: a circuit's proof by part", (await tech.locator('[data-size-bar="part"]', { hasText: 'Opened columns' }).count()) === 1)
+  await tech.locator('[data-profiling]').uncheck()
+  for (let k = 0; k < 30 && (await overview()).profiling; k++) await page.waitForTimeout(100)
+  o = await overview()
+  eq('switched off: the profiles stay', [o.profiling, row('vega-v1')?.profiled_runs], [false, 1])
+  await tech.locator('[data-profiling]').check()
+  for (let k = 0; k < 30 && !(await overview()).profiling; k++) await page.waitForTimeout(100)
+  await resetDemo([])
+  eq('a reset switches Profiling off', (await overview()).profiling, false)
+  await tech.locator('[data-clear-measurements]').click()
+  await tech.locator('[data-clear-measurements]', { hasText: 'Click again to clear' }).click()
+  for (let k = 0; k < 30 && (await overview()).measurements.runs; k++) await page.waitForTimeout(100)
+  eq('Clear empties the profiles too', (await profile('vega-v1')).body.runs, 0)
+  await tech.close()
+  await ctx.dispose()
+}
+
+/** Another issuer: a credential whose Document Signer is not a configured trust anchor, or (N4) a
+ *  BBS credential under another issuer key. With "Trust new issuers" on (the default), its first
+ *  verified presentation adds it to the trusted issuers; off, it is refused (issuer_key_set). */
+async function groupN() {
+  await resetDemo(['vega-v1', LONGFELLOW_SYSTEM])
+  await openPage()
+  const ctx = await client()
+  // Only the fixture's issuer: the run leaves any other added issuer alone.
+  const forgetOther = () => call(ctx, 'POST', '/api/tech/issuers', { data: { forget: otherFingerprint } })
+  const others = async () => (await overview()).learnedIssuers.filter((i) => i.fingerprint === otherFingerprint)
+  await forgetOther()
+  const signUp = async (circuit, wallet = otherTeen) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const only = (system, id) => JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [system], system_id_values: [id] } } })
+    const r = await fetchRequest(ctx, s, circuit === LONGFELLOW ? only(LONGFELLOW_SYSTEM, LONGFELLOW) : WALLET_METADATA)
+    const p = await present(ctx, r, wallet, circuit)
+    await respond(ctx, r, vpForm(r, p.presentation))
+    return sessionView(s.id)
+  }
+  const verified = (v) => v?.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+
+  begin('N1', 'a new issuer: trusted from its first verified presentation (Vega)')
+  let o = await overview()
+  eq('on by default, the other issuer not added', [o.trustNewIssuers, (await others()).length], [true, 0])
+  let v = await signUp(VEGA)
+  eq('verified', v?.status, 'verified')
+  check('the trace says the issuer was added', /Demo Document Signer/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
+  eq('the issuer added', (await others()).length, 1)
+  const added = (await others())[0]
+  check('with its subject and fingerprint', /CN=Demo Document Signer/.test(added?.subject) && /^[0-9a-f]{64}$/.test(added?.fingerprint), JSON.stringify(added))
+  v = await signUp(VEGA)
+  check('the next presentation: trusted, nothing new', v?.status === 'verified' && !verified(v)?.issuer_added && (await others()).length === 1)
+
+  begin('N1b', 'a new issuer the site cannot read itself: the verifier names it, the site trusts it and verifies again')
+  await forgetOther()
+  await armFault('issuer.read')
+  v = await signUp(VEGA)
+  eq('verified', v?.status, 'verified')
+  check('the trace says the issuer was added', /Demo Document Signer/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
+  eq('the issuer added', (await others()).length, 1)
+  check('the server log says it verified again', !SERVER_LOG || /\[issuers\] [^\n]*the verifier does not know issuer CN=Demo Document Signer[^\n]*verifying again with it trusted/.test(serverLog()))
+
+  begin('N2', 'switched off in /tech: an unknown issuer is refused; Remove forgets one')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-learned-issuers]').waitFor()
+  await tech.locator(`[data-forget-issuer="${added.fingerprint}"]`).click()
+  for (let k = 0; k < 30 && (await others()).length; k++) await page.waitForTimeout(100)
+  eq('removed from /tech', (await others()).length, 0)
+  await tech.locator('[data-trust-new]').uncheck()
+  for (let k = 0; k < 30 && (await overview()).trustNewIssuers; k++) await page.waitForTimeout(100)
+  eq('server: off', (await overview()).trustNewIssuers, false)
+  v = await signUp(VEGA)
+  eq('refused: issuer_key_set', [v?.status, rejectedTrace(v)?.code], ['failed', 'issuer_key_set'])
+  check('the trace names the unknown issuer', /CN=Demo Document Signer/.test(rejectedTrace(v)?.issuer ?? '') && rejectedTrace(v)?.trust_new_issuers === false, JSON.stringify(rejectedTrace(v)))
+  eq('nothing added', (await others()).length, 0)
+  v = await signUp(VEGA, teen)
+  eq("the demo issuer still verifies", v?.status, 'verified')
+  expectAnswer('server: an issuers call without a boolean or a fingerprint', await call(ctx, 'POST', '/api/tech/issuers', { data: { trust_new: 'yes' } }), 400, 'bad_request')
+  expectAnswer('server: forget an unknown issuer', await call(ctx, 'POST', '/api/tech/issuers', { data: { forget: 'ab'.repeat(32) } }), 404, 'unknown_issuer')
+
+  begin('N3', 'a demo reset switches it on again; Longfellow learns the issuer too')
+  await resetDemo([LONGFELLOW_SYSTEM])
+  eq('on after a reset', (await overview()).trustNewIssuers, true)
+  v = await signUp(LONGFELLOW)
+  eq('Longfellow: verified', v?.status, 'verified')
+  check('added', !!verified(v)?.issuer_added && (await others()).length === 1)
+  await tech.reload()
+  await tech.locator('[data-learned-issuers]', { hasText: 'Demo Document Signer' }).waitFor()
+  check('/tech lists it', true)
+  await forgetOther()
+  eq('cleaned up', (await others()).length, 0)
+
+  begin('N4', 'BBS: a new issuer key, trusted from its first verified presentation; off, refused')
+  await resetDemo([BBS_SYSTEM])
+  const bbsOthers = async () => (await overview()).learnedIssuers.filter((i) => i.fingerprint === otherBbsFingerprint)
+  await call(ctx, 'POST', '/api/tech/issuers', { data: { forget: otherBbsFingerprint } })
+  const bbsSignUp = async (wallet = otherTeenBbs) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, s, JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } } }))
+    const p = await presentBbs(ctx, r, wallet)
+    await respond(ctx, r, bbsForm(r, p.presentation))
+    return sessionView(s.id)
+  }
+  v = await bbsSignUp()
+  eq('verified', v?.status, 'verified')
+  check('the trace says the issuer key was added', /^BBS issuer key 8c3e7f468123aa32/.test(verified(v)?.issuer_added ?? ''), verified(v)?.issuer_added)
+  const bbsAdded = (await bbsOthers())[0]
+  eq('added as a BBS issuer', [bbsAdded?.format, (await bbsOthers()).length], ['bbs_cd', 1])
+  check('the server log says it verified again', !SERVER_LOG || /\[issuers\] [^\n]*the verifier does not know issuer BBS issuer key 8c3e7f468123aa32[^\n]*verifying again with it trusted/.test(serverLog()))
+  v = await bbsSignUp()
+  check('the next presentation: trusted, nothing new', v?.status === 'verified' && !verified(v)?.issuer_added && (await bbsOthers()).length === 1)
+  v = await bbsSignUp(teenBbs)
+  check("the demo issuer: verified, nothing added", v?.status === 'verified' && !verified(v)?.issuer_added)
+  await tech.reload()
+  await tech.locator('[data-learned-issuers]', { hasText: 'BBS issuer key' }).waitFor()
+  check('/tech lists it', true)
+  await tech.locator(`[data-forget-issuer="${otherBbsFingerprint}"]`).click()
+  for (let k = 0; k < 30 && (await bbsOthers()).length; k++) await page.waitForTimeout(100)
+  eq('removed from /tech', (await bbsOthers()).length, 0)
+  await call(ctx, 'POST', '/api/tech/issuers', { data: { trust_new: false } })
+  v = await bbsSignUp()
+  eq('off: refused, issuer_key_set', [v?.status, rejectedTrace(v)?.code], ['failed', 'issuer_key_set'])
+  check('the trace names the key', /^BBS issuer key 8c3e7f468123aa32/.test(rejectedTrace(v)?.issuer ?? '') && rejectedTrace(v)?.trust_new_issuers === false, JSON.stringify(rejectedTrace(v)))
+  eq('nothing added', (await bbsOthers()).length, 0)
+  await resetDemo()
+  await tech.close()
+  await ctx.dispose()
+}
+
+/** A real phone: the site dialog hides the demo phone at first, shows it on request, and when
+ *  another phone scans the code, the code and the demo phone go away and the request completes. */
+async function groupR() {
+  await resetDemo()
+  await openPage({ demoPhone: false })
+  await goto('/')
+  const demoPhone = () => page.locator('[data-demo-phone]')
+  const toggle = () => site().locator('[data-demo-phone-toggle]')
+
+  begin('R1', 'the dialog hides the demo phone at first; Show demo phone shows it, and the choice stays')
+  await (await siteButton('Sign up')).click()
+  await site().locator('[data-qr]').waitFor({ timeout: 15_000 })
+  check('the QR code, no demo phone', !(await demoPhone().isVisible()))
+  await page.waitForTimeout(400)
+  check('the guide names no demo phone', !(await guidePanel().textContent()).includes(TEEN), (await guidePanel().textContent()).slice(0, 300))
+  eq('the toggle', (await toggle().textContent()).trim(), 'Show demo phone')
+  await toggle().click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor()
+  check('Show demo phone shows it', await demoPhone().isVisible())
+  await page.waitForTimeout(400)
+  check('the guide names it', (await guidePanel().textContent()).includes(TEEN))
+  eq('the toggle then', (await toggle().textContent()).trim(), 'Hide demo phone')
+  await closeDialog()
+  await goto('/')
+  await (await siteButton('Sign up')).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  check('after a reload: still shown', await demoPhone().isVisible())
+  await toggle().click()
+  check('Hide demo phone hides it', !(await demoPhone().isVisible()))
+  await toggle().click()
+
+  begin('R2', 'a real phone scans the code: the code and the demo phone go away; its answer completes the request')
+  const id = await newSessionId(undefined)
+  const ctx = await client()
+  const r = await fetchRequest(ctx, { authorizationUrl: `openid4vp://?request_uri=${encodeURIComponent(`${BASE}/api/vp/request/${id}`)}&request_uri_method=post` })
+  await dialogShows('Continue on your phone')
+  check('the QR code is gone', !(await site().locator('[data-qr]').count()))
+  check('the demo phone is hidden, without its toggle', !(await demoPhone().isVisible()) && !(await toggle().count()))
+  check('no scan steps', !(await site().getByText('Open an EUDI Wallet App on your phone').count()))
+  const p = await present(ctx, r, teen)
+  await respond(ctx, r, vpForm(r, p.presentation))
+  await visible('dialog: "Account created: u/…"', site().getByText(/^Account created: u\//), 30_000)
+  check('logged in', !!(await me()).account)
+  await dialog().waitFor({ state: 'detached', timeout: 10_000 })
+  check('the dialog closes by itself after the outcome', true)
+  await ctx.dispose()
+
+  begin('R3', 'the next request: the demo phone as the presenter left it')
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await (await siteButton('Log in')).click()
+  await phone().getByRole('button', { name: 'Scan QR code' }).waitFor({ timeout: 15_000 })
+  check('shown again, with the QR code', (await demoPhone().isVisible()) && (await site().locator('[data-qr]').count()) === 1)
+  await closeDialog()
+}
+
+/** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
+ *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
+async function groupV() {
+  await resetDemo()
+  await openPage()
+  const dev = () => page.locator('.vd.page')
+  const popup = () => page.locator('.vd.backdrop [role=dialog]')
+  const devPhone = () => popup().locator('.phone')
+  const rows = async () => (await dev().locator('.rows li').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+  const latest = async () => (await call(page.request, 'GET', '/api/dev/latest')).body
+  const until = async (what, test, timeout = 30_000) => {
+    const end = Date.now() + timeout
+    let l = await latest()
+    while (!test(l) && Date.now() < end) {
+      await page.waitForTimeout(200)
+      l = await latest()
+    }
+    return check(what, test(l), JSON.stringify({ status: l.session?.status, outcome: l.session?.outcome, completion: l.session?.completion }))
+  }
+
+  // /dev polls its session, so the network never goes idle: wait for the app instead.
+  const devReady = async () => {
+    await page.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
+    await dev().waitFor()
+    await page.waitForTimeout(500)
+  }
+
+  begin('V1', '/dev: the view switch, what /tech accepts, no guide')
+  await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Developer' }).click()
+  await page.waitForURL('**/dev')
+  await devReady()
+  check('no guide panel', !(await guidePanel().count()))
+  eq('the proof systems, grouped: VegaMC and Longfellow, then BBS', [await dev().locator('.info .group.mso_mdoc .name').allTextContents(), await dev().locator('.info .group.bbs_cd .name').allTextContents()], [['VegaMC', 'Longfellow'], ['BBS']])
+  eq('VegaMC on, the others off', await dev().locator('.info .sys.on .name').allTextContents(), ['VegaMC'])
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).click()
+  for (let k = 0; k < 30 && !(await overview()).acceptedProofSystems.includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('switched on from /dev: the server accepts Longfellow too', (await overview()).acceptedProofSystems, ['vega-v1', LONGFELLOW_SYSTEM])
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"][aria-checked="true"]`).waitFor()
+  await dev().locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).click()
+  for (let k = 0; k < 30 && (await overview()).acceptedProofSystems.includes(LONGFELLOW_SYSTEM); k++) await page.waitForTimeout(100)
+  eq('and off again', (await overview()).acceptedProofSystems, ['vega-v1'])
+  check('no account panel in /dev', !(await dev().getByText('Community account').count()))
+  eq('the quick links', (await page.getByRole('navigation', { name: 'Quick links' }).getByRole('link').allTextContents()).map((t) => t.trim()), ['c', 'd', 't', 'm'])
+  for (const [short, full] of [['/c', '/'], ['/d', '/dev'], ['/t', '/tech'], ['/m', '/mod']]) {
+    const r = await page.request.get(short, { maxRedirects: 0 })
+    check(`${short} redirects to ${full}`, r.status() >= 300 && r.status() < 400 && new URL(r.headers().location, BASE).pathname === full, `${r.status()} ${r.headers().location}`)
+  }
+  check('no proof system switch here', !(await dev().locator('input[type=checkbox]').count()))
+  check('an empty diagram', await dev().getByText('Choose an age proof and press Request').isVisible())
+
+  begin('V2', "18+ on the teen's phone: Requirement Not Met, access_denied, encrypted; nothing applied")
+  let m = mark()
+  await dev().getByRole('radio', { name: '18+' }).click()
+  await dev().getByRole('button', { name: 'Request' }).click()
+  await popup().getByText('Scan with the SIROS ID wallet').waitFor()
+  check('the popup shows the real request as a QR code', (await popup().locator('svg').count()) > 0 && (await popup().getByRole('link', { name: 'Open wallet on this device' }).getAttribute('href')).startsWith('openid4vp://?client_id=x509_san_dns%3Acommunity.example'))
+  let l = await latest()
+  eq('the session: the dev purpose with 18+', l.session?.purpose, { kind: 'dev', age: 'over18' })
+  await popup().getByRole('button', { name: 'Simulate scan' }).click()
+  const pick = popup().getByRole('radiogroup', { name: 'Phone' })
+  eq('Simulate scan lists the three phones', (await pick.getByRole('radio').allTextContents()).map((t) => t.split(' · ')[0].trim()), [TEEN, ADULT, TEEN_BBS])
+  const inGroup = async (cls) => (await pick.locator(`.group.${cls} [role=radio]`).allTextContents()).map((t) => t.split(' · ')[0].trim())
+  eq('grouped by encoding: the circuits\' mdoc phones, then BBS', [await inGroup('mso_mdoc'), await inGroup('bbs_cd')], [[TEEN, ADULT], [TEEN_BBS]])
+  check("the list says which phones' credentials the site accepts", (await pick.getByRole('radio', { name: new RegExp(TEEN_BBS) }).textContent()).includes('not accepted now') && (await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).textContent()).includes('accepted: VegaMC'))
+  await pick.getByRole('radio', { name: new RegExp(`^${TEEN}`) }).click()
+  await popup().getByRole('button', { name: 'Scan', exact: true }).click()
+  eq("the teen's phone beside the code", (await devPhone().locator('[data-phone-label]').textContent()).trim(), TEEN)
+  await devPhone().getByText('Requirement Not Met').waitFor({ timeout: 20_000 })
+  l = await latest()
+  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.jwt', l.session.responseKey.kid])
+  await devPhone().getByRole('button', { name: 'Close' }).click()
+  await until('the session ends declined', (x) => x.session?.outcome?.reason === 'denied')
+  // The page logs the response_uri call when its answer arrives, which can be after the server ended the session.
+  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied')
+  for (let k = 0; k < 30 && !encryptedDenial(); k++) await page.waitForTimeout(100)
+  check('the answer was encrypted (response=JWE)', encryptedDenial())
+  await dev().locator('.rows li', { hasText: 'Not completed: access_denied' }).waitFor()
+  const r2 = await rows()
+  for (const t of ['Create presentation request', 'Build DCQL query (zkp_req)', 'Make response encryption key', 'Fetch request + wallet_metadata', 'Authenticate verifier', 'Attestation does not meet the age range', 'Encrypt response', 'Send error response', 'Decrypt response']) {
+    check(`the diagram: ${t}`, r2.some((x) => x.includes(t)))
+  }
+  eq('no account', (await me()).account, null)
+
+  begin('V3', 'keys 3 and S, then Scan: 13–17 on the same phone, shared; the account is created with the age range')
+  // The popup's own Close (the phone may still show its outcome screen's Close for a moment).
+  await popup().locator('button.cancel', { hasText: 'Close' }).click()
+  await page.keyboard.press('3')
+  await popup().getByText('Scan with the SIROS ID wallet').waitFor()
+  await page.keyboard.press('s')
+  check('S opens the phone list, the teen\'s phone picked', (await popup().getByRole('radio', { checked: true }).textContent()).startsWith(TEEN))
+  await popup().getByRole('button', { name: 'Scan', exact: true }).click()
+  await devPhone().getByRole('button', { name: 'Share' }).click({ timeout: 20_000 })
+  await devPhone().getByText('Enter the Pin').waitFor()
+  for (const d of anyPin()) await devPhone().getByRole('button', { name: d, exact: true }).click()
+  await devPhone().getByRole('button', { name: 'Submit' }).click()
+  await devPhone().getByText('Success!').waitFor({ timeout: 60_000 })
+  await until('completed: account created, age recorded', (x) => x.session?.completion?.ok && x.session.completion.kind === 'created' && x.session.completion.age === true)
+  await devPhone().getByRole('button', { name: 'Close' }).click()
+  check('Close on the phone closes the popup', await popup().waitFor({ state: 'detached', timeout: 5_000 }).then(() => true, () => false))
+  const r3 = await rows()
+  for (const t of ['Holder approved', 'Device key signs', 'Build witness', 'Generate ZK proof (VegaMC)', 'Send response (ZkpPresentation)', 'Verify ZK proof (VegaMC)', 'Result delivered']) {
+    check(`the diagram: ${t}`, r3.some((x) => x.includes(t)))
+  }
+  l = await latest()
+  check('the handover carries the key thumbprint: the proof verified', l.session.outcome?.ok === true)
+  check('the decoded ZkpPresentation', l.session.response?.presentation?.decoded?.system_id === VEGA && !!l.session.response.presentation.decoded.results)
+  await page.keyboard.press('i')
+  await dev().getByRole('tab', { name: /Checks/ }).click()
+  eq('the inspector: every check passed', await dev().locator('.checks li .st').allTextContents(), Array(9).fill('pass'))
+  const acct = (await me()).account
+  eq('the account: 13–17 proven', acct?.ageProofs?.map((p) => p.label), ['13–17'])
+  await dev().locator('.rows li .hit').first().click()
+  await page.locator('.vd.backdrop [role=dialog]', { hasText: 'Create presentation request' }).waitFor()
+  check('a step opens its details', true)
+  await page.keyboard.press('Escape')
+
+  begin('V4', 'back on Community: logged in; c/teenspace open, c/afterdark refused, without a new request')
+  m = mark()
+  await page.getByRole('navigation', { name: 'View' }).getByRole('link', { name: 'Community' }).click()
+  await page.waitForURL((u) => !u.pathname.startsWith('/dev'))
+  await ready()
+  check('logged in: the account menu in the header', (await page.locator('header [data-user-menu]').count()) === 1)
+  await page.click('a[href="/c/afterdark"]')
+  await visible('c/afterdark: "You can\'t enter c/afterdark"', page.getByText("You can't enter c/afterdark"))
+  await page.click('a[href="/c/teenspace"]')
+  await page.waitForURL('**/c/teenspace')
+  await ready()
+  check('c/teenspace: no age request', !(await page.getByRole('button', { name: 'Verify age with wallet' }).count()))
+  check('no wallet request on Community', count(m, 'POST', '/api/vp/session') === 0)
+
+  begin('V5', 'Clear (R) empties the diagram')
+  await page.goto('/dev')
+  await devReady()
+  await dev().locator('.rows li').first().waitFor()
+  await page.keyboard.press('r')
+  check('empty after R', await dev().getByText('Choose an age proof and press Request').isVisible())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1742,6 +2845,13 @@ let crashed = null
 try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
+  if (ONLY) {
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, R: groupR, V: groupV, G: groupG }
+    // In the full run's order: G reads the sessions the groups before it leave.
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'R', 'V', 'K', 'G']
+    for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
+    throw Object.assign(new Error('only'), { only: true })
+  }
   const created = await groupA()
   await groupB(created)
   await groupC(created)
@@ -1751,12 +2861,20 @@ try {
   await groupH()
   await groupI()
   await groupJ()
+  await groupM()
+  await groupL()
+  await groupN()
+  await groupP()
+  await groupR()
+  await groupV()
   await groupK()
   await groupG()
 } catch (e) {
-  crashed = e
-  check(`the run reached the end`, false, e.message.split('\n')[0])
-  if (page) await page.screenshot({ path: join(SHOTS ?? '.', 'flows-failure.png') }).catch(() => {})
+  if (!e.only) {
+    crashed = e
+    check(`the run reached the end`, false, e.message.split('\n')[0])
+    if (page) await page.screenshot({ path: join(SHOTS ?? '.', 'flows-failure.png') }).catch(() => {})
+  }
 }
 await browser.close()
 

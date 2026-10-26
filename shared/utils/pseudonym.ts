@@ -7,14 +7,14 @@ export interface PseudonymInputs {
   config: PseudonymConfig
   /** Opening of `ssc` (secret_seed) or `psc` (private_seed), 16 bytes. */
   seed: Uint8Array
-  /** e.g. "x509_san_dns:readdit.example" */
+  /** e.g. "x509_san_dns:community.example" */
   verifierId?: string
   verifierContext?: string
   /** Only for user-managed-pseudonym-xsite-ssc. */
   userValue?: string
 }
 
-/** verifier_input as defined per configuration (rulebook, pseudonym-v1-sha256). */
+/** verifier_input as defined per configuration (rulebook v0.4, "Configurations", prf sha-256). */
 export async function verifierInput(i: Omit<PseudonymInputs, 'seed'>): Promise<Uint8Array> {
   switch (i.config) {
     case 'known-offender-matching-ssc':

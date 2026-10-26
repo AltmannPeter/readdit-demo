@@ -1,26 +1,50 @@
 import type { BirthDateRange } from '../types'
-import { NYM_DOCTYPE, type CircuitZkCredentialQuery, type CircuitZkFormats, type ReqItem, type RequestObject } from '../types/oid4vp'
+import { findSystem } from '../registry/circuits'
+import {
+  NYM_BBS_SCHEMA,
+  NYM_DOCTYPE,
+  type DcqlQuery,
+  type EncryptionJwk,
+  type ReqItem,
+  type RequestObject,
+  type SourceFormat,
+  type VpFormats,
+  type ZkpReqCredentialQuery,
+} from '../types/oid4vp'
 
+/** The query over the mdoc (mso_mdoc). */
 export const CREDENTIAL_QUERY_ID = 'nym_attestation'
+/** The query over the same attestation as a BBS credential (bbs_cd). */
+export const BBS_QUERY_ID = 'nym_attestation_bbs'
 export const RETURN_PSEUDONYM = 'nym'
 export const RETURN_AGE = 'age'
 
-/** Pseudonym always; age_check when a birth-date range is required. */
-export function buildCredentialQuery(age?: BirthDateRange): CircuitZkCredentialQuery {
-  const req: ReqItem[] = [
-    {
-      id: 'pseudonym-v1-sha256',
-      return: RETURN_PSEUDONYM,
-      params: { config: 'known-offender-matching-ssc', verifier_id_type: 'x509_san_dns' },
-    },
-  ]
-  if (age) req.push({ id: 'age_check', return: RETURN_AGE, params: { ...age } })
-  return {
-    id: CREDENTIAL_QUERY_ID,
-    format: 'circuit_zk',
-    meta: { doctype_value: NYM_DOCTYPE },
-    req,
-  }
+/** The pseudonym's PRF per source format (rulebook v0.4, "Parameters"). */
+export const PRF_FOR: Record<SourceFormat, 'sha-256' | 'hashdh-bls12381g1'> = { mso_mdoc: 'sha-256', bbs_cd: 'hashdh-bls12381g1' }
+
+/** A zkp_req query over `source`: the pseudonym always; age_check when a birth-date range is required. */
+export function buildCredentialQuery(source: SourceFormat, age?: BirthDateRange): ZkpReqCredentialQuery {
+  const _req: ReqItem[] = [{ fn_id: 'pseudonym', return: RETURN_PSEUDONYM, params: { config: 'known-offender-matching-ssc', ver: 1, prf: PRF_FOR[source] } }]
+  if (age) _req.push({ fn_id: 'age_check', return: RETURN_AGE, params: { ...age } })
+  return source === 'mso_mdoc'
+    ? { id: CREDENTIAL_QUERY_ID, format: 'zkp_req', meta: { source_format: 'mso_mdoc', doctype_value: NYM_DOCTYPE }, _req }
+    : { id: BBS_QUERY_ID, format: 'zkp_req', meta: { source_format: 'bbs_cd', schema_id_value: NYM_BBS_SCHEMA }, _req }
+}
+
+/** The source formats of the systems an offer lists, in the offer's order. */
+export function sourcesOf(offer: VpFormats): SourceFormat[] {
+  const ids = offer.zkp_req?.system_id_values ?? []
+  return [...new Set(ids.map((id) => findSystem(id)?.source_format).filter((f): f is SourceFormat => !!f))]
+}
+
+/**
+ * The DCQL query for the systems the site accepts (`offer`): one zkp_req credential query per
+ * source format, in the offer's order (mso_mdoc, then bbs_cd), and, with more than one, a
+ * credential set whose options are the alternatives, so the wallet answers exactly one of them.
+ */
+export function buildDcqlQuery(offer: VpFormats, age?: BirthDateRange): DcqlQuery {
+  const credentials = sourcesOf(offer).map((f) => buildCredentialQuery(f, age))
+  return credentials.length > 1 ? { credentials, credential_sets: [{ options: credentials.map((q) => [q.id]) }] } : { credentials }
 }
 
 export function clientIdFor(host: string): string {
@@ -48,24 +72,27 @@ export function buildRequestObject(o: {
   sessionId: string
   nonce: string
   state: string
-  query: CircuitZkCredentialQuery
-  formats: CircuitZkFormats
+  dcql: DcqlQuery
+  formats: VpFormats
   walletNonce?: string
+  /** The session's response encryption key: direct_post.jwt with this key in client_metadata.jwks. */
+  encryptionJwk: EncryptionJwk
 }): RequestObject {
   return {
     aud: 'https://self-issued.me/v2',
     iat: Math.floor(Date.now() / 1000),
     ...(o.walletNonce && { wallet_nonce: o.walletNonce }),
     response_type: 'vp_token',
-    response_mode: 'direct_post',
+    response_mode: 'direct_post.jwt',
     response_uri: responseUriFor(o.origin, o.sessionId),
     client_id: clientIdFor(o.host),
     nonce: o.nonce,
     state: o.state,
-    dcql_query: { credentials: [o.query] },
+    dcql_query: o.dcql,
     client_metadata: {
       client_name: o.siteName,
-      vp_formats_supported: { circuit_zk: o.formats },
+      vp_formats_supported: o.formats,
+      jwks: { keys: [o.encryptionJwk] },
     },
   }
 }

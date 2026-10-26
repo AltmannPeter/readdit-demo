@@ -1,0 +1,36 @@
+# Community's BBS backend: ETSI BBS committed disclosures (draft v0.7) with the ecdsa-pop,
+# date-range and pseudonym plugins of sirosfoundation/bbs-cd-plugins, compiled into a Node addon
+# that the site's server calls in process.
+#
+#   vendor/bbs-cd-plugins/  the bbs-cd-plugins repository, vendored unchanged (its own workspace;
+#                           VENDOR-SHA256SUMS lists the files' hashes; `sha256sum -c` checks them)
+#   nym-bbs/                the bbs_cd encoding: zkp_req request → BBS request, prover, verifier
+#   node/                   the napi-rs addon: BbsProver and BbsVerifier objects for Node (napi glue only)
+#   issuer/                 bbs-issuer: issues the demo BBS credential and the issuer parameters
+[workspace]
+resolver = "2"
+members = ["nym-bbs", "node", "issuer"]
+exclude = ["vendor"]
+
+[workspace.dependencies]
+bbs-cd = { path = "vendor/bbs-cd-plugins/crates/bbs-cd" }
+# `parallel` compiles in rayon, so that Parallelism::Max takes effect (the /tech switch);
+# Parallelism::Off stays sequential, and the output is the same for both.
+bbs-cd-plugin = { path = "vendor/bbs-cd-plugins/crates/bbs-cd-plugin", features = ["parallel"] }
+cd-tom256 = { path = "vendor/bbs-cd-plugins/crates/cd-tom256", features = ["parallel"] }
+cd-ecdsa-pop = { path = "vendor/bbs-cd-plugins/crates/cd-ecdsa-pop", features = ["parallel"] }
+cd-date-range = { path = "vendor/bbs-cd-plugins/crates/cd-date-range" }
+cd-pseudonym = { path = "vendor/bbs-cd-plugins/crates/cd-pseudonym" }
+
+[profile.release]
+codegen-units = 16
+# Function names (line tables and linkage names), so the profiler (/tech's Profiling switch)
+# names inlined functions by their full path; no effect on the code generated.
+debug = "limited"
+
+# The proofs are compute-heavy: optimize dependencies even in test builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

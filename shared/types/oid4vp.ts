@@ -1,6 +1,14 @@
-// OpenID4VP 1.0 + `circuit_zk` shapes from the Nym-authentication rulebook (v0.2).
+// OpenID4VP 1.0 with the `zkp_req` format of the Nym-authentication rulebook (v0.4): one DCQL
+// format for zero-knowledge presentations over either encoding of the nym_auth attestation,
+// ISO/IEC 18013-5 (`mso_mdoc`, proved with circuits) and BBS committed disclosures (`bbs_cd`,
+// proved with a scheme and its plugins).
 
 export const NYM_DOCTYPE = 'eu.europa.ec.eudi.nym_auth.1'
+/** The nym_auth attestation's bbs_cd schema id. */
+export const NYM_BBS_SCHEMA = 'eu.europa.ec.eudi.nym_auth.bbs.1'
+
+/** The attestation encodings a zkp_req query can name in `meta.source_format`. */
+export type SourceFormat = 'mso_mdoc' | 'bbs_cd'
 
 export type PseudonymConfig =
   | 'known-offender-matching-ssc'
@@ -8,44 +16,73 @@ export type PseudonymConfig =
   | 'account-recovery-ssc'
   | 'user-managed-pseudonym-xsite-ssc'
 
+/** The pseudonym's PRF: `sha-256` (mso_mdoc), `hashdh-bls12381g1` (bbs_cd, a 48-byte G1 point). */
+export type PseudonymPrf = 'sha-256' | 'hashdh-bls12381g1'
+
 export interface PseudonymReq {
-  id: 'pseudonym-v1-sha256'
+  fn_id: 'pseudonym'
   return: string
   params: {
     config: PseudonymConfig
-    verifier_id_type?: 'semantic' | 'x509_san_dns'
+    ver: 1
+    prf: PseudonymPrf
     verifier_context?: string
   }
 }
 
 export interface AgeCheckReq {
-  id: 'age_check'
+  fn_id: 'age_check'
   return: string
   params: { ge?: string; le?: string }
 }
 
 export type ReqItem = PseudonymReq | AgeCheckReq
 
-export interface CircuitZkCredentialQuery {
+/** `meta` of a zkp_req query: the source format and its type value. */
+export type ZkpReqMeta = { source_format: 'mso_mdoc'; doctype_value: string } | { source_format: 'bbs_cd'; schema_id_value: string }
+
+export interface ZkpReqCredentialQuery {
   id: string
-  format: 'circuit_zk'
-  meta: { doctype_value: string }
-  req: ReqItem[]
+  format: 'zkp_req'
+  meta: ZkpReqMeta
+  /** Proven, never disclosed. */
+  _req: ReqItem[]
   require_cryptographic_holder_binding?: true
 }
 
-export interface DcqlQuery {
-  credentials: CircuitZkCredentialQuery[]
+export type CredentialQuery = ZkpReqCredentialQuery
+
+/** The type value of a query's meta: the doctype (mso_mdoc) or the schema id (bbs_cd). */
+export const typeValueOf = (m: ZkpReqMeta) => (m.source_format === 'mso_mdoc' ? m.doctype_value : m.schema_id_value)
+
+/** DCQL credential set: the wallet answers with one of the options (each a list of query ids). */
+export interface CredentialSet {
+  options: string[][]
+  required?: boolean
 }
 
-export interface CircuitZkFormats {
-  circuit_proof_system_values?: string[]
-  circuit_id_values?: string[]
+export interface DcqlQuery {
+  credentials: CredentialQuery[]
+  credential_sets?: CredentialSet[]
+}
+
+/** `vp_formats_supported.zkp_req`: proof systems and system ids (circuits and schemes). */
+export interface ZkpReqFormats {
+  proof_system_values?: string[]
+  system_id_values?: string[]
+}
+
+/** vp_formats_supported: the formats a verifier accepts, or a wallet supports. */
+export interface VpFormats {
+  zkp_req?: ZkpReqFormats
 }
 
 /** `wallet_metadata` posted to request_uri when request_uri_method=post. */
 export interface WalletMetadata {
-  vp_formats_supported: { circuit_zk?: CircuitZkFormats }
+  vp_formats_supported: VpFormats
+  /** The response encryption the wallet supports (direct_post.jwt). */
+  authorization_encryption_alg_values_supported?: string[]
+  authorization_encryption_enc_values_supported?: string[]
 }
 
 /** Decoded payload of the Request Object fetched from `request_uri`. */
@@ -63,20 +100,37 @@ export interface RequestObject {
   dcql_query: DcqlQuery
   client_metadata: {
     client_name?: string
-    vp_formats_supported: { circuit_zk: CircuitZkFormats }
+    vp_formats_supported: VpFormats
+    /** direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
+    jwks?: { keys: EncryptionJwk[] }
+    /** Absent: A128GCM only (OpenID4VP 1.0). */
+    encrypted_response_enc_values_supported?: string[]
   }
 }
 
-/** Decoded `results`: pseudonyms as hex (CBOR bstr on the wire), predicates as true. */
+/** A public key in client_metadata.jwks. */
+export interface EncryptionJwk {
+  kty: string
+  crv?: string
+  x?: string
+  y?: string
+  kid?: string
+  use?: string
+  alg?: string
+}
+
+/** Decoded `results`: pseudonyms as hex (CBOR bstr on the wire: 32 bytes for sha-256, 48 for
+ *  hashdh-bls12381g1), predicates as true. */
 export type Results = Record<string, string | true>
 
 /**
- * vp_token: Credential Query id -> array of presentations, each
- * base64url(CBOR(CircuitZkPresentation)) without padding. Opaque to the site.
+ * vp_token: Credential Query id -> array of presentations, each base64url(CBOR(ZkpPresentation))
+ * without padding. Opaque to the site.
  */
 export type VpToken = Record<string, string[]>
 
-/** Body posted to `response_uri` (form-encoded on the wire; vp_token as JSON). */
+/** The response parameters. direct_post.jwt: the payload of the JWE posted as `response`
+ *  (vp_token as a JSON object). Unencrypted direct_post: form fields, vp_token as JSON text. */
 export type AuthorizationResponse =
   | { state: string; vp_token: VpToken }
   | { state: string; error: 'access_denied' | 'invalid_request'; error_description?: string }

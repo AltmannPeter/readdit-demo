@@ -11,7 +11,7 @@ const wallet = useWallet()
     </span>
     <h2 class="mt-4 text-lg font-semibold">{{ props.title }}</h2>
     <div class="mt-3 max-w-md space-y-2 text-left text-sm text-muted">
-      <p>Readdit accounts use a pseudonym from your EU Digital Identity Wallet. We never see your name, date of birth, or any personal information.</p>
+      <p>Community accounts use a pseudonym from your EU Digital Identity Wallet. We never see your name, date of birth, or any personal information.</p>
       <p>Some communities have an age limit. To enter, you prove your eligibility without revealing any details.</p>
       <p>Every account is bound to an identity attestation issued to a real person, so there are no bot accounts.</p>
     </div>

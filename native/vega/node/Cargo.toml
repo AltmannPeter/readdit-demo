@@ -1,8 +1,8 @@
 [package]
-name = "readdit-vega-node"
+name = "community-vega-node"
 version = "0.1.0"
 edition = "2024"
-description = "Node addon: the nym_auth Vega prover and verifier for Readdit's server"
+description = "Node addon: the nym_auth Vega prover and verifier for Community's server"
 publish = false
 
 [lib]
@@ -10,6 +10,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 nym-vega = { path = "../nym-vega" }
+# /tech's Profiling switch: the sampling profiler, shared by the three addons.
+nym-profile = { path = "../../nym-profile" }
 napi = { version = "3", features = ["napi8"] }
 napi-derive = "3"
 serde = "1"

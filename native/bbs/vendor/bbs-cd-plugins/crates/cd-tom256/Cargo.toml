@@ -1,0 +1,34 @@
+[package]
+name = "cd-tom256"
+description = "Toolkit for proofs about BBS-committed values in the P-256 fields: Tom-256, BLS12-381 to Tom-256 commitment transfer, scalar-multiplication, point-addition and on-curve proofs, batch verification."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+parallel = ["bbs-cd-plugin/parallel"]
+# Clone on secret prover state, for the special-soundness tests only.  MUST
+# NOT be enabled in a build you ship.  Only the test target below requires it.
+insecure-test-controls = []
+
+[dependencies]
+bbs-cd.workspace = true
+bbs-cd-plugin.workspace = true
+bls12_381.workspace = true
+p256.workspace = true
+ark-ff.workspace = true
+ark-ec.workspace = true
+ark-std.workspace = true
+num-bigint.workspace = true
+sha2.workspace = true
+rand_core.workspace = true
+
+[dev-dependencies]
+rand_chacha.workspace = true
+
+[[test]]
+name = "sm_transfer"
+required-features = ["insecure-test-controls"]

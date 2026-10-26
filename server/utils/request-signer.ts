@@ -4,7 +4,7 @@ import { verifierHosts } from '#shared/data/communities'
 
 // Signs Request Objects (JWS, ES256, x5c). The leaf certificate's dNSName SAN must equal
 // the client_id host (x509_san_dns). Without configured PEM files a self-signed P-256
-// certificate is generated at start, with a SAN for Readdit's host and one for each community
+// certificate is generated at start, with a SAN for Community's host and one for each community
 // with its own verifier identity (verifierHosts); fine for the mocked wallet, not for a real one.
 
 const ALG = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as const
@@ -16,7 +16,7 @@ interface Signer {
   selfSigned: boolean
 }
 
-const g = globalThis as unknown as { __readditSigner?: Promise<Signer> }
+const g = globalThis as unknown as { __communitySigner?: Promise<Signer> }
 
 async function load(): Promise<Signer> {
   // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
@@ -50,8 +50,8 @@ async function load(): Promise<Signer> {
 }
 
 export function requestSigner(): Promise<Signer> {
-  g.__readditSigner ??= load()
-  return g.__readditSigner
+  g.__communitySigner ??= load()
+  return g.__communitySigner
 }
 
 export async function signRequestObject(payload: object): Promise<string> {

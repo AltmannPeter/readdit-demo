@@ -1,0 +1,35 @@
+# Community's Longfellow backend: the nym_auth Longfellow circuits of the nym-auth-circuits archive on
+# Google's longfellow-zk Rust runtime, compiled into a Node addon that the site's server calls in
+# process. It proves the same statement over the same mdoc credential as native/vega.
+#
+#   vendor/longfellow-zk/  the 11 runtime crates of google/longfellow-zk 61a8a73 (rust/), unchanged,
+#                          in a trimmed workspace of their own (VENDOR-SHA256SUMS; `sha256sum -c`)
+#   circuits/mdoc/         circuits.zst, params.tsv, hash-semantic.tsv and test/, the archive's, unchanged
+#   fixtures/              the archive's credential/ fixtures that the tests read, unchanged
+#   nym-longfellow/        witness, prover and verifier around the runtime (no unsafe code)
+#   node/                  the napi-rs addon: Prover and Verifier objects for Node (napi glue only)
+[workspace]
+resolver = "2"
+members = ["nym-longfellow", "node"]
+exclude = ["vendor"]
+
+[workspace.dependencies]
+core-algebra = { path = "vendor/longfellow-zk/rust/core/algebra" }
+core-proto = { path = "vendor/longfellow-zk/rust/core/proto" }
+runtime-algebra = { path = "vendor/longfellow-zk/rust/runtime/algebra" }
+runtime-ligero = { path = "vendor/longfellow-zk/rust/runtime/ligero" }
+runtime-random = { path = "vendor/longfellow-zk/rust/runtime/random" }
+runtime-zk = { path = "vendor/longfellow-zk/rust/runtime/zk" }
+
+[profile.release]
+opt-level = 3
+# Function names (line tables and linkage names), so the profiler (/tech's Profiling switch)
+# names inlined functions by their full path; no effect on the code generated.
+debug = "limited"
+
+# The proofs are compute-heavy: optimize dependencies even in test builds.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

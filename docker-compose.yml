@@ -1,10 +1,17 @@
-# Readdit demo in a container: the site with the Vega prover and verifier built in (Rust addon).
+# Community demo in a container: the site with its three proof backends built in (Rust addons: Vega, Longfellow and BBS).
 #
 #   docker compose up -d --build        http://localhost:3000   (the first build takes several minutes)
 #   docker compose down
 #
-# There are no separate prover and verifier containers: the site's server runs both in process.
+# There are no separate prover and verifier containers or profiles: the site's server runs them in process.
+# The volume keeps /tech's measurements (.data/measurements.jsonl) across rebuilds; `docker compose
+# down -v` deletes it.
 services:
   web:
     build: .
     ports: ["3000:3000"]
+    volumes:
+      - community-data:/app/.data
+
+volumes:
+  community-data:

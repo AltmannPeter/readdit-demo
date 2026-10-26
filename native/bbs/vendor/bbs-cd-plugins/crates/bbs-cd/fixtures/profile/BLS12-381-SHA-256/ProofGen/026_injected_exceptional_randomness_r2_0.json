@@ -1,0 +1,70 @@
+{
+  "caseName": "injected exceptional randomness: r2 = 0",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofGen",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "signature": "93b27f95e15d458e7d2f06ea31d359e9f85494382cfabd39208bdc617376a831b3c1ab5c1ea584aa3548da59f27c2f3c216924438684b0b8d28dde4dd74b9b20677158e8296e31340f881c2f17311ea4",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "messages": [
+      "676976656e206e616d65",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "",
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"
+      },
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "00",
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      "6c617374"
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "COMMIT",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE"
+    ],
+    "precomputedRands": null
+  },
+  "mockedRng": {
+    "seed": "332e313431353932363533353839373933323338343632363433333833323739",
+    "dst": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f434f4d5f4449535f4d4f434b5f52414e444f4d5f5343414c4152535f4453545f",
+    "overrides": [
+      {
+        "call": 2,
+        "index": 1,
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "result": {
+      "valid": false,
+      "reason": "r2 == 0"
+    }
+  }
+}

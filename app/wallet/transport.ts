@@ -1,4 +1,4 @@
-import { compactVerify, decodeProtectedHeader } from 'jose'
+import { CompactEncrypt, compactVerify, decodeProtectedHeader, importJWK } from 'jose'
 import type { AuthorizationResponse, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
 
 /** How the wallet talks to the verifier: fetch request_uri, post to response_uri. */
@@ -9,7 +9,42 @@ export interface WalletTransport {
     clientId: string
     walletMetadata?: WalletMetadata
   }): Promise<VerifiedRequest>
-  postResponse(responseUri: string, body: AuthorizationResponse): Promise<void>
+  /** direct_post.jwt: encrypts the response to the request's key first (encryptResponse), unless
+   *  the caller passes the encrypted response. */
+  postResponse(request: RequestObject, body: AuthorizationResponse, encrypted?: EncryptedResponse | null): Promise<void>
+}
+
+/** How the response was encrypted, for the technical view. */
+export interface EncryptedResponse {
+  jwe: string
+  header: { alg: string; enc: string; kid?: string }
+  encrypt_ms: number
+}
+
+/**
+ * direct_post.jwt (OpenID4VP 1.0): the response parameters as the payload of a JWE to the first
+ * usable key in client_metadata.jwks, ECDH-ES on P-256, `enc` A128GCM by default, the key's `kid`
+ * copied into the header. Null when the request asks for no encryption or gives no usable key.
+ */
+export async function encryptResponse(request: RequestObject, body: AuthorizationResponse): Promise<EncryptedResponse | null> {
+  if (request.response_mode !== 'direct_post.jwt') return null
+  const jwk = encryptionKeyOf(request)
+  const enc = responseEncOf(request)
+  if (!jwk || !enc) return null
+  const t0 = performance.now()
+  const header = { alg: jwk.alg!, enc, ...(jwk.kid && { kid: jwk.kid }) }
+  const key = await importJWK({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jwk.alg)
+  const jwe = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify(body))).setProtectedHeader(header).encrypt(key)
+  return { jwe, header, encrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+}
+
+/** The form posted to response_uri: `response` (encrypted), or the parameters as fields. Only an
+ *  error response goes unencrypted (OpenID4VP allows it when the wallet cannot encrypt). */
+export async function responseForm(request: RequestObject, body: AuthorizationResponse, encrypted?: EncryptedResponse | null): Promise<URLSearchParams> {
+  const e = encrypted === undefined ? await encryptResponse(request, body) : encrypted
+  if (e) return new URLSearchParams({ response: e.jwe })
+  if (!('error' in body)) throw new Error('the request gives no key to encrypt the presentation to')
+  return new URLSearchParams({ state: body.state, error: body.error })
 }
 
 /** An HTTP refusal from request_uri or response_uri: its status and the code in its error body. */
@@ -81,11 +116,9 @@ export const httpTransport: WalletTransport = {
     if (walletNonce && verified.request.wallet_nonce !== walletNonce) throw new Error('wallet_nonce mismatch')
     return verified
   },
-  async postResponse(responseUri, body) {
-    const form = new URLSearchParams({ state: body.state })
-    if ('error' in body) form.set('error', body.error)
-    else form.set('vp_token', JSON.stringify(body.vp_token))
-    const res = await fetch(responseUri, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })
+  async postResponse(request, body, encrypted) {
+    const form = await responseForm(request, body, encrypted)
+    const res = await fetch(request.response_uri, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })
     if (!res.ok) throw new TransportError('response_uri', res.status, await codeOf(res))
   },
 }

@@ -1,0 +1,50 @@
+{
+  "caseName": "no commitments (N = 0) (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "97139cd1bc902f5859da9dd04fa7c940648168f8fe81f9b2c6bfafce9fbcdb8956b5bba121a294730fd9f89736128f5516e3a8ee1137e2a841de7a264297344299b3c97d586f3273c694a69d5e746fb0403897b9b11fb8574ef8d951c7b07c16",
+    "proof": "000000000000000099a6184d0053dd8c6a28fa5944ebfeba5ea183ca5b50b5f1508287498520abfdfab0ce693607f010fadde79bae09d6a1a68af02ab17e439124d999e1360f0b9f7bcd5f16d20da5b20029350583554686b7d92c0289b1447f67a6d9aa572e35e1a5a4dd3b5f965cc9eb76066b4cc1180a77d9cde994f6b98eca06733d801fe167cb837e93aedba565a231f5b3de4cb5216b8c3cc502af01b7a1635790c8f2b021281a19a27e3c9568485605a73396a75c558b3c82170bfe323f852e712365270e20ad632b11785a15209bbb7325af6ed61073faa06d992089b1dc71fcb2addbaa147b1c71279c817d77bb6a1ed4b9a114178fbbe8f66462ed815f7762dc5fa35fd57a7991292d6cb93a95e66e4d6f5ac8195bcaf6cf14e35c1f51907c6f1587c3ddbb70592c3b88cf81384ac995a8916d62446408988176ff00c46b813e457047dd2bdca5f00a8f075cd85ca52fc571023f73936c958f0e716a93aaa536e4a7dae961de1e85e14539e520e28eb0244050462b8d535814166688c3c80520c70fea2eafb287b87b672da8ebf690bb5d7156523fc2dd74557d50ad73ac3d97822b577fea9067c5966df72851e07e3d79d7bb",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      "676976656e206e616d65",
+      "",
+      "00"
+    ],
+    "commitments": [],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "DISCLOSE",
+      "HIDE",
+      "DISCLOSE",
+      "HIDE",
+      "HIDE",
+      "DISCLOSE",
+      "HIDE",
+      "HIDE"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "5db1e9193e2b4231c394babf18fa7ea86568b84c288f0e998f7b95bd295da95a",
+    "challenge": "523fc2dd74557d50ad73ac3d97822b577fea9067c5966df72851e07e3d79d7bb"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

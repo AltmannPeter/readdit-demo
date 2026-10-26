@@ -1,33 +1,23 @@
 <script setup lang="ts">
+// No Sign up or Log in here (Peter, 2026-10-23: "One single signup and login is enough"): the page
+// offers them (LoginNotice, the gates). Logged in, the account menu.
 const { account, memberships } = useAccount()
-const wallet = useWallet()
-/** Logged in somewhere: Readdit, or only a community with its own pseudonym. */
+/** Logged in somewhere: Community, or only a community with its own pseudonym. */
 const signedIn = computed(() => !!account.value || Object.values(memberships.value).some((m) => !m.banned))
 </script>
 
 <template>
   <header class="sticky top-0 z-30 h-14 border-b border-line bg-surface">
     <div class="mx-auto flex h-full max-w-[1280px] items-center gap-4 px-4">
-      <NuxtLink to="/" class="flex shrink-0 items-center gap-2">
+      <NuxtLink to="/" class="flex shrink-0 items-center gap-2" data-home>
         <AppLogo class="size-8" />
-        <span class="text-lg font-bold tracking-tight">readdit</span>
+        <span class="text-lg font-bold tracking-tight">community</span>
       </NuxtLink>
 
-      <label class="mx-auto hidden h-10 w-full max-w-lg items-center gap-2 rounded-full bg-canvas px-4 text-muted md:flex">
-        <AppIcon name="search" class="size-4 shrink-0" />
-        <input
-          type="search"
-          placeholder="Search Readdit"
-          class="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
-        />
-      </label>
-
       <div class="ml-auto flex shrink-0 items-center gap-2">
-        <template v-if="!signedIn">
-          <button class="btn-outline" @click="wallet.start({ kind: 'signin', intent: 'signup' })">Sign up</button>
-          <button class="btn-primary" @click="wallet.start({ kind: 'signin', intent: 'login' })">Log in</button>
-        </template>
-        <UserMenu v-else />
+        <QuickNav class="mr-1" />
+        <ViewSwitch class="mr-2" />
+        <UserMenu v-if="signedIn" />
       </div>
     </div>
   </header>

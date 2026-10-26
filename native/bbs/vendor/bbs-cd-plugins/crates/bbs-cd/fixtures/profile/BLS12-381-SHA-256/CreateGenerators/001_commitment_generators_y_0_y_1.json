@@ -1,0 +1,18 @@
+{
+  "caseName": "commitment generators (Y_0, Y_1)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "CreateGenerators",
+  "input": {
+    "count": 2,
+    "apiId": "434f4d5f4449535f4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f"
+  },
+  "trace": {},
+  "expected": {
+    "output": [
+      "8ab7988547e458492dc6887c4ddc21d5c1080ca06fd9f999189f1be34d0565b6d7b16c8f05095ec6c3b74bf3ece33df7",
+      "a195746ab2afa3c5f93335d830ea3e29f813641d168ce7ec4eff543246c7d2249f792a34df31b67334fe40be4ea1a869"
+    ]
+  }
+}

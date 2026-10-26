@@ -1,0 +1,21 @@
+{
+  "comment": "Test only (scripts/flows-check.mjs, group N): a teen's credential from another issuer, a second Document Signer made by native/vega/issuer (nym-issuer --holder 2011-03-14 --valid-until 9999-12-31T23:59:59Z). The site does not trust it at start; /tech's 'Trust new issuers' adds it at its first verified presentation.",
+  "holders": [
+    {
+      "credential": {
+        "doctype": "eu.europa.ec.eudi.nym_auth.1",
+        "format": "mso_mdoc",
+        "issuer_signed": "ompuYW1lU3BhY2VzoXgcZXUuZXVyb3BhLmVjLmV1ZGkubnltX2F1dGguMYLYGFhbpGhkaWdlc3RJRABmcmFuZG9tUAU39POoJnSxjv97e0QD6ctxZWxlbWVudElkZW50aWZpZXJqYmlydGhfZGF0ZWxlbGVtZW50VmFsdWXZA-xqMjAxMS0wMy0xNNgYWGikaGRpZ2VzdElEAWZyYW5kb21QXhOx8B6m_e9DpmDFdOxptHFlbGVtZW50SWRlbnRpZmllcmNzc2NsZWxlbWVudFZhbHVlWCAQjm3M1Tzov55rLMRQuIdcktvBrRgxpLIzA2ewSYh2j2ppc3N1ZXJBdXRohEOhASahGCFZAeAwggHcMIIBgqADAgECAhEAq-0jgzSMKBcZKMOdiyQBKDAKBggqhkjOPQQDAjBCMR0wGwYDVQQDDBREZW1vIERvY3VtZW50IFNpZ25lcjEUMBIGA1UECgwLRGVtbyBJc3N1ZXIxCzAJBgNVBAYMAlNFMCAXDTI2MTAyMjAwMDAwMFoYDzk5OTkxMjMxMjM1OTU5WjBCMR0wGwYDVQQDDBREZW1vIERvY3VtZW50IFNpZ25lcjEUMBIGA1UECgwLRGVtbyBJc3N1ZXIxCzAJBgNVBAYMAlNFMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKicXOlzpp6X9JNK7RcFmTxBQhWtfAwy7ABB653F-keZCNaPNeuxellrSooJblOD5HWZF2VYwrL7vF315pTcRBKNXMFUwDwYDVR0PAQH_BAUDAweAADASBgNVHSUECzAJBgcogYxdBQECMB0GA1UdDgQWBBSciiai0LuIFb2LHzBPDM9UJ7dH8TAPBgNVHRMBAf8EBTADAQEAMAoGCCqGSM49BAMCA0gAMEUCIQD53dbYow9yw_DoGYKWCXacjKefOcFofeoCPbuC2rL-wAIgDZ6rupnDyzSY3hys9S-OYz1E_rWMTJIUpPuZQjZj-U1ZAZPYGFkBjqZndmVyc2lvbmMxLjBvZGlnZXN0QWxnb3JpdGhtZ1NIQS0yNTZsdmFsdWVEaWdlc3RzoXgcZXUuZXVyb3BhLmVjLmV1ZGkubnltX2F1dGguMaIAWCCr0y09GtzXxEWogzeH4fDG6T9U-2_LAk2RzltynXn_WgFYIA9VmQp0L-eDNvTBbp0x353a5BOapu_cS_KJg_bP_ReZbWRldmljZUtleUluZm-haWRldmljZUtleaQBAiABIVggmiYk-7YgLXXoCL1FicKRCRnQ4QtdeuHv094SDEqKgkEiWCAiVYmiaHUUKvrsFtIvl0FuuF4zL3z0OPLCPsjJKvvdJWdkb2NUeXBleBxldS5ldXJvcGEuZWMuZXVkaS5ueW1fYXV0aC4xbHZhbGlkaXR5SW5mb6Nmc2lnbmVkwHQyMDI2LTEwLTIyVDAwOjAwOjAwWml2YWxpZEZyb23AdDIwMjYtMTAtMjJUMDA6MDA6MDBaanZhbGlkVW50aWzAdDk5OTktMTItMzFUMjM6NTk6NTlaWEB6U2Y45M8dxLsDTQmSF_z2Ta8b7GtVmC-rAgTTx8-Wf_ZH_V2mzRxVq-SsRnDmQM_VRyMLa2rEpnnjIKu0NSOS"
+      },
+      "device_key": {
+        "crv": "P-256",
+        "d": "EvqbsmpPT__uy6FNPka2MxXB1f_Pngzf1VWLotBnpug",
+        "kty": "EC",
+        "x": "miYk-7YgLXXoCL1FicKRCRnQ4QtdeuHv094SDEqKgkE",
+        "y": "IlWJomh1FCr67BbSL5dBbrheMy989Djywj7IySr73SU"
+      },
+      "secret_seed": "225771c01d9c01e1a1de98816f8af957"
+    }
+  ],
+  "document_signer_pem": "-----BEGIN CERTIFICATE-----\nMIIB3DCCAYKgAwIBAgIRAKvtI4M0jCgXGSjDnYskASgwCgYIKoZIzj0EAwIwQjEd\nMBsGA1UEAwwURGVtbyBEb2N1bWVudCBTaWduZXIxFDASBgNVBAoMC0RlbW8gSXNz\ndWVyMQswCQYDVQQGDAJTRTAgFw0yNjEwMjIwMDAwMDBaGA85OTk5MTIzMTIzNTk1\nOVowQjEdMBsGA1UEAwwURGVtbyBEb2N1bWVudCBTaWduZXIxFDASBgNVBAoMC0Rl\nbW8gSXNzdWVyMQswCQYDVQQGDAJTRTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA\nBConFzpc6ael/STSu0XBZk8QUIVrXwMMuwAQeudxfpHmQjWjzXrsXpZa0qKCW5Tg\n+R1mRdlWMKy+7xd9eaU3EQSjVzBVMA8GA1UdDwEB/wQFAwMHgAAwEgYDVR0lBAsw\nCQYHKIGMXQUBAjAdBgNVHQ4EFgQUnIomotC7iBW9ix8wTwzPVCe3R/EwDwYDVR0T\nAQH/BAUwAwEBADAKBggqhkjOPQQDAgNIADBFAiEA+d3W2KMPcsPw6BmClgl2nIyn\nnznBaH3qAj27gtqy/sACIA2eq7qZw8s0mN4crPUvjmM9RP61jEySFKT7mUI2Y/lN\n-----END CERTIFICATE-----\n"
+}

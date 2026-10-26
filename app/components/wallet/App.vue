@@ -1,20 +1,23 @@
 <script setup lang="ts">
 import type { AuthorizationResponse, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
 import type { WalletTransport } from '~/wallet/transport'
-import type { ConsentView, RequestView } from '~/wallet/engine'
+import type { ConsentView, RequestView, WalletCaps } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
 import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
-import { analyzeRequest, consentFor, parseAuthorizationUrl } from '~/wallet/engine'
-import { TransportError, httpTransport } from '~/wallet/transport'
+import { analyzeRequest, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
+import { TransportError, encryptResponse, httpTransport } from '~/wallet/transport'
+import { report } from '~/wallet/report'
 import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
-import { ProverError, prove, unlockAndSign } from '~/wallet/prover'
-import { findCircuit } from '#shared/registry/circuits'
+import { ProverError, prove, proveBbs, unlockAndSign } from '~/wallet/prover'
+import { findSystem } from '#shared/registry/circuits'
 
 /**
  * The SIROS ID wallet on the phone (mocked screens, real protocol). Drives the holder side of
  * OpenID4VP: scan -> POST request_uri with wallet_metadata -> verify the signed request -> check
- * it and pick a circuit -> consent -> PIN -> native steps (sign, witness and prove) -> POST response_uri.
+ * it and pick a system (a circuit or a scheme) -> consent -> PIN -> native steps -> POST
+ * response_uri. The native steps: for the mdoc (mso_mdoc) sign, then witness and prove; for the
+ * BBS credential (bbs_cd) one prove, in which the device key signs.
  * It publishes its state for the guide panel (useWalletFlow).
  *
  * It answers response_uri when the person declines and when the rulebook asks for an Error
@@ -29,11 +32,13 @@ const props = withDefaults(
     /** The phone this wallet runs on: its credentials, its history, its selected card. */
     phone: PhoneDef
     transport?: WalletTransport
+    /** Start scanning the code on screen at once (the developer view's Simulate scan). */
+    autoScan?: boolean
   }>(),
-  { transport: () => httpTransport },
+  { transport: () => httpTransport, autoScan: false },
 )
 /** Close on the success screen: the person is done on the phone and goes back to the site. */
-const emit = defineEmits<{ finished: [] }>()
+const emit = defineEmits<{ finished: []; scanned: [] }>()
 
 // Titles and descriptions from the SIROS ID wallet's English strings (src/locales/en.json).
 const ERRORS = {
@@ -58,11 +63,11 @@ const credentials = ref<CredentialView[] | null>(null)
 const focus = ref(props.phone.credentials[0] ?? 0)
 /** The credential shown on the home screen or opened last; the next request starts with it. */
 const selected = useState(`siros-selected-${props.phone.id}`, () => props.phone.credentials[0] ?? 0)
-/** The credentials that match the current request's document type, and the "Switch credential" popup. */
+/** The credentials that match one of the current request's credential queries, and the "Switch credential" popup. */
 const matching = ref<CredentialView[]>([])
 const switching = ref(false)
 const verifierSubject = ref('')
-const circuitIds = ref<string[] | null>(null)
+const caps = ref<WalletCaps | null>(null)
 const detected = ref(false)
 const error = ref<{ title: string; description: string; cause?: string } | null>(null)
 const workingTitle = ref('')
@@ -88,7 +93,8 @@ watchEffect(() => {
     credential: current.value,
     matching: matching.value.length,
     switching: switching.value,
-    walletCircuits: circuitIds.value ?? [],
+    walletCircuits: phoneSystems().filter((id) => findSystem(id)?.source_format === 'mso_mdoc'),
+    walletSchemes: phoneSystems().filter((id) => findSystem(id)?.source_format === 'bbs_cd'),
     view: view.value,
     consent: consent.value,
     metrics: metrics.value,
@@ -98,11 +104,14 @@ watchEffect(() => {
   }
 })
 
-/** The credential and the circuits this wallet runs; tried again at the next scan when it failed. */
+/** The credentials and what this wallet can prove; tried again at the next scan when it failed. */
 async function prepare(): Promise<boolean> {
   try {
     credentials.value ??= (await loadCredentials()).filter((c) => props.phone.credentials.includes(c.index))
-    circuitIds.value ??= (await $fetch<{ circuits: Array<{ circuit_id: string }> }>('/api/wallet/capabilities')).circuits.map((c) => c.circuit_id)
+    if (!caps.value) {
+      const c = await $fetch<{ circuits?: Array<{ system_id: string }>; schemes?: Array<{ system_id: string }> }>('/api/wallet/capabilities')
+      caps.value = { systemIds: [...(c.circuits ?? []), ...(c.schemes ?? [])].map((x) => x.system_id) }
+    }
     return true
   } catch (e) {
     const status = (e as { statusCode?: number }).statusCode
@@ -110,12 +119,25 @@ async function prepare(): Promise<boolean> {
     return false
   }
 }
-onMounted(prepare)
+onMounted(async () => {
+  if ((await prepare()) && props.autoScan && props.url && screen.value === 'home') startScan()
+})
 
+/** The systems this wallet can run for the source formats of the credentials on this phone. */
+function phoneSystems(): string[] {
+  const formats = new Set(credentials.value?.map((c) => c.format) ?? [])
+  return (caps.value?.systemIds ?? []).filter((id) => {
+    const f = findSystem(id)?.source_format
+    return !!f && formats.has(f)
+  })
+}
+
+/** wallet_metadata: those systems and their proof systems, in zkp_req. */
 function walletMetadata(): WalletMetadata {
-  const ids = circuitIds.value ?? []
-  const systems = [...new Set(ids.map((id) => findCircuit(id)?.proof_system).filter(Boolean) as string[])]
-  return { vp_formats_supported: { circuit_zk: { circuit_proof_system_values: systems, circuit_id_values: ids } } }
+  const ids = phoneSystems()
+  const encryption = { authorization_encryption_alg_values_supported: ['ECDH-ES'], authorization_encryption_enc_values_supported: ['A128GCM', 'A256GCM'] }
+  if (!ids.length) return { vp_formats_supported: {}, ...encryption }
+  return { vp_formats_supported: { zkp_req: { proof_system_values: [...new Set(ids.map((id) => findSystem(id)!.proof_system))], system_id_values: ids } }, ...encryption }
 }
 
 function fail(e: WalletError, cause?: string) {
@@ -152,6 +174,8 @@ async function onScanned() {
   if (!(await prepare())) return
   const parsed = props.url ? parseAuthorizationUrl(props.url) : null
   if (!parsed) return fail(ERRORS.qr, props.url ? 'not an openid4vp:// request' : 'no QR code on screen')
+  // Before the fetch: the site tells this phone's scan from a real phone's by it.
+  emit('scanned')
   try {
     const verified = await props.transport.fetchRequest({
       requestUri: parsed.requestUri,
@@ -161,11 +185,18 @@ async function onScanned() {
     })
     request.value = verified.request
     verifierSubject.value = verified.signer.subject
-    // Every credential of the requested document type matches; the one selected on the home
-    // screen is used (else the first), and the request screen offers the others ("Switch credential").
-    const doctype = verified.request.dcql_query?.credentials?.[0]?.meta?.doctype_value
-    matching.value = credentials.value!.filter((c) => c.docType === doctype)
-    focus.value = matching.value.find((c) => c.index === selected.value)?.index ?? matching.value[0]?.index ?? 0
+    await report(verified.request.state, 'authenticate', 'Verifier authenticated', {
+      client_id: verified.request.client_id,
+      certificate: verified.signer.subject,
+      checks: ['ES256 signature by the x5c leaf', 'dNSName SAN equals the client_id host', 'client_id matches the QR code'],
+    })
+    // Every credential that fits one of the request's queries (format and document type or
+    // schema) matches; the one selected on the home screen is used, else the first in the
+    // request's order of preference, and the request screen offers the others ("Switch credential").
+    const order = verified.request.dcql_query?.credentials ?? []
+    const rank = (c: CredentialView) => order.findIndex((q) => q === queryFor(verified.request, c))
+    matching.value = credentials.value!.filter((c) => rank(c) >= 0).sort((a, b) => rank(a) - rank(b))
+    focus.value = matching.value.find((c) => c.index === selected.value)?.index ?? matching.value[0]?.index ?? credentials.value![0]?.index ?? 0
     await analyze()
   } catch (e) {
     // An HTTP refusal from request_uri; anything else concerns the request's signature or certificate.
@@ -178,22 +209,39 @@ async function onScanned() {
 /** The request against the chosen credential: the request screen, or Requirement Not Met. */
 async function analyze() {
   const cred = current.value!
-  view.value = analyzeRequest(request.value!, cred, today.value, circuitIds.value ?? [])
+  view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { systemIds: [] })
   consent.value = view.value.satisfiable ? await consentFor(view.value, cred, verifierSubject.value) : null
   screen.value = view.value.satisfiable ? 'request' : 'unmet'
+  const v = view.value
+  await report(request.value!.state, 'match', v.satisfiable ? 'nym_auth attestation matched' : v.problem === 'age' ? 'Attestation does not meet the age range' : 'Request not supported', {
+    credential: cred.docType,
+    format: cred.format,
+    ...(v.query && { query: v.query.id }),
+    ...(v.system && { system_id: v.system.system_id, proof_system: v.system.proof_system }),
+    ...(v.reason && { reason: v.reason }),
+    response_mode: request.value!.response_mode,
+  })
 }
 
-/** "Switch credential": the request is checked again against the chosen credential. */
+/** "Switch credential": the request is checked again against the chosen credential, which the
+ *  next request starts with too. */
 async function choose(index: number) {
   switching.value = false
   focus.value = index
+  selected.value = index
   await analyze()
 }
 
-/** Posts to response_uri; a refusal there ends on the matching error screen (410: Request Expired). */
+/** Encrypts the response (direct_post.jwt) and posts it to response_uri; a refusal there ends on
+ *  the matching error screen (410: Request Expired). */
 async function send(body: AuthorizationResponse): Promise<boolean> {
   try {
-    await props.transport.postResponse(request.value!.response_uri, body)
+    const req = request.value!
+    const encrypted = await encryptResponse(req, body)
+    if (encrypted) {
+      await report(req.state, 'encrypt', 'Response encrypted', { header: encrypted.header, bytes: encrypted.jwe.length, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
+    }
+    await props.transport.postResponse(req, body, encrypted)
     return true
   } catch (e) {
     if (e instanceof TransportError) fail(e.status === 410 ? ERRORS.expired : ERRORS.response, e.message)
@@ -209,6 +257,7 @@ async function send(body: AuthorizationResponse): Promise<boolean> {
 async function refuse(next: WalletScreen, at: 'request' | 'pin' | null = null) {
   const independent = view.value?.problem === 'unsupported' || view.value?.problem === 'no_circuit'
   const code = independent ? 'invalid_request' : 'access_denied'
+  if (at) await report(request.value!.state, 'decline', 'Holder declined', { at })
   if (!(await send({ state: request.value!.state, error: code }))) return
   sentError.value = code
   declinedAt.value = at
@@ -216,6 +265,7 @@ async function refuse(next: WalletScreen, at: 'request' | 'pin' | null = null) {
 }
 
 function toPin() {
+  void report(request.value?.state, 'consent', 'Holder approved', { fields: consent.value?.fields.map((f) => f.name) })
   screen.value = 'pin'
 }
 
@@ -232,17 +282,27 @@ async function onPin() {
   screen.value = 'working'
   workingTitle.value = 'Creating presentation...'
   metrics.value = null
-  let out: ProveOutput
+  const queryId = view.value!.query!.id
+  let presentation: string
   try {
-    const signed = await unlockAndSign({ request: req, credential: focus.value })
-    metrics.value = { sign_ms: signed.metrics.sign_ms }
-    out = await prove({ request: req, circuitId: view.value!.circuit!.circuit_id, deviceSignature: signed.device_signature, credential: focus.value })
-    metrics.value = {
-      ...metrics.value,
-      witness_ms: out.witness_ms ?? out.metrics.witness_ms,
-      prove_ms: out.metrics.prove_ms,
-      proof_bytes: out.metrics.proof_bytes,
-      presentation_bytes: out.metrics.presentation_bytes,
+    if (view.value!.scheme) {
+      const out = await proveBbs({ request: req, queryId, credential: focus.value })
+      const { prove_ms, presentation_bytes, ...bbs } = out.metrics
+      metrics.value = { sign_ms: bbs.device_sign_ms, prove_ms, presentation_bytes, bbs }
+      presentation = out.presentation
+    } else {
+      const systemId = view.value!.circuit!.system_id
+      const signed = await unlockAndSign({ request: req, credential: focus.value, systemId })
+      metrics.value = { sign_ms: signed.metrics.sign_ms }
+      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value })
+      metrics.value = {
+        ...metrics.value,
+        witness_ms: out.witness_ms ?? out.metrics.witness_ms,
+        prove_ms: out.metrics.prove_ms,
+        proof_bytes: out.metrics.proof_bytes,
+        presentation_bytes: out.metrics.presentation_bytes,
+      }
+      presentation = out.presentation
     }
   } catch (e) {
     const code = (e as Error).message
@@ -256,7 +316,7 @@ async function onPin() {
     return
   }
   workingTitle.value = 'Sending response...'
-  if (!(await send({ state: req.state, vp_token: { [req.dcql_query.credentials[0]!.id]: [out.presentation] } }))) return
+  if (!(await send({ state: req.state, vp_token: { [queryId]: [presentation] } }))) return
   workingTitle.value = 'Presentation sent successfully'
   history.value = [{ audience: host, at: Date.now(), credential: focus.value }, ...history.value]
   await wait(Math.max(MIN_COMPLETED_MS, MIN_PROGRESS_MS - (Date.now() - shownAt)))

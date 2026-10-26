@@ -8,8 +8,11 @@ import { ageOn, loadCredentials } from '~/wallet/holder'
 // the verifier; this dialog shows the QR code, follows the status and applies the result
 // to this browser's login. It publishes its state for the guide panel (useDialogFlow).
 // Closing it before the request ends cancels the session on the server.
-// The phone beside it is one of the demo's phones; Swap phone hands over to the other one while
-// the QR code is on screen (the site records the swap for the technical view).
+// The phone beside it is one of the demo's phones, hidden until the presenter shows it (the main
+// flow scans with a real phone); Swap phone hands over to the next one while the QR code is on
+// screen (the site records the swap for the technical view). Once a phone has scanned the code,
+// the QR code makes way for the request's status, and when that phone was not the demo phone, the
+// demo phone is hidden for the rest of the request.
 
 interface Completion {
   ok: boolean
@@ -17,14 +20,21 @@ interface Completion {
   handle?: string
   /** The age proof was recorded too (a sign-in at an age-restricted community). */
   age?: boolean
-  /** A community account: its community, and whether it was just linked to the Readdit account. */
+  /** A community account: its community, and whether it was just linked to the Community account. */
   community?: string
   linked?: boolean
 }
 
 const { state, close } = useWallet()
 const { refresh, account } = useAccount()
-const { phone, swap: swapPhone } = usePhone()
+const { phone, other: nextPhone, swap: swapPhone } = usePhone()
+const demoPhone = useDemoPhone()
+onMounted(demoPhone.restore)
+/** The demo phone scanned this request's code. */
+const demoScanned = ref(false)
+/** Another phone (a real one) scanned this request's code: the demo phone has no part in it. */
+const realPhone = ref(false)
+const phoneShown = computed(() => demoPhone.shown.value && !realPhone.value)
 const today = useToday()
 /** Each phone's owner's age today, from the birth date in the phone's credential. */
 const ages = ref<Record<string, number>>({})
@@ -80,7 +90,7 @@ let pollErrors = 0
 const dialogFlow = useDialogFlow()
 const lastOutcome = useLastOutcome()
 watchEffect(() => {
-  dialogFlow.value = { phase: phase.value, authUrl: authUrl.value, failure: failure.value, completion: completion.value, verification: verification.value, swapped: swapped.value }
+  dialogFlow.value = { phase: phase.value, authUrl: authUrl.value, failure: failure.value, completion: completion.value, verification: verification.value, swapped: swapped.value, demoPhone: phoneShown.value }
 })
 
 const community = computed(() => {
@@ -106,7 +116,7 @@ const subtitle = computed(() => {
   if (!community.value) return ''
   const p = state.value.purpose
   if (p?.kind === 'community') {
-    return `${communityName.value} asks for proof of human: one account per person, not linked to your other accounts unless you choose to.${p.link && account.value ? ` You chose to link it to u/${account.value.handle}.` : ''}`
+    return `${communityName.value} is fully anonymous. Your pseudonym will be unique to /${community.value.slug}. One account per person.${p.link && account.value ? ` You chose to link it to u/${account.value.handle}.` : ''}`
   }
   const gated = `${COMMUNITY_PREFIX}${community.value.slug} is for ${ageText.value}.`
   return state.value.purpose?.kind === 'signin' ? `${gated} The same step logs you in with a pseudonym.` : gated
@@ -117,13 +127,14 @@ const FAILURES: Record<string, string> = {
   invalid_request: `Nothing was shared with ${siteName}.`,
   invalid: `${siteName} could not verify the response.`,
   unavailable: 'Verification is not available right now. Try again later.',
+  none_accepted: `${siteName} does not accept any proof yet. Switch one on in the technical view, then try again.`,
   expired: 'The code has expired. Try again.',
   cancelled: 'The request was cancelled. Try again.',
   gone: 'This code is no longer valid. Try again.',
   banned: `This wallet's ${siteName} account has been banned.`,
   community_banned: 'This wallet\'s account in this community has been banned.',
-  other_pseudonym: 'Your Readdit account is linked to another account in this community, from another wallet. Nothing was changed.',
-  linked_elsewhere: 'This account in the community is linked to another Readdit account. Nothing was changed.',
+  other_pseudonym: 'Your Community account is linked to another account in this community, from another wallet. Nothing was changed.',
+  linked_elsewhere: 'This account in the community is linked to another Community account. Nothing was changed.',
   mismatch: 'The pseudonym in this proof does not match your account. The age proof was not applied.',
   no_account: `There is no ${siteName} account for this wallet. Sign up to create one.`,
   account_exists: 'There is already an account associated with this user. Log in instead.',
@@ -133,6 +144,7 @@ const FAILURES: Record<string, string> = {
   age_verified: 'Your age is already verified for this community.',
 }
 const TITLES: Record<string, string> = {
+  none_accepted: 'No proof accepted',
   community_banned: 'Account banned',
   other_pseudonym: 'Pseudonym does not match',
   linked_elsewhere: 'Linked to another account',
@@ -170,6 +182,8 @@ async function start() {
   activePurpose = p
   phoneFinished = false
   swapped.value = false
+  demoScanned.value = false
+  realPhone.value = false
   phase.value = 'starting'
   failure.value = null
   completion.value = null
@@ -222,6 +236,7 @@ async function poll() {
     if (mine !== run) return
     pollErrors = 0
     if (s.verification) verification.value = s.verification
+    if (s.status !== 'waiting' && s.status !== 'failed' && !demoScanned.value) realPhone.value = true
     if (s.status === 'scanned' && phase.value === 'waiting') phase.value = 'scanned'
     else if (s.status === 'responded') phase.value = 'verifying'
     else if (s.status === 'failed') failWith(s.failure ?? 'invalid')
@@ -258,7 +273,7 @@ async function complete(id: string, mine: number) {
   const account = c.kind === 'created' ? `Account created: u/${c.handle}` : c.kind === 'logged_in' ? `Logged in as u/${c.handle}` : ''
   if (c.community) {
     message.value = c.kind === 'created' ? `Joined ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}` : `In ${COMMUNITY_PREFIX}${c.community} as u/${c.handle}`
-    note.value = c.linked ? 'Linked to your Readdit account.' : ''
+    note.value = c.linked ? 'Linked to your Community account.' : ''
   } else if (c.age) {
     message.value = 'Age verified'
     note.value = account
@@ -268,9 +283,18 @@ async function complete(id: string, mine: number) {
   }
   phase.value = 'success'
   if (activePurpose) lastOutcome.value = { purpose: activePurpose, ok: true, kind: c.kind, handle: c.handle }
-  // The dialog stays open until Close on the phone's success screen (or the site's own close).
+  // The dialog stays open until Close on the demo phone's success screen (or the site's own close).
+  // A real phone's Close does not reach the site: the dialog shows the outcome briefly and closes.
   if (phoneFinished) close()
+  else if (realPhone.value) {
+    clearTimeout(closeTimer)
+    closeTimer = setTimeout(() => mine === run && phase.value === 'success' && close(), REAL_PHONE_CLOSE_MS)
+  }
 }
+
+/** How long the outcome of a real phone's request stays on screen. */
+const REAL_PHONE_CLOSE_MS = 2500
+let closeTimer: ReturnType<typeof setTimeout> | undefined
 
 /** Close on the phone's success screen: back to the site once the site has applied the result. */
 let phoneFinished = false
@@ -310,6 +334,7 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  clearTimeout(closeTimer)
   stop()
 })
 </script>
@@ -329,7 +354,7 @@ onBeforeUnmount(() => {
         :style="{ right: guide.width.value }"
         @click.self="close"
       >
-        <div class="card flex w-full max-w-[880px] overflow-hidden shadow-2xl" role="dialog" aria-modal="true" :aria-label="title">
+        <div class="card flex w-full overflow-hidden shadow-2xl" :class="phoneShown ? 'max-w-[880px]' : 'max-w-[520px]'" role="dialog" aria-modal="true" :aria-label="title">
           <!-- website side -->
           <section class="flex min-w-0 flex-1 flex-col p-8">
             <div class="flex items-start justify-between gap-4">
@@ -344,12 +369,8 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-1 flex-col items-center justify-center py-6">
               <div class="relative size-60 rounded-2xl border border-line bg-white p-4">
-                <QrCode
-                  v-if="authUrl"
-                  :value="authUrl"
-                  class="transition-opacity duration-300"
-                  :class="phase === 'waiting' ? 'opacity-100' : 'opacity-10'"
-                />
+                <!-- once a phone has scanned it, the code makes way for the request's status -->
+                <QrCode v-if="authUrl && phase === 'waiting'" :value="authUrl" data-qr />
                 <div
                   v-if="phase !== 'waiting'"
                   class="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-white/80 px-6 text-center"
@@ -389,17 +410,28 @@ onBeforeUnmount(() => {
                   <button v-else-if="retryable" class="btn-primary" @click="start">Try again</button>
                   <button class="btn-outline" @click="close">Close</button>
                 </div>
-                <ol v-else class="space-y-2 text-sm text-muted">
+                <ol v-else-if="phase === 'waiting' || phase === 'starting'" class="space-y-2 text-sm text-muted">
                   <li class="flex gap-3"><span class="font-semibold text-ink">1</span>Open an EUDI Wallet App on your phone</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">2</span>Tap the scan button and point your phone at this code</li>
                   <li class="flex gap-3"><span class="font-semibold text-ink">3</span>Review the request and enter any 6-digit PIN</li>
                 </ol>
               </div>
             </div>
+            <button
+              v-if="!realPhone"
+              type="button"
+              class="hidden items-center gap-1.5 self-start text-xs text-muted hover:text-ink md:flex"
+              :aria-expanded="phoneShown"
+              data-demo-phone-toggle
+              @click="demoPhone.toggle"
+            >
+              <AppIcon name="phone" class="size-3.5" />
+              {{ phoneShown ? 'Hide demo phone' : 'Show demo phone' }}
+            </button>
           </section>
 
           <!-- the phone in use: one of the demo's phones, swappable while the QR code is on screen -->
-          <section class="hidden flex-col items-center justify-center gap-3 border-l border-line bg-canvas px-10 py-5 md:flex">
+          <section v-show="phoneShown" class="hidden flex-col items-center justify-center gap-3 border-l border-line bg-canvas px-10 py-5 md:flex" data-demo-phone>
             <div class="flex w-[330px] items-center justify-between">
               <p class="flex items-center gap-2 text-sm font-semibold" aria-live="polite" data-phone-label>
                 <span class="size-2.5 rounded-full" :style="{ backgroundColor: phone.tone }" aria-hidden="true" />
@@ -408,7 +440,7 @@ onBeforeUnmount(() => {
               <button
                 class="flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="!canSwap"
-                :title="canSwap ? 'Hand over to the other phone' : 'The phone on screen has already scanned the code'"
+                :title="canSwap ? `Hand over to the ${nextPhone.label.replace(/^\w/, (c) => c.toLowerCase())}` : 'The phone on screen has already scanned the code'"
                 @click="swap"
               >
                 <AppIcon name="swap" class="size-3.5" />
@@ -417,7 +449,7 @@ onBeforeUnmount(() => {
             </div>
             <!-- a swap slides the other phone in; a new request replaces the phone at once -->
             <div :key="phone.id" :class="swapAnimating && 'phone-swap-in'">
-              <WalletApp :key="`${attempt}-${phone.id}`" :url="authUrl" :phone="phone" @finished="onPhoneFinished" />
+              <WalletApp :key="`${attempt}-${phone.id}`" :url="authUrl" :phone="phone" @scanned="demoScanned = true" @finished="onPhoneFinished" />
             </div>
           </section>
         </div>

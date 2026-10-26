@@ -1,0 +1,48 @@
+{
+  "caseName": "subset with original indexes 1 and 3 (subset positions 0 and 1 have other types)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "PrecomputeCommitment",
+  "input": {
+    "committedMessages": [
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      {
+        "scalar": "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"
+      }
+    ],
+    "commitmentIndexes": [
+      1,
+      3
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ]
+  },
+  "mockedRng": {
+    "seed": "332e313431353932363533353839373933323338343632363433333833323739",
+    "dst": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f434f4d5f4449535f4d4f434b5f52414e444f4d5f5343414c4152535f4453545f"
+  },
+  "trace": {},
+  "expected": {
+    "output": {
+      "commitments": [
+        "b8acff409a260e6bca01d4c31cedc2c82d2d96b230f9363420f48d3e2f69ebe2cc69da412cd93d574a54043f675f48fa",
+        "b77acce086490f8ed2e7552924e9891e16d504549e541fd3397e00688cf32b0d289a20e73c10c1db55ee8f43ea3a8ef1"
+      ],
+      "commitmentRands": [
+        "720d17d189ad16d3b380b3b9d14cc108f7c141f6b77db654bfefc025716ff605",
+        "4aa21ab5a49e2433f57176e460f867a4a147b510db35f384e1632af4b6b42e49"
+      ]
+    }
+  }
+}

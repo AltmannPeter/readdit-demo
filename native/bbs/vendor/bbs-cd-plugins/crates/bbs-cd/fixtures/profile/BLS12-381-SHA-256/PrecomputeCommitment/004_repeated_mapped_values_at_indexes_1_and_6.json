@@ -1,0 +1,48 @@
+{
+  "caseName": "repeated mapped values at indexes 1 and 6",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHA-256",
+  "operation": "PrecomputeCommitment",
+  "input": {
+    "committedMessages": [
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      },
+      {
+        "scalar": "00000000000000000000000000000000000000000000000000000000012c9985"
+      }
+    ],
+    "commitmentIndexes": [
+      1,
+      6
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ]
+  },
+  "mockedRng": {
+    "seed": "332e313431353932363533353839373933323338343632363433333833323739",
+    "dst": "4242535f424c53313233383147315f584d443a5348412d3235365f535357555f524f5f4832475f484d32535f5332535f434f4d5f4449535f4d4f434b5f52414e444f4d5f5343414c4152535f4453545f"
+  },
+  "trace": {},
+  "expected": {
+    "output": {
+      "commitments": [
+        "b8acff409a260e6bca01d4c31cedc2c82d2d96b230f9363420f48d3e2f69ebe2cc69da412cd93d574a54043f675f48fa",
+        "acbfea96f6408f8faa9caa03a306775942960c132f380ae4a7193743b92f5303a4688d9738bacba740121a8e3ad640f4"
+      ],
+      "commitmentRands": [
+        "720d17d189ad16d3b380b3b9d14cc108f7c141f6b77db654bfefc025716ff605",
+        "4aa21ab5a49e2433f57176e460f867a4a147b510db35f384e1632af4b6b42e49"
+      ]
+    }
+  }
+}

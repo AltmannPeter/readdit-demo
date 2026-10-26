@@ -1,4 +1,4 @@
-# Readdit's Vega backend: the nym_auth circuits and proving system of the nym-auth-circuits
+# Community's Vega backend: the nym_auth circuits and proving system of the nym-auth-circuits
 # archive, compiled into a Node addon that the site's server calls in process.
 #
 #   vega-age/      the circuits and the hand-written witness builder, vendored unchanged
@@ -14,3 +14,6 @@ members = ["vega-age", "nym-vega", "node", "issuer"]
 [profile.release]
 # The addon and the issuer are built once; the prover's speed matters, its build time does not.
 codegen-units = 16
+# Function names (line tables and linkage names), so the profiler (/tech's Profiling switch)
+# names inlined functions by their full path; no effect on the code generated.
+debug = "limited"

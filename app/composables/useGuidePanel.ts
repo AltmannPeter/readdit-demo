@@ -1,6 +1,6 @@
 const OPEN_WIDTH = '22rem'
 const CLOSED_WIDTH = '2.75rem'
-const STORAGE_KEY = 'readdit-guide-open'
+const STORAGE_KEY = 'community-guide-open'
 
 /** The guide panel docked at the right edge: open or collapsed, and the width the site leaves for it. */
 export function useGuidePanel() {

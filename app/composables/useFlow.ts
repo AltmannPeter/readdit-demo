@@ -13,6 +13,17 @@ export interface ProofMetrics {
   prove_ms?: number
   proof_bytes?: number
   presentation_bytes?: number
+  /** bbs_cd: the BBS prover's parts (commitments, BBS proof, each plugin) and sizes. */
+  bbs?: {
+    offline_ms?: number
+    bbs_ms?: number
+    ecdsa_pop_ms?: number
+    device_sign_ms?: number
+    pseudonym_ms?: number
+    date_range_ms?: number | null
+    online_ms?: number
+    parts?: { bbs_proof: number; ecdsa_pop: number; pseudonym: number; date_range: number | null }
+  }
 }
 
 /** What the wallet on the phone shows and knows about the current request. */
@@ -26,8 +37,9 @@ export interface WalletFlow {
   matching: number
   /** The "Switch credential" popup is open. */
   switching: boolean
-  /** Circuits the wallet can run (its wallet_metadata). */
+  /** Circuits (mso_mdoc) and schemes (bbs_cd) the wallet lists in its wallet_metadata for this phone. */
   walletCircuits: string[]
+  walletSchemes: string[]
   view: RequestView | null
   consent: ConsentView | null
   metrics: ProofMetrics | null
@@ -58,6 +70,8 @@ export interface DialogFlow {
   completion: { kind: string; handle?: string; age?: boolean; community?: string; linked?: boolean } | null
   /** The phone was swapped while this request's QR code was on screen. */
   swapped: boolean
+  /** The demo phone is on screen beside the QR code (hidden at first, and once a real phone scanned). */
+  demoPhone: boolean
   verification: VerificationMetrics | null
 }
 
@@ -77,6 +91,7 @@ export const initialWalletFlow = (): WalletFlow => ({
   matching: 0,
   switching: false,
   walletCircuits: [],
+  walletSchemes: [],
   view: null,
   consent: null,
   metrics: null,
@@ -88,6 +103,6 @@ export const initialWalletFlow = (): WalletFlow => ({
 export const useWalletFlow = () => useState<WalletFlow>('flow-wallet', initialWalletFlow)
 
 export const useDialogFlow = () =>
-  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null, swapped: false }))
+  useState<DialogFlow>('flow-dialog', () => ({ phase: 'starting', authUrl: null, failure: null, completion: null, verification: null, swapped: false, demoPhone: false }))
 
 export const useLastOutcome = () => useState<LastOutcome | null>('flow-last', () => null)

@@ -1,0 +1,55 @@
+{
+  "caseName": "repeated mapped values at different committed indexes (verify)",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "ProofVerify",
+  "input": {
+    "PK": "96615c4f4c8c12abefbfd47e298298f961ecb71cdcf8e84ed9667c277d9262b446a56852ef22f7940227b8704d2db160093a0f03bb10c72889c617ed85019ada70534ff314779e37e3e327fc567209cfd3d5afbccf4b6bde6ffc18d97ff1d1bb",
+    "proof": "00000000000000028dd84f34f1016db13cb9f1254ab149d81616545b2ca52a21e5c0259fc5b9c67065a818da2dcb809afee659bd55e20cc292fe8c332626e1ac9a331e37f2e13f4bfe1ecb8ab176c3e6b7dfaeb62c4d84f7d757af9e57f84643a02ca36ae440db818c9709a38af6dcaff42bc4f37136e23f30e2fa336ad2d8f5bad76cd35ddd032cb0f886805ada5463f46474517b90f13f44b4974758c3708deb3a71a5f2802e5187c5dc6b3813478461f13cb167b0e1881786c523fa2e0cad91a98c76a7d014021ecbec9b1e29b3296c8d7a6e4582841a0542b9fdae94b3cdbba855127c9177d5be99b08f7e986b638c837d77887fccdb29ce0d0d21cbf75bffab855e15b54dbfe3f68cd62a648d182b0c6a3be444e0bd2f5aa2a2afceef0dd79238a5b31f78c7175e08a4561dd4ef1d824e40887b2b38632627e8273a721e4676889baf0601cdc55e3099392adddba5375094cd1d48065ac081cc067453f6be1d802ed77276687a2da9b7d28a680a84c708d32473d5346cfa7581245fcd94faeeed2decaad5dec63be178c09d31334f107871f0aeeaeb93fe15111ed8b49f2b7ad4c94914159fd490a578fa157be8ebb711493bbb9dfad415a6b693c83eac635976b487ae97b0a38521f6de4fadf66dc7e082c5e2d6010eca2255716c5b957dbc204a508ebf54f889ff829f1aa6d5fc3802a7de89c0134125d25d7ba34c53f82ff397842f04442164747d65ae5d7f2a76644aa47c64d735da6100dbf39f8cc7cad4c7870d06580e32def2e66e8731ef6b290e4738a0b25e53937f1bface90053fcd5d28ffeaeae530b04dcfe1763265fb4ddabb61dc11",
+    "header": "11223344556677889900aabbccddeeff",
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "disclosedMessages": [
+      "",
+      {
+        "scalar": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "6c617374"
+    ],
+    "commitments": [
+      "93fe15111ed8b49f2b7ad4c94914159fd490a578fa157be8ebb711493bbb9dfad415a6b693c83eac635976b487ae97b0",
+      "a38521f6de4fadf66dc7e082c5e2d6010eca2255716c5b957dbc204a508ebf54f889ff829f1aa6d5fc3802a7de89c013"
+    ],
+    "messageTypes": [
+      "OCTETS",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "SCALAR",
+      "OCTETS",
+      "SCALAR",
+      "OCTETS"
+    ],
+    "messageDisclosures": [
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE",
+      "HIDE",
+      "DISCLOSE",
+      "HIDE",
+      "COMMIT",
+      "DISCLOSE"
+    ]
+  },
+  "trace": {
+    "apiId": "4242535f424c53313233383147315f584f463a5348414b452d3235365f535357555f524f5f4832475f484d32535f5332535f",
+    "domain": "077b53af2f7fd80166359a7b78d2bcac31e4b9580e71ecc09e4c752bc63953fe",
+    "challenge": "5e53937f1bface90053fcd5d28ffeaeae530b04dcfe1763265fb4ddabb61dc11"
+  },
+  "expected": {
+    "result": {
+      "valid": true,
+      "reason": null
+    }
+  }
+}

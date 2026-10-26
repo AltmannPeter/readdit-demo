@@ -2,7 +2,7 @@
 name = "nym-issuer"
 version = "0.1.0"
 edition = "2024"
-description = "Issues Readdit's demo nym_auth mdoc (SPEC.md §2.1 profile), device key, secret seed and trust anchor"
+description = "Issues Community's demo nym_auth mdoc (SPEC.md §2.1 profile), device key, secret seed and trust anchor"
 publish = false
 
 [[bin]]

@@ -1,0 +1,19 @@
+{
+  "caseName": "three commitments, the first and third identical",
+  "specVersion": "v0.5",
+  "baseline": "BBS-12",
+  "ciphersuite": "BLS12-381-SHAKE-256",
+  "operation": "PresentationContext",
+  "input": {
+    "presentationHeader": "bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501",
+    "commitments": [
+      "91abee38c503bd8956916b13ccb5b0d76fe92ad83741b6a9d689baa521dfd63311d55394cd50c8cc81b6049c8d836adf",
+      "955a0d4b4941653efc81b77d56feece9374d5bcfabae4569c4b077bf4591ec67d143d8a2eff9f649c4f0515b231ecb58",
+      "91abee38c503bd8956916b13ccb5b0d76fe92ad83741b6a9d689baa521dfd63311d55394cd50c8cc81b6049c8d836adf"
+    ]
+  },
+  "trace": {},
+  "expected": {
+    "output": "0000000000000020bed231d880675ed101ead304512e043ade9958dd0241ea70b4b3957fba941501000000000000000391abee38c503bd8956916b13ccb5b0d76fe92ad83741b6a9d689baa521dfd63311d55394cd50c8cc81b6049c8d836adf955a0d4b4941653efc81b77d56feece9374d5bcfabae4569c4b077bf4591ec67d143d8a2eff9f649c4f0515b231ecb5891abee38c503bd8956916b13ccb5b0d76fe92ad83741b6a9d689baa521dfd63311d55394cd50c8cc81b6049c8d836adf"
+  }
+}

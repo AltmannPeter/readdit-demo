@@ -1,4 +1,4 @@
-//! nym-issuer: issues the Readdit demo's `eu.europa.ec.eudi.nym_auth.1` mdocs under the issuance
+//! nym-issuer: issues the Community demo's `eu.europa.ec.eudi.nym_auth.1` mdocs under the issuance
 //! profile of nym-auth-circuits SPEC.md §2.1, with fresh keys:
 //!
 //! - a demo issuer key (P-256) and its self-signed Document Signer certificate, which the

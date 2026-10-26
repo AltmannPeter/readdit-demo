@@ -10,7 +10,7 @@ const post = computed(() => {
 })
 const { access } = useCommunityAccess(community)
 const { account, memberships, refresh } = useAccount()
-/** Who comments: the community account in a community with its own pseudonym, else the Readdit account. */
+/** Who comments: the community account in a community with its own pseudonym, else the Community account. */
 const author = computed(() => (community.value?.nymHost ? memberships.value[community.value.slug]?.handle : account.value?.handle) ?? null)
 
 interface UserComment {
@@ -46,7 +46,7 @@ async function submit() {
 }
 const totalComments = computed(() => (post.value ? countComments(post.value.comments) : 0) + userComments.value.length)
 
-useHead(() => ({ title: post.value ? `${post.value.title} · Readdit` : 'Readdit' }))
+useHead(() => ({ title: post.value ? `${post.value.title} · Community` : 'Community' }))
 </script>
 
 <template>
