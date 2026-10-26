@@ -238,3 +238,65 @@ fn learned_issuer() {
   let demo = prove(&prover, &req).unwrap();
   assert_eq!(verify(&verifier, &req, demo["presentation"].as_str().unwrap())["ok"], true);
 }
+
+
+/// `prove_with`: the device key signs through a `HashSigner` the wallet supplies (a key-store key in
+/// a real wallet; here the same software key, counting its signatures). The presentation verifies,
+/// with the pseudonym `prove` gives, and the key signed exactly once.
+#[test]
+fn prove_with_a_device_signer() {
+  use cd_ecdsa_pop::{HashSigner, Mode, SoftwareDevice};
+  use nym_bbs::credential::CredentialJson;
+  use nym_bbs::profile::{Handover, RequestObject};
+  use nym_bbs::prover::PresentInput;
+  use std::cell::Cell;
+
+  struct Counting {
+    device: SoftwareDevice,
+    calls: Cell<u32>,
+  }
+  impl HashSigner for Counting {
+    fn hash_public_key(&self) -> bbs_cd_plugin::error::Result<[u8; 33]> {
+      self.device.hash_public_key()
+    }
+    fn sign_message(&self, msg: &[u8]) -> bbs_cd_plugin::error::Result<(p256::Scalar, p256::Scalar)> {
+      self.calls.set(self.calls.get() + 1);
+      self.device.sign_message(msg)
+    }
+  }
+
+  let prover = Prover::load();
+  let verifier = Verifier::load(&std::fs::read(root("native/bbs/demo/issuer-params.bin")).unwrap()).unwrap();
+  let w = wallet();
+  let d = nym_bbs::unb64url("d", w["holders"][0]["device_key"]["d"].as_str().unwrap()).unwrap();
+  let signer = Counting {
+    device: SoftwareDevice::from_key(p256::ecdsa::SigningKey::from_slice(&d).unwrap(), Mode::Hashed, false),
+    calls: Cell::new(0),
+  };
+
+  let req = request("community.example", "fedcba9876543210fedcba9876543210", Some(json!({ "ge": "2008-10-20", "le": "2013-10-19" })));
+  let ro: RequestObject = serde_json::from_value(req.clone()).unwrap();
+  let handover_value: Handover = serde_json::from_value(handover(&req)).unwrap();
+  let credential: CredentialJson = serde_json::from_value(w["holders"][0]["credential"].clone()).unwrap();
+  let input = PresentInput {
+    request: &ro,
+    credential_query_id: "nym_attestation_bbs",
+    handover: &handover_value,
+    credential: &credential,
+    parallel: false,
+  };
+  let out = prover.prove_with(&input, &signer).expect("prove_with");
+  assert_eq!(signer.calls.get(), 1);
+  let v = verify(&verifier, &req, out["presentation"].as_str().unwrap());
+  assert_eq!(v["ok"], true, "{v}");
+  assert_eq!(out["results"]["nym"], v["results"]["nym"]);
+  assert_eq!(out["results"]["nym"], prove(&prover, &req).unwrap()["results"]["nym"]);
+
+  // A refusal comes before the device is asked: an unmet age range signs nothing.
+  let adult_only = request("community.example", "fedcba9876543210fedcba9876543210", Some(json!({ "le": "2000-01-01" })));
+  let ro2: RequestObject = serde_json::from_value(adult_only.clone()).unwrap();
+  let handover_value: Handover = serde_json::from_value(handover(&adult_only)).unwrap();
+  let input = PresentInput { request: &ro2, handover: &handover_value, ..input };
+  assert_eq!(prover.prove_with(&input, &signer).unwrap_err().error, "unsatisfiable");
+  assert_eq!(signer.calls.get(), 1);
+}
