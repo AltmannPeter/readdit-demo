@@ -4,6 +4,9 @@
 //! The device key signs inside `ecdsa-pop` (hashed mode: ECDSA-P256-SHA256 over the plugin's
 //! device message, which binds the request's nonce and env), so there is no separate signing step
 //! as in the mdoc flow.
+//!
+//! A wallet whose device key is in secure hardware calls [`Prover::prove_with`] with its own
+//! [`HashSigner`] instead of handing over the key: the same presentation, signed by the key store.
 
 use std::cell::RefCell;
 use std::time::Instant;
@@ -13,7 +16,7 @@ use bbs_cd_plugin::issuer::scalar_to_u128;
 use bbs_cd_plugin::par::Parallelism;
 use bbs_cd_plugin::plugin::PluginProver;
 use cd_date_range::{DateRangeProver, RECOMMENDED_BITS};
-use cd_ecdsa_pop::{prepare, EcdsaParams, EcdsaPopProver, Mode, ProveStats, Signer, SoftwareDevice};
+use cd_ecdsa_pop::{prepare, EcdsaParams, EcdsaPopProver, HashSigner, Mode, ProveStats, Signer, SoftwareDevice};
 use cd_pseudonym::PseudonymProver;
 use p256::ecdsa::SigningKey;
 use rand_core::OsRng;
@@ -85,11 +88,40 @@ impl Prover {
 
   /// The presentation, or the refusal.
   pub fn prove(&self, input: &ProveInput) -> Result<Json, Refusal> {
+    let present = PresentInput {
+      request: &input.request,
+      credential_query_id: &input.credential_query_id,
+      handover: &input.handover,
+      credential: &input.credential,
+      parallel: input.parallel,
+    };
+    self.present(&present, || {
+      let jwk = &input.device_key;
+      if jwk.kty != "EC" || jwk.crv != "P-256" {
+        return Err(Refusal::bad_credential("device_key is not a P-256 key"));
+      }
+      let d = unb64url("device_key.d", &jwk.d).map_err(Refusal::bad_credential)?;
+      let key = SigningKey::from_slice(&d).map_err(|e| Refusal::bad_credential(format!("device_key: {e}")))?;
+      Ok(Device::Software(SoftwareDevice::from_key(key, Mode::Hashed, true)))
+    })
+  }
+
+  /// The presentation with the device key's signature made by `signer` (hashed mode:
+  /// ECDSA-P256-SHA256 over the ecdsa-pop device message), for a key the wallet cannot hand over.
+  /// Everything else is [`Prover::prove`]: the same statement, plugins, presentation and metrics.
+  pub fn prove_with(&self, input: &PresentInput, signer: &dyn HashSigner) -> Result<Json, Refusal> {
+    self.present(input, || Ok(Device::Platform(signer)))
+  }
+
+  /// [`Prover::prove`] and [`Prover::prove_with`]: `device` is asked for at the point `prove`
+  /// always read the device key, so the order of the checks (and so which refusal is reported) is
+  /// the same for both.
+  fn present<'a>(&self, input: &PresentInput, device: impl FnOnce() -> Result<Device<'a>, Refusal>) -> Result<Json, Refusal> {
     let t_all = Instant::now();
     let peak = Peak::start();
     let heap = Heap::start();
     let cred = input.credential.decode().map_err(Refusal::bad_credential)?;
-    let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, &cred.issuer)?;
+    let s = profile::statement(input.request, input.credential_query_id, input.handover, &cred.issuer)?;
 
     if let Some(age) = &s.age {
       let birth = cred
@@ -102,13 +134,7 @@ impl Prover {
       }
     }
 
-    let jwk = &input.device_key;
-    if jwk.kty != "EC" || jwk.crv != "P-256" {
-      return Err(Refusal::bad_credential("device_key is not a P-256 key"));
-    }
-    let d = unb64url("device_key.d", &jwk.d).map_err(Refusal::bad_credential)?;
-    let key = SigningKey::from_slice(&d).map_err(|e| Refusal::bad_credential(format!("device_key: {e}")))?;
-    let device = SoftwareDevice::from_key(key, Mode::Hashed, true);
+    let device = device()?;
 
     // Offline: the BBS commitments and the ecdsa-pop preparation, independent of the request's
     // nonce (a wallet would do this ahead of time).
@@ -123,7 +149,7 @@ impl Prover {
 
     // Online.
     let stats = RefCell::new(ProveStats::default());
-    let mut pop = EcdsaPopProver::new(pop_slot, Signer::Hash(&device));
+    let mut pop = EcdsaPopProver::new(pop_slot, Signer::Hash(device.signer()));
     pop.stats = Some(&stats);
     pop.parallelism = par;
     let mut provers: Vec<Box<dyn PluginProver>> = vec![Box::new(pop), Box::new(PseudonymProver::new(&s.verifier_id))];
@@ -197,6 +223,32 @@ impl Prover {
         "plugins": s.request.plugins.iter().map(|p| String::from_utf8_lossy(&p.plugin_id).into_owned()).collect::<Vec<_>>(),
       },
     }))
+  }
+}
+
+/// [`ProveInput`] without the device key: what [`Prover::prove_with`] takes.
+#[derive(Clone, Copy, Debug)]
+pub struct PresentInput<'a> {
+  pub request: &'a RequestObject,
+  pub credential_query_id: &'a str,
+  pub handover: &'a Handover,
+  pub credential: &'a CredentialJson,
+  /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false.
+  pub parallel: bool,
+}
+
+/// The device key: held here ([`Prover::prove`]), or signing elsewhere ([`Prover::prove_with`]).
+enum Device<'a> {
+  Software(SoftwareDevice),
+  Platform(&'a dyn HashSigner),
+}
+
+impl Device<'_> {
+  fn signer(&self) -> &dyn HashSigner {
+    match self {
+      Device::Software(d) => d,
+      Device::Platform(s) => *s,
+    }
   }
 }
 
