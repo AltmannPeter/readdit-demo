@@ -94,9 +94,21 @@ impl Circuits {
     let zst = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let sha256: [u8; 32] = Sha256::digest(&zst).into();
     let pair = zstd::decode_all(&zst[..]).map_err(|e| format!("{}: zstd: {e}", path.display()))?;
+    let mut c = Self::from_pair(layout, &pair, sha256)?;
+    c.load_ms = crate::measure::ms(t);
+    Ok(c)
+  }
+
+  /// The circuits from the decompressed LFC2 pair (the signature circuit, then the hash circuit)
+  /// and their [`Layout`], for a prover that receives the bytes rather than a directory.
+  /// `zst_sha256` is the SHA-256 of the compressed artifact the bytes came from (what a registry
+  /// or catalog pins); the caller has checked it. Both circuits must match the layout.
+  pub fn from_pair(layout: Layout, pair: &[u8], zst_sha256: [u8; 32]) -> Result<Self, String> {
+    let t = Instant::now();
+    let sha256 = zst_sha256;
     let (p256, gf2) = (P256Field::new(), Gf2_128Field::new());
     let (sig, rest) =
-      CircuitReader::new(&p256, FieldID::P256).from_bytes(&pair, true).map_err(|e| format!("the signature circuit: {e:?}"))?;
+      CircuitReader::new(&p256, FieldID::P256).from_bytes(pair, true).map_err(|e| format!("the signature circuit: {e:?}"))?;
     let (hash, rest) =
       CircuitReader::new(&gf2, FieldID::Gf2_128).from_bytes(rest, true).map_err(|e| format!("the hash circuit: {e:?}"))?;
     if !rest.is_empty() {

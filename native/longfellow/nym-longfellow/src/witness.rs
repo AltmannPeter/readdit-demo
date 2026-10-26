@@ -50,7 +50,12 @@ impl Layout {
   /// Reads `params.tsv` and `hash-semantic.tsv` in `dir` (`circuits/mdoc`).
   pub fn read(dir: &Path) -> Result<Self, String> {
     let read = |f: &str| std::fs::read_to_string(dir.join(f)).map_err(|e| format!("{}: {e}", dir.join(f).display()));
-    let params = read("params.tsv")?;
+    Self::parse(&read("params.tsv")?, &read("hash-semantic.tsv")?)
+  }
+
+  /// The layout from the text of `params.tsv` and `hash-semantic.tsv` (for a prover that carries
+  /// them in its own build rather than reading files), checked as [`Layout::read`] checks it.
+  pub fn parse(params: &str, sem: &str) -> Result<Self, String> {
     let side = |name: &str| -> Result<Side, String> {
       let f: Vec<&str> = params
         .lines()
@@ -67,7 +72,6 @@ impl Layout {
         circuit_id: crate::unhex("params.tsv circuit_id", f.get(6).copied().unwrap_or(""))?,
       })
     };
-    let sem = read("hash-semantic.tsv")?;
     let mut lines = sem.lines();
     let profile: Vec<usize> = lines
       .next()
