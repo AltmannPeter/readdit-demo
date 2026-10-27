@@ -47,5 +47,8 @@ The native addons take the version as `rulebook` ("0.4" when absent) in the prov
 2. A new way to write or read params: a new operator in `shared/protocol/operators.ts` (never change
    an existing one), named in the function's `wire`.
 3. A new wire or presentation rule in the addons: a new `Rulebook` variant there.
-4. flows-check group Q covers the switch, and v0.5 over HTTP and in the browser; add the new
+4. Copy the rulebook's test vectors to `profiles/<id>/test-vectors/` and point `scripts/vectors-check.mjs`
+   and the addons' `tests/rulebook_vectors.rs` at them (v0.5: `npm run vectors:check`, see
+   [`nym-auth-v0.5/test-vectors`](nym-auth-v0.5/test-vectors/README.md)).
+5. flows-check group Q covers the switch, and v0.5 over HTTP and in the browser; add the new
    version's flows there.

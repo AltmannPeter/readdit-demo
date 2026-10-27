@@ -1,0 +1,2 @@
+cbor2>=5.6
+cryptography>=44   # deterministic ECDSA (RFC 6979)

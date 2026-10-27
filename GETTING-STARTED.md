@@ -427,6 +427,7 @@ cargo run --release -p bbs-issuer -- --wallet ../../app/wallet/demo-wallet.json 
 
 ```sh
 npm run vega:check                              # real proofs of both credentials: pseudonyms, refusals, any PIN, 18+ (needs build:native)
+npm run vectors:check                           # the site's pseudonyms and age ranges against the rulebook v0.5 test vectors
 (cd native/vega && cargo test -p nym-vega)      # the OpenID4VP handover against the spec's example, age_check mapping
 (cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
 (cd native/bbs && cargo test --release -p nym-bbs)  # BBS: prove, verify, the same pseudonym, refusals

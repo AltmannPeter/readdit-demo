@@ -55,7 +55,7 @@ In tables, REQ is short for REQUIRED, OPT is short for OPTIONAL, CON is short fo
 
 | Data Identifier | Attribute Identifier | CBOR / CDDL Representation | Presence | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **birth_date_commitment** | `bsc` | `bstr` (32 bytes) | REQ | **Birthdate and Seed Commitment**: $`C = \text{SHA-256}(\text{secret\_seed} \Vert \text{birth\_date})`$ where $`\text{secret\_seed}`$ is a 16-byte random shared secret between the issuer and prover (the issuer known seed), and $`\text{birth\_date}`$ is the holder's date of birth as an RFC 3339 `full-date`. |
+| **birthdate_and_secret_seed_commitment** | `bsc` | `bstr` (32 bytes) | REQ | **Birthdate and Seed Commitment**: $`C = \text{SHA-256}(\text{secret\_seed} \Vert \text{birth\_date})`$ where $`\text{secret\_seed}`$ is a 16-byte random shared secret between the issuer and prover (the issuer known seed), and $`\text{birth\_date}`$ is the holder's date of birth as an RFC 3339 `full-date`. |
 | **private_seed_commitment** | `psc` | `bstr` (32 bytes) | REQ | **Issuer Unknown Seed Commitment**: $`C = \text{SHA-256}(\text{private\_seed})`$ where $`\text{private\_seed}`$ is a 16-byte random value known only to the prover, or 32 zero bytes if the prover has not provided one. |
 
 In the `mso_mdoc` encoding the commitment input `birth_date` is the `full-date` (`YYYY-MM-DD`) as a 10-byte UTF-8 string, without CBOR tag or length prefix; with the 16-byte `secret_seed`, the hash input is 26 bytes. `birth_date` is not itself a data element of the `mso_mdoc` encoding.
@@ -291,7 +291,7 @@ The example shows the decoded payload of a signed Request Object (`openid4vp-v1-
 
 EXAMPLE BELOW IS WORK IN PROGRESS AND BEING REVISED.
 
-Alternative 1. The Readdit demo runs this DCQL and metadata over the cross-device redirect flow (`request_uri`, `direct_post`); the example shows the Digital Credentials API.
+Over the cross-device redirect flow, the same DCQL and metadata are sent in a Request Object fetched from a `request_uri`, with Response Mode `direct_post.jwt` instead of `dc_api.jwt`; the response is encrypted in both cases.
 
 ```json
 {
@@ -678,5 +678,3 @@ Over redirects, including a request fetched from a `request_uri`, the following 
 ## Response confidentiality
 
 A `zkp_req` presentation MUST be encrypted to the Verifier. The Response Mode MUST be `direct_post.jwt` over redirects and `dc_api.jwt` over the Digital Credentials API, and the Request Object MUST carry the Verifier's response-encryption key in `client_metadata`. A Wallet Unit MUST treat a request with another Response Mode, or without a response-encryption key, as unsatisfiable.
-
-> **NOTE:** The Readdit demo does not encrypt the response, for simplicity. It uses `direct_post`, and its `Handover` has a `null` `jwkThumbprint`.
