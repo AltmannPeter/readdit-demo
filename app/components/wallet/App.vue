@@ -286,7 +286,7 @@ async function onPin() {
   let presentation: string
   try {
     if (view.value!.scheme) {
-      const out = await proveBbs({ request: req, queryId, credential: focus.value })
+      const out = await proveBbs({ request: req, queryId, credential: focus.value, rulebook: view.value!.profile?.rulebook.version })
       const { prove_ms, presentation_bytes, ...bbs } = out.metrics
       metrics.value = { sign_ms: bbs.device_sign_ms, prove_ms, presentation_bytes, bbs }
       presentation = out.presentation
@@ -294,7 +294,7 @@ async function onPin() {
       const systemId = view.value!.circuit!.system_id
       const signed = await unlockAndSign({ request: req, credential: focus.value, systemId })
       metrics.value = { sign_ms: signed.metrics.sign_ms }
-      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value })
+      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value, rulebook: view.value!.profile?.rulebook.version })
       metrics.value = {
         ...metrics.value,
         witness_ms: out.witness_ms ?? out.metrics.witness_ms,

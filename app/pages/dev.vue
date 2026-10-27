@@ -88,6 +88,13 @@ watch(
   <div class="vd page">
     <header class="top">
       <DevAppBrand />
+      <!-- the demo profile: the rulebook version, the commit it is based on (/tech switches it) -->
+      <p v-if="state.profile" class="profile mono" data-dev-profile>
+        <span>{{ state.profile.label }}</span>
+        <a :href="state.profile.documentUrl" target="_blank" rel="noopener">rulebook ↗</a>
+        <a v-if="state.profile.commitUrl" :href="state.profile.commitUrl" target="_blank" rel="noopener">{{ state.profile.commit!.slice(0, 7) }} ↗</a>
+        <span v-else class="faint">not committed yet</span>
+      </p>
       <div class="top-right">
         <QuickNav />
         <ViewSwitch />
@@ -133,6 +140,8 @@ watch(
   grid-template-areas: 'top top' 'side main';
 }
 .top-right { display: flex; align-items: center; gap: 12px; }
+.profile { display: flex; align-items: center; gap: 10px; margin: 0 auto 0 16px; font-size: 11px; color: var(--muted); }
+.profile a { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
 .top {
   grid-area: top;
   display: flex;

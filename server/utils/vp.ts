@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 import type { VpFormats } from '#shared/types/oid4vp'
 import { PROOF_SYSTEMS, findCircuit, findScheme, findSystem } from '#shared/registry/circuits'
+import { systemAvailable } from '#shared/profiles'
 import type { VpSessionRecord } from './store'
 
 const list = (v: unknown) =>
@@ -72,7 +73,9 @@ export class NothingAccepted extends Error {
  * configuration mismatch. With nothing accepted, NothingAccepted.
  */
 export async function verifierOffer(): Promise<VpFormats> {
-  const accepted = store().acceptedProofSystems
+  // A proof system the demo profile cannot use yet (status pending) is not offered.
+  const profile = activeProfile()
+  const accepted = store().acceptedProofSystems.filter((x) => systemAvailable(profile, x))
   if (!accepted.length) throw new NothingAccepted()
   const missing: string[] = []
   const take = async (systems: string[], make: () => Promise<string[]>): Promise<string[]> => {

@@ -1,5 +1,6 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
 import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import { systemStatus } from '#shared/profiles'
 import type { ResponseKey } from './response-key'
 import type { SizePart, StepProfile } from './services'
 
@@ -74,8 +75,11 @@ export interface VpSessionRecord {
   state: string
   /** The key the wallet encrypts its response to (direct_post.jwt). Not in any trace or API answer. */
   responseKey: ResponseKey
-  /** The age range the request asks for, if any (from the community's gate, when the session starts). */
-  age?: BirthDateRange
+  /** The demo profile the session was created under (shared/profiles; a profile switch resets the demo). */
+  profile?: string
+  /** The age_check params the request asks for, if any, as the profile writes them from the
+   *  community's gate when the session starts (v0.4: birth-date bounds; v0.5: a range in years). */
+  ageParams?: Record<string, string>
   /** The DCQL query: one zkp_req credential query per source format the accepted systems cover,
    *  alternatives in credential_sets.
    *  Made again, with the offer, when the wallet fetches the request, so it follows /tech's switches. */
@@ -95,7 +99,9 @@ export interface VpSessionRecord {
   answered?: string
   /** `format`: the source format of the answered query; `proofId`: the system (circuit or scheme)
    *  of the verified presentation. */
-  outcome?: { ok: true; format: SourceFormat; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
+  outcome?:
+    | { ok: true; format: SourceFormat; proofId: string; pseudonym: string; age?: true; ageBounds?: BirthDateRange }
+    | { ok: false; reason: FailReason; detail?: string }
   /** `age`: the session's age proof was recorded for the account. */
   completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
@@ -174,7 +180,8 @@ function fresh(): Store {
     accounts: new Map(),
     comments: [],
     bannedNotices: new Map(),
-    acceptedProofSystems: configuredProofSystems(),
+    // Only what the demo profile can use (a pending system stays off).
+    acceptedProofSystems: configuredProofSystems().filter((x) => systemStatus(activeProfile(), x)?.status === 'available'),
     multithreading: configuredMultithreading(),
     profiling: false,
     trustNewIssuers: configuredTrustNewIssuers(),

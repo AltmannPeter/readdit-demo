@@ -132,6 +132,8 @@ export interface ProveBody {
   credential: WalletCredential
   secret_seed: string
   device_signature: string
+  /** The rulebook version ("0.4" when absent). */
+  rulebook?: string
 }
 
 export interface WitnessSummary {
@@ -196,7 +198,7 @@ export interface VerifyMetrics {
 }
 
 export type VerifyResult =
-  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
+  | { ok: true; system_id: string; results: Record<string, string | true>; bounds?: { ge?: string | null; le?: string | null } | null; metrics: VerifyMetrics }
   | { ok: false; reason: string; code?: string; input?: string | null; certificate?: string | null; metrics?: VerifyMetrics }
 
 /** The HTTP status text for a prover refusal code (docs/backend-api.md, "Prover refusals"). The code
@@ -442,7 +444,7 @@ export const verifier = {
   /** `learned_issuers`: Document Signer certificates (base64 DER) trusted besides the configured
    *  trust anchors (server/utils/issuers.ts). An `issuer_key_set` refusal for a certificate that is
    *  not trusted carries it as `certificate` (base64 DER). */
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
     const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult), b.name)
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
@@ -488,6 +490,8 @@ export interface BbsProveBody {
   handover: Handover
   credential: BbsCredential
   device_key: DeviceKeyJwk
+  /** The rulebook version ("0.4" when absent): v0.5 writes proof_time and takes ages in years. */
+  rulebook?: string
 }
 
 export interface BbsProveMetrics {
@@ -526,7 +530,7 @@ export interface BbsProveResult {
 }
 
 export type BbsVerifyResult =
-  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
+  | { ok: true; system_id: string; results: Record<string, string | true>; bounds?: { ge?: string | null; le?: string | null } | null; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
   | { ok: false; reason: string; code?: string; issuer_key?: string | null; metrics?: VerifyMetrics }
 
 interface NativeBbsProver {
@@ -602,7 +606,9 @@ export const bbsVerifier = {
   /** `learned_issuers`: BBS issuer keys (base64) trusted besides the configured issuer
    *  (server/utils/issuers.ts). An `issuer_key_set` refusal for a key that is not trusted carries
    *  it as `issuer_key`. */
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
+  /** `rulebook`: the demo profile's version ("0.4", "0.5"); `now` and `proof_time_tolerance_s`:
+   *  the verifier's clock and tolerance for proof_time (v0.5, with an age check). */
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now?: string; proof_time_tolerance_s?: number; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
     const n = await bbsNative('verifier')
     const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading('bbs') }))) as BbsVerifyResult), 'bbs')
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }

@@ -24,7 +24,7 @@ use crate::circuit::{CIRCUIT_ID, PROOF_SYSTEM, RUNTIME};
 use crate::handover::Handover;
 use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
-use crate::request::{RequestObject, statement};
+use crate::request::{RequestObject, Rulebook, statement_for};
 use crate::witness::Public;
 use crate::x509::TrustAnchors;
 use crate::zk::{Circuits, Rejection, ZkVerifierPair};
@@ -46,6 +46,9 @@ pub struct VerifyInput {
   /// DER, that `/tech` learned from earlier presentations ("Trust new issuers").
   #[serde(default)]
   pub learned_issuers: Vec<String>,
+  /// The rulebook version the site's request follows (the demo profile): "0.4" (absent) or "0.5".
+  #[serde(default)]
+  pub rulebook: Option<String>,
 }
 
 /// Why a presentation is refused.
@@ -121,12 +124,13 @@ impl Verifier {
     metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
-      Ok((results, system_id)) => json!({ "ok": true, "system_id": system_id, "results": results, "metrics": metrics }),
+      Ok((results, system_id, bounds)) => json!({ "ok": true, "system_id": system_id, "results": results, "bounds": bounds, "metrics": metrics }),
       Err(r) => json!({ "ok": false, "code": r.code, "input": r.input, "reason": r.reason, "certificate": r.certificate, "metrics": metrics }),
     }
   }
 
-  fn check(&self, input: &VerifyInput, metrics: &mut Map<String, Json>) -> Result<(Map<String, Json>, String), Refused> {
+  /// The results, the circuit, and the birth-date bounds the proof showed (with an age check).
+  fn check(&self, input: &VerifyInput, metrics: &mut Map<String, Json>) -> Result<(Map<String, Json>, String, Option<Json>), Refused> {
     let t = Instant::now();
     let bytes = crate::unb64url("presentation", &input.presentation).map_err(|e| refuse("presentation", e))?;
     let p = Presentation::decode(&bytes).map_err(|e| refuse("presentation", format!("presentation: {e}")))?;
@@ -138,7 +142,13 @@ impl Verifier {
     if p.system_id != CIRCUIT_ID {
       return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
     }
-    let s = statement(&input.request, &input.credential_query_id, &input.handover)
+    // v0.5: an age range's bounds come from the UTC date of proof_time (checked against the clock in 3.).
+    let rulebook = Rulebook::parse(input.rulebook.as_deref()).map_err(|r| refuse("request", r.detail))?;
+    let date = match rulebook {
+      Rulebook::V04 => None,
+      Rulebook::V05 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),
+    };
+    let s = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, date)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
     if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
@@ -224,6 +234,8 @@ impl Verifier {
     if let Some(h) = &s.age_handle {
       results.insert(h.clone(), Json::Bool(true));
     }
-    Ok((results, CIRCUIT_ID.to_string()))
+    let bounds = s.age_handle.is_some() || rulebook == Rulebook::V05 && (s.age.born_from.is_some() || s.age.born_by.is_some());
+    let bounds = bounds.then(|| json!({ "ge": s.age.born_from.map(|d| d.text()), "le": s.age.born_by.map(|d| d.text()) }));
+    Ok((results, CIRCUIT_ID.to_string(), bounds))
   }
 }

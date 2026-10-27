@@ -38,7 +38,7 @@ export function systemSupportsQuery(e: SystemEntry, q: ZkpReqCredentialQuery): b
     if (r.fn_id === 'pseudonym') return !!nym && nym.configs.includes(r.params.config) && nym.prf.includes(r.params.prf) && nym.ver.includes(r.params.ver)
     if (r.fn_id === 'age_check') {
       const f = e.functions.age_check
-      return !!f && Object.keys(r.params).every((k) => f.params.includes(k as 'ge' | 'le'))
+      return !!f && Object.keys(r.params).every((k) => f.params.includes(k as 'ge' | 'le' | 'range'))
     }
     return false
   })

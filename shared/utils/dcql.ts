@@ -1,34 +1,28 @@
-import type { BirthDateRange } from '../types'
 import { findSystem } from '../registry/circuits'
-import {
-  NYM_BBS_SCHEMA,
-  NYM_DOCTYPE,
-  type DcqlQuery,
-  type EncryptionJwk,
-  type ReqItem,
-  type RequestObject,
-  type SourceFormat,
-  type VpFormats,
-  type ZkpReqCredentialQuery,
-} from '../types/oid4vp'
+import type { Profile } from '../profiles'
+import { typeValue } from '../profiles'
+import { buildReq } from '../protocol/request'
+import type { DcqlQuery, EncryptionJwk, RequestObject, SourceFormat, VpFormats, ZkpReqCredentialQuery } from '../types/oid4vp'
 
 /** The query over the mdoc (mso_mdoc). */
 export const CREDENTIAL_QUERY_ID = 'nym_attestation'
 /** The query over the same attestation as a BBS credential (bbs_cd). */
 export const BBS_QUERY_ID = 'nym_attestation_bbs'
+/** The pseudonym's return handle (every profile's pseudonym function returns under it). */
 export const RETURN_PSEUDONYM = 'nym'
-export const RETURN_AGE = 'age'
 
-/** The pseudonym's PRF per source format (rulebook v0.4, "Parameters"). */
-export const PRF_FOR: Record<SourceFormat, 'sha-256' | 'hashdh-bls12381g1'> = { mso_mdoc: 'sha-256', bbs_cd: 'hashdh-bls12381g1' }
-
-/** A zkp_req query over `source`: the pseudonym always; age_check when a birth-date range is required. */
-export function buildCredentialQuery(source: SourceFormat, age?: BirthDateRange): ZkpReqCredentialQuery {
-  const _req: ReqItem[] = [{ fn_id: 'pseudonym', return: RETURN_PSEUDONYM, params: { config: 'known-offender-matching-ssc', ver: 1, prf: PRF_FOR[source] } }]
-  if (age) _req.push({ fn_id: 'age_check', return: RETURN_AGE, params: { ...age } })
+/**
+ * A zkp_req query over `source`, as the profile writes it: the pseudonym always; age_check when
+ * the site asks for an age (`ageParams`, written by the profile's operator: v0.4 birth-date bounds,
+ * v0.5 a range in years).
+ */
+export function buildCredentialQuery(source: SourceFormat, profile: Profile, ageParams?: Record<string, string>): ZkpReqCredentialQuery {
+  const _req = buildReq(profile, source, ageParams)
+  const type = typeValue(profile, source)
+  if (!type) throw new Error(`profile ${profile.id} has no ${source} encoding`)
   return source === 'mso_mdoc'
-    ? { id: CREDENTIAL_QUERY_ID, format: 'zkp_req', meta: { source_format: 'mso_mdoc', doctype_value: NYM_DOCTYPE }, _req }
-    : { id: BBS_QUERY_ID, format: 'zkp_req', meta: { source_format: 'bbs_cd', schema_id_value: NYM_BBS_SCHEMA }, _req }
+    ? { id: CREDENTIAL_QUERY_ID, format: 'zkp_req', meta: { source_format: 'mso_mdoc', doctype_value: type }, _req }
+    : { id: BBS_QUERY_ID, format: 'zkp_req', meta: { source_format: 'bbs_cd', schema_id_value: type }, _req }
 }
 
 /** The source formats of the systems an offer lists, in the offer's order. */
@@ -42,8 +36,8 @@ export function sourcesOf(offer: VpFormats): SourceFormat[] {
  * source format, in the offer's order (mso_mdoc, then bbs_cd), and, with more than one, a
  * credential set whose options are the alternatives, so the wallet answers exactly one of them.
  */
-export function buildDcqlQuery(offer: VpFormats, age?: BirthDateRange): DcqlQuery {
-  const credentials = sourcesOf(offer).map((f) => buildCredentialQuery(f, age))
+export function buildDcqlQuery(offer: VpFormats, profile: Profile, ageParams?: Record<string, string>): DcqlQuery {
+  const credentials = sourcesOf(offer).map((f) => buildCredentialQuery(f, profile, ageParams))
   return credentials.length > 1 ? { credentials, credential_sets: [{ options: credentials.map((q) => [q.id]) }] } : { credentials }
 }
 

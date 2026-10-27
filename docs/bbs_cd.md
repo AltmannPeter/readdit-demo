@@ -1,7 +1,9 @@
 # `bbs_cd` in Community: nym_auth over BBS committed disclosures
 
 Status: how the demo implements the `bbs_cd` encoding of rulebook v0.4 (`docs/nym_auth_rulebook.md`,
-"BBS committed-disclosure encoding", `zkp_req`, PRF `hashdh-bls12381g1`). The rulebook is
+"BBS committed-disclosure encoding", `zkp_req`, PRF `hashdh-bls12381g1`) and v0.5
+(`docs/nym_auth_rulebook-v0.5.md`; the demo profile decides, `profiles/README.md`). The schema, the
+credential and the plugins are the same in both; v0.5 changes `age_check` (§4, "v0.5"). The rulebook is
 normative; this note records the demo's choices and what the code checks. It replaces the demo's
 earlier `mms_zk` profile (format `mms_zk`, function `pseudonym-bbs-v1`, the pseudonym as SHA-256 of
 the point).
@@ -106,7 +108,17 @@ the payload of a JWE (`direct_post.jwt`, ECDH-ES, A128GCM) to the key in `client
 }
 ```
 
-No `proof_time`: the encoding has no validity period, and the reader refuses one.
+v0.4: no `proof_time`; the encoding has no validity period, and the verifier refuses one.
+
+**v0.5.** `age_check` is an assertion: `{ "fn_id": "age_check", "params": { "range": "13-17" } }`,
+no `return`, no entry in `results` (`{ "nym": h'...' }` only). The presentation carries
+`"proof_time": 0("YYYY-MM-DDThh:mm:ssZ")` (UTC, to the second) when the request has an age check:
+the prover sets it from its clock, and both sides compute the date-range plugin's bounds from the
+range and its UTC date D (C on or before D minus A years, E after D minus (B + 1) years; 29 February
+clamps; `nym_bbs::dates`). The verifier checks `proof_time` against its clock within the tolerance
+(`proof_time` refusal), derives the bounds from it for the BBS request it builds itself, and
+answers them as `bounds`; a wallet that moves `proof_time` to another date gets other bounds, and
+the date-range proof does not verify.
 
 ## 5. Verification (`nym-bbs` verifier)
 
@@ -117,11 +129,13 @@ No `proof_time`: the encoding has no validity period, and the reader refuses one
 3. The query is one the rulebook allows (§2); the keys of `results` are its `return` handles.
 4. The envelope parses against the derived BBS request; the BBS proof verifies under the issuer
    key with the presentation header; each plugin verifies.
-5. `results.nym` equals the pseudonym plugin's G1 point; `age` is true.
+5. `results.nym` equals the pseudonym plugin's G1 point; v0.4: `age` is true (v0.5: no age entry,
+   the date-range plugin's proof is the assertion).
 
 Refusal codes (`[vp] … presentation refused: <code>`): `presentation` (not base64url, too large, not
 a ZkpPresentation, or the envelope does not parse), `scheme` (another system, or not offered),
-`issuer_key_set`, `request`, `results`, `proof_invalid` (the BBS proof or a plugin proof fails).
+`issuer_key_set`, `proof_time` (v0.5: missing with an age check, or beyond the tolerance), `request`,
+`results`, `proof_invalid` (the BBS proof or a plugin proof fails).
 
 Community stores the pseudonym as 96 hex digits. It differs from the mso_mdoc pseudonym of the same
 person (another PRF, even over the same seed), so the teen has one Community account per encoding.

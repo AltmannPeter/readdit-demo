@@ -30,7 +30,7 @@ use crate::error::Refusal;
 use crate::handover::{self, Handover};
 use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
-use crate::request::{RequestObject, Statement, statement};
+use crate::request::{RequestObject, Rulebook, Statement, statement_for};
 use crate::{dates, hex, keys, mdoc, threads, unb64url, unhex, x509};
 
 /// The device key as the wallet holds it: a P-256 JWK with its private part.
@@ -82,6 +82,9 @@ pub struct WitnessInput {
   /// One thread per core for the witness and the proof; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
+  #[serde(default)]
+  pub rulebook: Option<String>,
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -195,7 +198,10 @@ impl Prover {
     if input.system_id != CIRCUIT_ID {
       return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
-    let s: Statement = statement(&input.request, &input.credential_query_id, &input.handover)?;
+    // The time of the proof (proof_time), read first: v0.5 computes an age range's bounds from its date.
+    let now: Time = dates::now().map_err(Refusal::bad_request)?;
+    let rulebook = Rulebook::parse(input.rulebook.as_deref())?;
+    let s: Statement = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, Some(now.date))?;
     if input.credential.format != "mso_mdoc" || input.credential.doctype != DOC_TYPE {
       return Err(bad(format!("the credential is not an mso_mdoc of {DOC_TYPE}")));
     }
@@ -228,7 +234,6 @@ impl Prover {
       .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))?;
 
     // Holder data against the request: validity now, and the birth date in [E, C].
-    let now: Time = dates::now().map_err(Refusal::bad_request)?;
     let (now_s, from_s, until_s) = (
       dates::unix(&now).map_err(Refusal::bad_request)?,
       dates::unix(&m.valid_from).map_err(bad)?,

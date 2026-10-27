@@ -1,8 +1,9 @@
 import { compactDecrypt, decodeProtectedHeader } from 'jose'
-import { RETURN_AGE, RETURN_PSEUDONYM } from '#shared/utils/dcql'
+import { RETURN_PSEUDONYM } from '#shared/utils/dcql'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
 import type { FailReason } from '../../../utils/store'
 import type { IssuerFormat } from '../../../utils/issuers'
+import type { BirthDateRange } from '#shared/types'
 
 /**
  * response_uri (direct_post.jwt). Form field `response`: a JWE (ECDH-ES, A128GCM) to the session's
@@ -119,17 +120,24 @@ export default defineEventHandler(async (event) => {
   let newIssuer = presented && store().trustNewIssuers && !(await isTrusted(presented)) ? presented : null
   if (format === 'mso_mdoc' && !presented) console.warn(`[issuers] ${s.id}: cannot read issuer_key_set from the presentation; the verifier checks it`)
   const t0 = Date.now()
-  let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; unknownIssuer?: string | null; metrics?: VerifyMetrics }
+  // The demo profile the session was created under: the rulebook version the verifiers apply.
+  const profile = sessionProfile(s)
+  const rulebook = profile.rulebook.version
+  let result: { ok: true; proofId: string; results: Record<string, string | true>; bounds?: BirthDateRange; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; unknownIssuer?: string | null; metrics?: VerifyMetrics }
   try {
     const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
     /** One verification with these issuers trusted besides the configured ones. */
     const verify = async (learned: string[]) => {
       const { profile, ...r } =
         format === 'mso_mdoc'
-          ? await verifier.verify({ ...call, now: new Date().toISOString(), learned_issuers: learned })
-          : await bbsVerifier.verify({ ...call, learned_issuers: learned })
+          ? await verifier.verify({ ...call, rulebook, now: new Date().toISOString(), learned_issuers: learned })
+          : await bbsVerifier.verify({ ...call, rulebook, now: new Date().toISOString(), proof_time_tolerance_s: Number(useRuntimeConfig().proofTimeToleranceS), learned_issuers: learned })
       keepProfile(s, 'verify', profile)
-      if (r.ok) return { ok: true as const, proofId: r.system_id, results: r.results, metrics: r.metrics }
+      if (r.ok) {
+        // The bounds an age check's proof showed (a verifier that computes them reports them; null: no bound).
+        const bounds = r.bounds ? { ...(r.bounds.ge && { ge: r.bounds.ge }), ...(r.bounds.le && { le: r.bounds.le }) } : undefined
+        return { ok: true as const, proofId: r.system_id, results: r.results, ...(bounds && { bounds }), metrics: r.metrics }
+      }
       const named = r.code === 'issuer_key_set' ? ('certificate' in r ? r.certificate : 'issuer_key' in r ? r.issuer_key : null) : null
       return { ok: false as const, code: r.code, reason: r.reason, input: 'input' in r ? r.input : null, unknownIssuer: named ?? null, metrics: r.metrics }
     }
@@ -167,23 +175,42 @@ export default defineEventHandler(async (event) => {
   if (!system || system.source_format !== source) return reject('circuit', `${result.proofId} is not a ${source} system`)
   if (offered && !offered.includes(result.proofId)) return reject('circuit', `${result.proofId} not offered`)
   if (!store().acceptedProofSystems.includes(system.proof_system)) return reject('format', `${system.proof_system} is no longer accepted`)
-  const expected = query._req.map((r) => r.return).sort().join()
+  // results: exactly the return handles of the value functions (v0.5: age_check is an assertion
+  // and has none).
+  const expected = query._req
+    .map((r) => r.return)
+    .filter((h): h is string => !!h)
+    .sort()
+    .join()
   if (Object.keys(result.results).sort().join() !== expected) return reject('results', 'results keys do not match _req')
   // 32 bytes (sha-256) or a 48-byte G1 point (hashdh-bls12381g1).
   const pseudonym = result.results[RETURN_PSEUDONYM]
   const nymHex = source === 'mso_mdoc' ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{96}$/
   if (typeof pseudonym !== 'string' || !nymHex.test(pseudonym)) return reject('results', 'bad pseudonym')
-  const hasAge = query._req.some((r) => r.fn_id === 'age_check')
-  if (hasAge && result.results[RETURN_AGE] !== true) return reject('results', 'bad predicate')
+  const ageItem = query._req.find((r) => r.fn_id === 'age_check')
+  const hasAge = !!ageItem
+  // The age check, as the profile defines it: a value function returns true under its handle; an
+  // assertion has no output, the proof itself shows it holds. The birth-date bounds the proof
+  // established: the request's own (bounds from the request) or the verifier's, computed from the
+  // range and the date of proof_time.
+  const ageSpec = profile.functions.age_check
+  let ageBounds: BirthDateRange | undefined
+  if (ageItem) {
+    if (ageSpec.kind === 'value' && result.results[ageItem.return ?? ''] !== true) return reject('results', 'bad predicate')
+    ageBounds = ageSpec.bounds_date === 'proof_time' ? result.bounds : { ...(ageItem.params.ge && { ge: ageItem.params.ge }), ...(ageItem.params.le && { le: ageItem.params.le }) }
+    if (!ageBounds) return reject('results', 'the verifier reported no age bounds')
+  }
 
   s.status = 'verified'
-  s.outcome = { ok: true, format: source, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const }) }
+  s.outcome = { ok: true, format: source, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const, ageBounds }) }
   const added = newIssuer ? await learnIssuer(newIssuer, result.proofId, format) : null
   await recordMeasurement(s, source, result.proofId, result.metrics as Record<string, unknown> | undefined, hasAge)
   addTrace(s, 'verify', 'Proof verified', {
     format: source,
     system_id: result.proofId,
     results: result.results,
+    ...(ageBounds && { age_bounds: ageBounds }),
+    profile: profile.id,
     metrics: result.metrics,
     ...(added && { issuer_added: addedName(added) }),
     round_trip_ms: roundTripMs,

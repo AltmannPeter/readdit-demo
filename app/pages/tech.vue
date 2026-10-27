@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { PROOF_SYSTEMS, type CircuitEntry, type SchemeEntry } from '#shared/registry/circuits'
+import type { ProfileManifest } from '#shared/profiles'
 
 definePageMeta({ layout: false })
 useHead({ title: 'Technical view · Community' })
@@ -90,13 +91,15 @@ interface SizePart {
   children: SizePart[]
 }
 interface Overview {
+  profile: string
+  profiles: ProfileManifest[]
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   multithreading: boolean
   profiling: boolean
   trustNewIssuers: boolean
   learnedIssuers: Array<{ format: 'mso_mdoc' | 'bbs_cd'; fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
-  measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
+  measurements: { runs: number; profileRuns: number; profile: string; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -244,6 +247,32 @@ const memTotal = (r: MeasurementRow, side: 'prove' | 'verify') => {
   if (work == null) return '–'
   return mb((m?.keys_mb ?? 0) + work)
 }
+/** The demo profile the site runs, and the build the site runs from. */
+const profile = computed(() => data.value?.profiles.find((p) => p.id === data.value?.profile) ?? null)
+const pub = useRuntimeConfig().public as { repository?: string; buildCommit?: string }
+const buildUrl = pub.buildCommit && pub.repository ? `${pub.repository}/commit/${pub.buildCommit}` : null
+/** A proof system the profile cannot use yet (pending), with why. */
+const pending = (id: string) => profile.value?.systems.find((x) => x.proof_system === id && x.status !== 'available') ?? null
+const encodings = computed(() => {
+  const e = profile.value?.credential.encodings ?? {}
+  return [
+    ...(e.mso_mdoc ? [{ name: 'mso_mdoc', type: e.mso_mdoc.doctype, attributes: e.mso_mdoc.attributes }] : []),
+    ...(e.bbs_cd ? [{ name: 'bbs_cd', type: e.bbs_cd.schema_id, attributes: e.bbs_cd.attributes }] : []),
+  ]
+})
+const profileError = ref('')
+const switchingProfile = ref(false)
+async function setProfile(id: string) {
+  profileError.value = ''
+  switchingProfile.value = true
+  try {
+    await $fetch('/api/tech/demo-profile', { method: 'POST', body: { profile: id } })
+  } catch {
+    profileError.value = 'Not changed.'
+  }
+  switchingProfile.value = false
+  await load()
+}
 const acceptError = ref('')
 async function setAccepted(id: string, accept: boolean) {
   acceptError.value = ''
@@ -330,20 +359,93 @@ const statusTone = (s: string) =>
     </header>
 
     <main v-if="data" class="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <!-- the demo profile: which rulebook version the site runs; switching resets the demo -->
+      <section v-if="profile" class="card p-4" data-profile-section>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <h2 class="font-semibold">Demo profile</h2>
+          <select
+            class="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+            data-demo-profile
+            :value="data.profile"
+            :disabled="switchingProfile"
+            @change="setProfile(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="p in data.profiles" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </select>
+          <span class="text-xs text-muted">Switching resets the demo.</span>
+          <span class="flex flex-wrap items-center gap-x-3 text-xs" data-profile-version>
+            <span>Rulebook v{{ profile.version }} · {{ profile.date }}</span>
+            <a :href="profile.documentUrl" target="_blank" rel="noopener" class="underline decoration-dotted underline-offset-2" data-profile-document>rulebook ↗</a>
+            <a v-if="profile.commitUrl" :href="profile.commitUrl" target="_blank" rel="noopener" class="font-mono underline decoration-dotted underline-offset-2" data-profile-commit>{{ profile.commit!.slice(0, 7) }} ↗</a>
+            <span v-else class="text-muted" data-profile-commit>not committed yet</span>
+            <a v-if="buildUrl" :href="buildUrl" target="_blank" rel="noopener" class="text-muted underline decoration-dotted underline-offset-2" data-build-commit>build {{ pub.buildCommit!.slice(0, 7) }} ↗</a>
+          </span>
+        </div>
+        <p v-if="profileError" class="mt-1 text-xs text-adult">{{ profileError }}</p>
+        <details class="mt-2 text-xs" data-profile-details>
+          <summary class="cursor-pointer text-muted">What this version defines</summary>
+          <div class="mt-2 grid gap-4 lg:grid-cols-2">
+            <div>
+              <h3 class="font-semibold">Credential: {{ profile.credential.id }}</h3>
+              <div v-for="enc in encodings" :key="enc.name" class="mt-1">
+                <p class="font-mono">{{ enc.name }} · {{ enc.type }}</p>
+                <ul class="mt-0.5 space-y-0.5">
+                  <li v-for="a in enc.attributes" :key="a.id">
+                    <span class="font-mono">{{ a.id }}</span> <span class="text-muted">({{ a.role }}{{ a.presence === 'optional' ? ', optional' : '' }})</span> {{ a.description }}
+                  </li>
+                </ul>
+              </div>
+              <p v-if="profile.credential.metadataUrls.length" class="mt-1 flex flex-wrap gap-x-3">
+                <a v-for="m in profile.credential.metadataUrls" :key="m.url" :href="m.url" target="_blank" rel="noopener" class="underline decoration-dotted underline-offset-2">{{ m.label }} ↗</a>
+              </p>
+              <h3 class="mt-3 font-semibold">Pseudonym configurations</h3>
+              <ul class="mt-0.5 space-y-0.5">
+                <li v-for="c in profile.pseudonymConfigs" :key="c.id">
+                  <span class="font-mono">{{ c.id }}</span> <span class="text-muted">{{ c.seed }} · {{ c.encodings.join(', ') }}</span>
+                  <span v-if="c.requested" class="ml-1 rounded bg-surface px-1">requested</span>
+                </li>
+              </ul>
+              <h3 class="mt-3 font-semibold">Proof systems</h3>
+              <ul class="mt-0.5 space-y-0.5">
+                <li v-for="x in profile.systems" :key="x.system_id">
+                  <span class="font-mono">{{ x.system_id }}</span>
+                  <span class="ml-1.5" :class="x.status === 'available' ? 'text-muted' : 'text-adult'">{{ x.status }}</span><span v-if="x.note" class="text-muted">: {{ x.note }}</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="font-semibold">Functions</h3>
+              <div v-for="f in profile.functions" :key="f.id" class="mt-1" :data-profile-function="f.id">
+                <p>
+                  <span class="font-mono">{{ f.id }}</span>
+                  <span class="text-muted"> · {{ f.kind }}{{ f.return ? ` (return ${f.return})` : '' }} · {{ f.wire }}{{ f.boundsDate ? ` · bounds from ${f.boundsDate === 'proof_time' ? 'the date of proof_time' : 'the request'}` : '' }}</span>
+                </p>
+                <p class="mt-0.5">{{ f.meaning }}</p>
+                <ul class="mt-0.5 list-disc pl-4 text-muted">
+                  <li v-for="t in f.translation" :key="t">{{ t }}</li>
+                </ul>
+                <p class="mt-0.5"><span class="text-muted">Proven:</span> {{ f.proof }}</p>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <!-- proof systems: the switches, and each one's prover and verifier as icons -->
       <section class="card p-4">
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
           <h2 class="text-sm font-semibold">Proof systems</h2>
-          <div v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
-            <label class="flex items-center gap-2">
+          <div v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="(!loaded(p.id) || pending(p.id)) && 'opacity-50'">
+            <label class="flex items-center gap-2" :title="pending(p.id)?.note ?? ''">
               <input
                 type="checkbox"
                 :data-accept="p.id"
                 :checked="data.acceptedProofSystems.includes(p.id)"
-                :disabled="!loaded(p.id)"
+                :disabled="!loaded(p.id) || !!pending(p.id)"
                 @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
               />
               {{ shortName(p.label) }}
+              <span v-if="pending(p.id)" class="text-xs text-adult" :data-pending="p.id">pending</span>
             </label>
             <button
               v-for="side in SIDES[p.id]"
@@ -625,6 +727,9 @@ const statusTone = (s: string) =>
           <div class="min-w-0 flex-1">
             <h2 class="text-sm font-semibold">Benchmark</h2>
             <p class="mt-0.5 text-xs text-muted" data-machine>{{ machineText(data.measurements.machine) }}</p>
+            <p v-if="data.measurements.runs !== data.measurements.profileRuns" class="mt-0.5 text-xs text-muted" data-benchmark-profile>
+              Runs under {{ profile?.label ?? data.measurements.profile }}; {{ data.measurements.runs - data.measurements.profileRuns }} under other profiles not shown.
+            </p>
           </div>
           <button v-if="data.measurements.runs" class="btn-ghost text-xs" data-clear-measurements @click="clearMeasurements">{{ clearing ? 'Click again to clear' : 'Clear' }}</button>
         </div>

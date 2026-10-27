@@ -6,6 +6,8 @@ import { DEV_GROUPS, DEV_NAMES } from '~/dev/flow'
 const flow = useDevFlow()
 const { state } = flow
 const busy = ref<string | null>(null)
+/** A proof system the demo profile cannot use yet (e.g. v0.5 waiting for its circuits). */
+const pending = (id: string) => state.value.profile?.pending.find((p) => p.proof_system === id) ?? null
 
 async function toggle(id: string) {
   if (busy.value) return
@@ -30,12 +32,13 @@ async function toggle(id: string) {
         role="switch"
         :aria-checked="state.accepted.includes(id)"
         :class="['sys', { on: state.accepted.includes(id) }]"
-        :disabled="busy === id"
+        :disabled="busy === id || !!pending(id)"
+        :title="pending(id)?.note ?? ''"
         :data-accept="id"
         @click="toggle(id)"
       >
         <span class="name">{{ DEV_NAMES[id] }}</span>
-        <span class="st mono">{{ state.accepted.includes(id) ? 'on' : 'off' }}</span>
+        <span class="st mono">{{ pending(id) ? 'pending' : state.accepted.includes(id) ? 'on' : 'off' }}</span>
       </button>
     </div>
   </div>

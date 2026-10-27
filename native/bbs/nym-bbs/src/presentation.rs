@@ -1,18 +1,19 @@
-//! `ZkpPresentation` (rulebook v0.4, "Presentation encoding"), for the `bbs_cd` scheme:
+//! `ZkpPresentation` (rulebook v0.4 and v0.5, "Presentation encoding"), for the `bbs_cd` scheme:
 //!
 //! ```cddl
 //! ZkpPresentation = {
 //!   "system_id"      => tstr,          ; the scheme id
 //!   "proof"          => bstr,          ; the bbs-cd-plugins envelope (BCDP)
 //!   "issuer_key_set" => [+ bstr],      ; one BBS issuer public key, 96 bytes
-//!   ? "proof_time"   => tdate,         ; absent: bbs_cd carries no validity period
-//!   "results"        => { + tstr => bstr .size 48 / true }
+//!   ? "proof_time"   => tdate,         ; v0.5, when _req has age_check (bbs_cd checks no validity)
+//!   "results"        => { * tstr => bstr .size 48 / true }  ; v0.4: age_check's true
 //! }
 //! ```
 //!
-//! The pseudonym is the compressed G1 point of `hashdh-bls12381g1` (48 bytes). The reader takes
-//! untrusted input: it refuses unknown, duplicate or missing members, `proof_time`, other types and
-//! trailing bytes.
+//! The pseudonym is the compressed G1 point of `hashdh-bls12381g1` (48 bytes). `proof_time` is a tag
+//! 0 text string `YYYY-MM-DDThh:mm:ssZ`; whether one may or must be there is the verifier's rule
+//! (by rulebook version). The reader takes untrusted input: it refuses unknown, duplicate or missing
+//! members, other types and trailing bytes.
 
 use ciborium::value::Value;
 
@@ -28,6 +29,8 @@ pub struct Presentation {
   pub system_id: String,
   pub proof: Vec<u8>,
   pub issuer_key_set: Vec<Vec<u8>>,
+  /// v0.5 with an age check: the time the bounds are computed for, `YYYY-MM-DDThh:mm:ssZ`.
+  pub proof_time: Option<String>,
   /// In the order of `_req`.
   pub results: Vec<(String, ResultValue)>,
 }
@@ -46,12 +49,16 @@ impl Presentation {
         (Value::Text(k.clone()), v)
       })
       .collect();
-    let map = Value::Map(vec![
+    let mut members = vec![
       (Value::Text("system_id".into()), Value::Text(self.system_id.clone())),
       (Value::Text("proof".into()), Value::Bytes(self.proof.clone())),
       (Value::Text("issuer_key_set".into()), Value::Array(self.issuer_key_set.iter().map(|k| Value::Bytes(k.clone())).collect())),
-      (Value::Text("results".into()), Value::Map(results)),
-    ]);
+    ];
+    if let Some(t) = &self.proof_time {
+      members.push((Value::Text("proof_time".into()), Value::Tag(0, Box::new(Value::Text(t.clone())))));
+    }
+    members.push((Value::Text("results".into()), Value::Map(results)));
+    let map = Value::Map(members);
     let mut out = Vec::new();
     ciborium::ser::into_writer(&map, &mut out).map_err(|e| format!("encoding the presentation: {e}"))?;
     Ok(out)
@@ -65,7 +72,7 @@ impl Presentation {
       return Err("trailing bytes after the presentation".into());
     }
     let Value::Map(entries) = value else { return Err("not a CBOR map".into()) };
-    let (mut system_id, mut proof, mut issuer_key_set, mut results) = (None, None, None, None);
+    let (mut system_id, mut proof, mut issuer_key_set, mut proof_time, mut results) = (None, None, None, None, None);
     for (key, value) in entries {
       let Value::Text(key) = key else { return Err("a member key is not a text string".into()) };
       let slot_taken = |taken: bool| if taken { Err(format!("member {key} appears twice")) } else { Ok(()) };
@@ -92,7 +99,12 @@ impl Presentation {
           }
           issuer_key_set = Some(keys);
         }
-        "proof_time" => return Err("proof_time: the bbs_cd encoding has no validity period".into()),
+        "proof_time" => {
+          slot_taken(proof_time.is_some())?;
+          let Value::Tag(0, inner) = value else { return Err("proof_time is not a tag 0 date-time".into()) };
+          let Value::Text(t) = *inner else { return Err("proof_time is not a tag 0 text string".into()) };
+          proof_time = Some(t);
+        }
         "results" => {
           slot_taken(results.is_some())?;
           let Value::Map(items) = value else { return Err("results is not a map".into()) };
@@ -109,9 +121,6 @@ impl Presentation {
             };
             out.push((k, v));
           }
-          if out.is_empty() {
-            return Err("results is empty".into());
-          }
           results = Some(out);
         }
         other => return Err(format!("unknown member {other}")),
@@ -121,6 +130,7 @@ impl Presentation {
       system_id: system_id.ok_or("no system_id")?,
       proof: proof.ok_or("no proof")?,
       issuer_key_set: issuer_key_set.ok_or("no issuer_key_set")?,
+      proof_time,
       results: results.ok_or("no results")?,
     })
   }

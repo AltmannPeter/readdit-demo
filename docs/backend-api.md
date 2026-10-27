@@ -4,8 +4,18 @@ There are three backends, each a Node addon (Rust, napi-rs) loaded in the site's
 the Vega addon (`native/vega`, a circuit over the nym_auth mdoc, `mso_mdoc`), described first; the
 Longfellow addon (`native/longfellow`, a circuit over the same mdoc, with the same interface), in
 its own section; and the BBS addon (`native/bbs`, a scheme over the nym_auth BBS credential,
-`bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query (v0.4) with
-a `ZkpPresentation`. Only `server/utils/services.ts` calls them. Each loads on its own; the site
+`bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query with
+a `ZkpPresentation`, in the version the input names: `"rulebook": "0.4"` (the default when absent)
+or `"0.5"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove) and verify input.
+v0.5 changes one thing here: `age_check` is an assertion, `{ "fn_id": "age_check", "params": {
+"range": "13-17" } }` without `return` and with no output in `results`; the prover and the
+verifier compute E and C from the range and the UTC date of `proof_time` (the prover's clock; the
+verifier reads it from the presentation after checking it against `now` within its tolerance), and
+the verifier answers the bounds it used as `"bounds": { "ge", "le" }` (null for no bound) next to
+`results` (v0.4 too, with the request's bounds). BBS presentations carry `proof_time` under v0.5
+when the request has an age check (refused otherwise: `proof_time`; under v0.4 a `proof_time` is
+refused as `presentation`). Vega and Longfellow read v0.5 requests on the v0.4 circuits; the site
+offers them under v0.5 only once their v0.5 circuits are in. Only `server/utils/services.ts` calls them. Each loads on its own; the site
 starts when at least one loads and offers only the systems of those that did. The
 addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
 a presentation costs no network hop on the server side.
@@ -211,7 +221,8 @@ it does not know (such as a `pin`) is ignored.
   "handover": { "…": "as above" },
   "credential": { "format": "mso_mdoc", "doctype": "eu.europa.ec.eudi.nym_auth.1", "issuer_signed": "<base64url IssuerSigned>" },
   "secret_seed": "<hex, 16 bytes>",
-  "device_signature": "<hex r‖s from step 1>"
+  "device_signature": "<hex r‖s from step 1>",
+  "rulebook": "0.4"
 }
 ```
 
@@ -284,12 +295,13 @@ Prover refusals:
   "credential_query_id": "nym_attestation",
   "presentation": "<base64url CBOR>",
   "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
-  "now": "2026-10-13T00:37:08.000Z"
+  "now": "2026-10-13T00:37:08.000Z",
+  "rulebook": "0.4"
 }
 ```
 
 ```json
-{ "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
+{ "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true }, "bounds": { "ge": "2008-10-14", "le": "2013-10-13" },
   "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "keys_mb": 40.5, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
 ```
 
@@ -401,27 +413,30 @@ key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
 { "request": { …Request Object… }, "credential_query_id": "nym_attestation_bbs",
   "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
   "credential": { "format": "bbs_cd", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
-  "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" } }
+  "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" },
+  "rulebook": "0.5" }
 ```
 
-It answers `{ ok: true, system_id, presentation, results, metrics, statement }`: `presentation` is
+It answers `{ ok: true, system_id, presentation, results, metrics, proof_time, statement }`: `presentation` is
 base64url(CBOR(ZkpPresentation)), its `proof` the bbs-cd-plugins envelope, `issuer_key_set` the
-96-byte issuer key, `results.nym` the 48-byte G1 point, no `proof_time`; `results` as the
+96-byte issuer key, `results.nym` the 48-byte G1 point, `proof_time` only under v0.5 with an age
+check (also answered as `proof_time`, null otherwise); `results` as the
 verifier's; `metrics` `offline_ms` (commitments and
 the ecdsa-pop preparation), `bbs_ms`, `ecdsa_pop_ms`, `device_sign_ms`, `pseudonym_ms`,
 `date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `proof_bytes` (the envelope),
 `presentation_bytes` (the ZkpPresentation), `parts` (bytes per part), `heap_mb`, `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
-committed attributes, plugins). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
+committed attributes, plugins, `rulebook`, `age_bounds`). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
 is outside the range), `400 unsupported_request`, `unsupported_config`, `unsupported_function`,
 `unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
 does not decode or verify, or the device key is not the credential's), `bad_request`.
 
-**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover, learned_issuers? }`,
-all but the presentation from the site's session store. `learned_issuers`: BBS issuer public keys
+**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover, learned_issuers?, rulebook?, now?, proof_time_tolerance_s? }`,
+all but the presentation from the site's session store; `now` (RFC 3339) and
+`proof_time_tolerance_s` are needed for a v0.5 age check. `learned_issuers`: BBS issuer public keys
 (base64 of the 96-byte point) trusted besides the configured issuer, each with the profile's
-schema ("Trust new issuers", `server/utils/issuers.ts`). It answers `{ ok: true, system_id, results, metrics }`
+schema ("Trust new issuers", `server/utils/issuers.ts`). It answers `{ ok: true, system_id, results, bounds, metrics }`
 or `{ ok: false, code, reason, issuer_key, metrics }` with `code` `presentation`, `scheme`, `issuer_key_set`,
-`request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5); `issuer_key` (base64) names the
+`proof_time` (v0.5), `request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5); `issuer_key` (base64) names the
 one key of an `issuer_key_set` refusal that is not trusted, null otherwise. `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
 `ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
 
@@ -458,7 +473,8 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `GET /api/dev/latest` | | This browser's newest session for the developer view, created after `?after=<ms>`, and what `/tech` accepts |
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
-| `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
+| `POST /api/tech/accept` | 400 `bad_request`, 409 `pending_system` | An unknown proof system; one the demo profile cannot use yet (v0.5: Vega and Longfellow, waiting for their circuits). Switching off the last accepted one is allowed |
+| `POST /api/tech/demo-profile` | 400 `bad_request` | `{ profile }`: `nym-auth-v0.4` or `nym-auth-v0.5`. Switches the profile and resets the demo; a later demo reset keeps it |
 | `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
 | `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
 | `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |

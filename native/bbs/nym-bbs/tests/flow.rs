@@ -284,6 +284,7 @@ fn prove_with_a_device_signer() {
     handover: &handover_value,
     credential: &credential,
     parallel: false,
+    rulebook: nym_bbs::profile::Rulebook::V04,
   };
   let out = prover.prove_with(&input, &signer).expect("prove_with");
   assert_eq!(signer.calls.get(), 1);
@@ -299,4 +300,101 @@ fn prove_with_a_device_signer() {
   let input = PresentInput { request: &ro2, handover: &handover_value, ..input };
   assert_eq!(prover.prove_with(&input, &signer).unwrap_err().error, "unsatisfiable");
   assert_eq!(signer.calls.get(), 1);
+}
+
+/// Rulebook v0.5 (`docs/nym_auth_rulebook-v0.5.md`): age_check is an assertion with a `range` in
+/// whole years; the presentation carries `proof_time`, and both sides compute the bounds from its
+/// UTC date. The same credential and schema as v0.4.
+#[test]
+fn rulebook_v05_age_range() {
+  use nym_bbs::dates::{AgeRange, Utc};
+  use nym_bbs::presentation::Presentation;
+  let prover = Prover::load();
+  let verifier = Verifier::load(&std::fs::read(root("native/bbs/demo/issuer-params.bin")).unwrap()).unwrap();
+  let w = wallet();
+  let v05 = |range: &str, nonce: &str| {
+    let mut req = request("community.example", nonce, Some(json!({})));
+    let item = &mut req["dcql_query"]["credentials"][0]["_req"][1];
+    *item = json!({ "fn_id": "age_check", "params": { "range": range } });
+    req
+  };
+  let prove05 = |req: &Value| {
+    let input: ProveInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation_bbs", "handover": handover(req),
+      "credential": w["holders"][0]["credential"], "device_key": w["holders"][0]["device_key"], "rulebook": "0.5",
+    }))
+    .unwrap();
+    prover.prove(&input)
+  };
+  let verify05 = |req: &Value, pres: &str, rulebook: &str, now: &str| {
+    let input: VerifyInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation_bbs", "presentation": pres, "handover": handover(req),
+      "rulebook": rulebook, "now": now, "proof_time_tolerance_s": 300,
+    }))
+    .unwrap();
+    verifier.verify(&input)
+  };
+  let now = Utc::now().unwrap();
+  let now_text = now.text();
+  // The teen (born 2011-03-14) is 13 to 17 today, until 2029.
+  let req = v05("13-17", "v05-age-range-nonce-0123456789ab");
+  let out = prove05(&req).expect("prove v0.5");
+  let pres = out["presentation"].as_str().unwrap();
+  let decoded = Presentation::decode(&base64url(pres)).unwrap();
+  let pt = decoded.proof_time.clone().expect("proof_time");
+  assert_eq!(pt.len(), 20);
+  assert!(decoded.results.iter().all(|(k, _)| k == "nym"), "an assertion has no output");
+  let v = verify05(&req, pres, "0.5", &now_text);
+  assert_eq!(v["ok"], true, "{v}");
+  assert!(v["results"].get("age").is_none());
+  let (ge, le) = AgeRange::parse("13-17").unwrap().bounds(Utc::parse_proof_time(&pt).unwrap().date()).unwrap();
+  assert_eq!(v["bounds"]["ge"], json!(ge.as_ref().map(nym_bbs::dates::iso)));
+  assert_eq!(v["bounds"]["le"], json!(le.as_ref().map(nym_bbs::dates::iso)));
+  assert_eq!(out["statement"]["age_bounds"], v["bounds"]);
+
+  // 18+: the teen cannot prove it.
+  assert_eq!(prove05(&v05("18+", "v05-age-range-nonce-18plus-012345")).unwrap_err().error, "unsatisfiable");
+  // The v0.5 request with a return handle on the assertion, or a range with A > B: unsupported.
+  let mut with_return = req.clone();
+  with_return["dcql_query"]["credentials"][0]["_req"][1]["return"] = json!("age");
+  assert_eq!(prove05(&with_return).unwrap_err().error, "unsupported_request");
+  assert_eq!(prove05(&v05("17-13", "v05-age-range-nonce-reversed-0123")).unwrap_err().error, "unsupported_request");
+
+  // The verifier's clock: proof_time beyond the tolerance is refused.
+  let late = Utc::from_unix(now.unix() + 3600).text();
+  assert_eq!(verify05(&req, pres, "0.5", &late)["code"], "proof_time");
+  // A v0.4 verifier refuses proof_time in a bbs_cd presentation.
+  assert_eq!(verify05(&req, pres, "0.4", &now_text)["code"], "presentation");
+  // Without proof_time, a v0.5 age check is refused.
+  let mut bare = decoded.clone();
+  bare.proof_time = None;
+  let bare = b64(&bare.encode().unwrap());
+  assert_eq!(verify05(&req, &bare, "0.5", &now_text)["code"], "proof_time");
+  // Another proof_time within the tolerance but on another date would change the bounds; one on the
+  // same date keeps them, and the proof still verifies only for the bounds it was made for.
+  let mut moved = decoded.clone();
+  moved.proof_time = Some(Utc::from_unix(Utc::parse_proof_time(&pt).unwrap().unix() - 1).text());
+  let moved_pres = b64(&moved.encode().unwrap());
+  let mv = verify05(&req, &moved_pres, "0.5", &now_text);
+  let same_day = Utc::parse_proof_time(moved.proof_time.as_ref().unwrap()).unwrap().date() == Utc::parse_proof_time(&pt).unwrap().date();
+  if same_day {
+    assert_eq!(mv["ok"], true, "{mv}");
+  }
+
+  // v0.5 without an age check: no proof_time, the same as v0.4.
+  let plain = request("community.example", "v05-plain-nonce-0123456789abcdef", None);
+  let out = prove05(&plain).expect("prove v0.5 pseudonym only");
+  let decoded = Presentation::decode(&base64url(out["presentation"].as_str().unwrap())).unwrap();
+  assert!(decoded.proof_time.is_none());
+  assert_eq!(verify05(&plain, out["presentation"].as_str().unwrap(), "0.5", &now_text)["ok"], true);
+}
+
+fn base64url(s: &str) -> Vec<u8> {
+  use base64::Engine;
+  base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s).unwrap()
+}
+
+fn b64(b: &[u8]) -> String {
+  use base64::Engine;
+  base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
 }

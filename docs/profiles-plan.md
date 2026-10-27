@@ -1,6 +1,6 @@
 # Plan: demo profiles (rulebook versions, credentials, functions, flows)
 
-Status: agreed plan, 2026-10-26. No code yet. Owner: Peter Altmann.
+Status: agreed plan, 2026-10-26; partly built 2026-10-27 (see "Status" at the end). Owner: Peter Altmann.
 
 ## Goal
 
@@ -24,14 +24,15 @@ Decisions (Peter, 2026-10-26):
 - The version is shown in `/tech` and `/dev` only.
 - Trust machinery (trust lists, issuer policy) stays as it is for now; the plan covers the ZKP parts.
 
-## Expected v0.5 changes
+## v0.5 changes (rulebook draft of 2026-10-27, `docs/nym_auth_rulebook-v0.5.md`)
 
-- `birth_date` is replaced by `bdc`, a birth-date commitment: SHA-256(16-byte random salt ‖ the
-  14-byte full-date as encoded in an mdoc MSO, i.e. CBOR tag 1004 + "YYYY-MM-DD"). The circuit
-  checks the hash and uses the opened date only for predicates, as it uses `ssc`. Purpose:
-  prevent accidental disclosure of the birth date.
-- `psc` (private seed commitment) is added as an attribute; a pseudonym configuration over
-  `psc` follows (c/france's "fully anonymous" setting will point to it).
+- `birth_date` and `ssc` are replaced by `bsc` = SHA-256(`secret_seed` ‖ `birth_date`), the
+  16-byte issuer-known seed and the 10-byte `YYYY-MM-DD` (no CBOR tag). The circuit opens `bsc` with
+  both and uses the seed for the pseudonym and the date only for predicates. Purpose: prevent
+  accidental disclosure of the birth date. (Replaces the earlier idea of a separate salted `bdc`.)
+- `psc` = SHA-256(`private_seed`) is required; 32 zero bytes when the holder has none (a psc
+  configuration is then unsatisfiable). c/france's "fully anonymous" setting will point to it.
+- `age_check` is an assertion (no `return`, no output) with `range` "A-B", "A+" or "B-".
 - `age_check` asks for ages in years instead of `ge`/`le` dates. The circuit still checks dates;
   the applications translate years into date bounds (see "Functions").
 - New credential types: PID and PhotoID, with circuits.
@@ -208,3 +209,26 @@ Phases 1 to 4 do not depend on v0.5 and can start now.
   accepting bounds for its date and the day before.
 - PID and PhotoID: which functions over each (age, pseudonym, other predicates), and their
   doctypes and circuits from the v0.5 delivery.
+
+## Status (2026-10-27)
+
+Built (Peter: "Treat this as v0.5 and let the user select version from a dropdown. build the
+profile support now with version number and link to github for the commit it is based on"):
+
+- Profiles `nym-auth-v0.4` and `nym-auth-v0.5` with a JSON Schema checked at start
+  (`profiles/`, `profiles/README.md`): rulebook version, date and document, the GitHub commit,
+  the credential per encoding, function specs (kind, operator, bounds date, meaning, translation,
+  proof), pseudonym configurations with their properties, and per proof system available or
+  pending.
+- The request interpreter and operators (`shared/protocol/`): the site writes requests, the wallet
+  reads them (under the profiles its credential fits), the response route reads the profile.
+- `/tech`: Demo profile dropdown (resets the demo), version, rulebook and commit links, build
+  commit, "What this version defines", pending systems; `/dev`: profile and links in the header;
+  Benchmark records carry the profile.
+- v0.5: BBS end to end (`proof_time` in the presentation with an age check, bounds from its date,
+  checked within the tolerance); Vega and Longfellow read v0.5 requests and verify them on the v0.4
+  circuits in tests, but are pending in the profile until the v0.5 circuits (`bsc`, `psc`) and
+  credentials exist. The addons take `rulebook` in their input.
+
+Not built yet: the flow file and its coverage check (section 4); the addons taking the statement
+instead of parsing requests (phase 4); the v0.5 mdoc witness, issuer and credentials.

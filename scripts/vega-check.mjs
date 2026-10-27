@@ -184,5 +184,38 @@ check('G4 18+ request, adult credential: proves, verifies, age true', vAdult.ok 
 const teen18 = await present(request(ADULT), teen)
 check('G4 18+ request, teen credential: 422 unsatisfiable', teen18.ok === false && teen18.status === 422 && teen18.error === 'unsatisfiable', JSON.stringify(teen18))
 
+// G5: rulebook v0.5's request side on the v0.4 circuit and credential (the v0.5 circuits over bsc
+// and psc are not here yet): age_check is an assertion with a range in years, and both sides
+// compute the bounds from the UTC date of proof_time.
+{
+  const v05 = (range) => {
+    const req = request(TEEN)
+    const q = req.dcql_query.credentials[0]
+    return { ...req, dcql_query: { credentials: [{ ...q, _req: [q._req[0], { fn_id: 'age_check', params: { range } }] }] } }
+  }
+  const present05 = async (r5, wallet = teen) => {
+    const s5 = await sign(r5, wallet)
+    const w = await prover.witness(JSON.stringify({
+      system_id: CIRCUIT, credential_query_id: 'nym_attestation', request: r5, handover: handoverOf(r5),
+      credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s5.device_signature, rulebook: '0.5',
+    }))
+    if (typeof w === 'string') return JSON.parse(w)
+    return JSON.parse(await prover.prove(w))
+  }
+  const verify05 = async (r5, presentation, rulebook = '0.5') =>
+    JSON.parse(await verifier.verify(JSON.stringify({ request: r5, credential_query_id: 'nym_attestation', presentation, handover: handoverOf(r5), now: new Date().toISOString(), rulebook })))
+  const r5 = v05('13-17')
+  const p5 = await present05(r5)
+  const v5 = p5.ok ? await verify05(r5, p5.presentation) : p5
+  check('G5 v0.5 13-17: proves and verifies, no age output', v5.ok === true && Object.keys(v5.results).join() === 'nym' && v5.results.nym === expectedNym, JSON.stringify(v5.results ?? v5))
+  check('G5 v0.5 bounds from the date of proof_time', v5.bounds?.ge === TEEN.ge && v5.bounds?.le === TEEN.le, JSON.stringify(v5.bounds))
+  const t18 = await present05(v05('18+'))
+  check('G5 v0.5 18+, teen: 422 unsatisfiable', t18.ok === false && t18.status === 422, JSON.stringify(t18))
+  const a18 = await present05(v05('18+'), adult)
+  const va = a18.ok ? await verify05(v05('18+'), a18.presentation) : a18
+  check('G5 v0.5 18+, adult: proves; another request (nonce) does not verify', a18.ok === true && va.ok === false, JSON.stringify(va.code ?? va))
+  expectRefusal('G5 v0.5 presentation read as v0.4', await verify05(r5, p5.presentation, '0.4'), 'request')
+}
+
 console.log(failures ? `${failures} check(s) failed` : 'all checks passed')
 process.exit(failures ? 1 : 0)

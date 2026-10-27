@@ -15,7 +15,8 @@ has to show two things:
   Longfellow (Google longfellow-zk, Rust) with the nym_auth circuits of the nym-auth-circuits
   archive, over the same mdoc (see section 2), and, next to them, BBS with committed disclosures
   (sirosfoundation/bbs-cd-plugins) for a BBS form of the same credential (the rulebook's `bbs_cd`
-  encoding, `docs/bbs_cd.md`). Every request is the rulebook's `zkp_req` format (v0.4).
+  encoding, `docs/bbs_cd.md`). Every request is the rulebook's `zkp_req` format, in the version of
+  the demo profile `/tech` selects (v0.4 or v0.5, row Demo profiles).
 
 The person uses Community on a computer and an identity wallet on their phone for every identity step,
 over cross-device OpenID4VP (QR code).
@@ -54,6 +55,11 @@ needs from the credential the person chose; the prover keeps none of it.
   verification and binding. In the shared
   package it is `docs/nym_auth_rulebook.md`. In Peter's workspace it is in the parent folder
   (`pseudonym_demo/`).
+- `nym_auth_rulebook-v0.5.md` – the rulebook's next version (Peter, 2026-10-27; the file's own
+  header still says 0.4), in `docs/`: `bsc` = SHA-256(`secret_seed` ‖ `birth_date`) replaces
+  `birth_date` and `ssc` in the mdoc, `psc` is required (32 zero bytes without a private seed),
+  `age_check` is an assertion with `range` in whole years, `proof_time` carries D, the date the
+  bounds are computed for. The `nym-auth-v0.5` profile runs it (row Demo profiles).
 - `NYM-AUTH.md` (Peter's workspace only) – benchmarks for the full nym_auth statement. On mdoc,
   Longfellow (Google Rust, 1 thread) takes about 0.9 s end to end and produces a proof of about
   345 KB. Peter shows these on a slide; the site does not need to reproduce them.
@@ -86,6 +92,7 @@ current decisions; the replaced ones are quoted in them.
 | Credential | **Changed 2026-10-13 (Frédéric), split over the phones 2026-10-19 (Peter):** two `nym_auth` mdocs from one Document Signer: the teen's (born 2011-03-14) and an adult's (born 1990-05-20), one per phone, and the teen's BBS credential on a third phone (row BBS); a request starts with the credential shown on the phone's home screen (or opened last). Each covers both pseudonym and age. Each mdoc has its own seed, so each gives its own pseudonym and account; the teen's BBS credential has the teen's seed, but another PRF, so another account. Each card has its own colour (teen grey `#5B6573`, adult red `#8C2F39`, BBS teal `#2E5E6E`, `CARD_COLOURS` in `app/wallet/holder.ts`) and shows the holder's birth date ("Birth Date"), which tell them apart. The birth date stays on the phone; the request screen does not show it. The wallet holds no other card (the Personal ID placeholder was removed on 2026-10-13, Peter). They do not expire: validUntil `9999-12-31T23:59:59Z` and the Document Signer's notAfter `99991231235959Z`; the product shows no expiry. When more than one credential on a phone matches a request, the request screen offers "Switch credential", as the SIROS ID app does; with one credential per phone it does not appear. Was: "One `nym_auth` attestation covers both pseudonym and age." |
 | Pseudonym config | `known-offender-matching-ssc`, `ver` 1, `prf` `sha-256` (mdoc) or `hashdh-bls12381g1` (BBS). Rulebook v0.4 has no `verifier_id_type`: the trust framework fixes one form of `verifier_id`, and the demo's fixes `x509_san_dns`, so `client_id = x509_san_dns:<siteHost>` is the `verifier_id`; a community with its own pseudonym uses `x509_san_dns:<nymHost>` instead. |
 | Rulebook v0.4 | **Added 2026-10-20 (Peter):** the requests and presentations follow rulebook v0.4 (`docs/nym_auth_rulebook.md`): format `zkp_req` with `meta.source_format` (`mso_mdoc` + `doctype_value`, `bbs_cd` + `schema_id_value`), `_req` items `{ fn_id, return, params }`, `vp_formats_supported.zkp_req` `{ proof_system_values, system_id_values }` (circuits and schemes together), and `ZkpPresentation` with `system_id`. Cross-device `request_uri` (POST, `wallet_metadata`) and the B.2.6.1 handover; the rulebook's example shows the DC API. Was: the `circuit_zk` format of rulebook v0.2 and the demo's `mms_zk`. |
+| Demo profiles | **Added 2026-10-27 (Peter: "Treat this as v0.5 and let the user select version from a dropdown. build the profile support now with version number and link to github for the commit it is based on"):** the site runs one **demo profile** at a time, one rulebook version: `profiles/<id>/profile.json`, checked against `profiles/schema/profile.schema.json` at start (`server/plugins/profiles.ts`; a profile that does not fit stops the built server), listed in `shared/profiles/index.ts`, guide in `profiles/README.md`. `nym-auth-v0.4` (default, `NUXT_DEMO_PROFILE`) and `nym-auth-v0.5`. A profile holds the rulebook version, date and document, the GitHub repository and the commit it is based on (`source.commit`; null for v0.5 until Peter commits it), the credential per encoding (attributes and roles, metadata files: v0.5 has Peter's `nym_auth.mdoc.json` and `nym_auth.schema-meta.yaml`), the functions (value or assertion, the operator that writes and reads the params, where age bounds come from, meaning, translation, proof), the pseudonym configurations with their properties (the consent wording; was `app/wallet/rulebook.ts`'s table), and which proof systems the version can use (`available` or `pending` with a note). Request interpretation is not hardcoded (Peter: "There needs to be a module that helps the verifier understand what the request means"): `shared/protocol/request.ts` writes and reads `_req` from the profile's function specs and the named operators of `shared/protocol/operators.ts` (`age.birth-date-bounds@1` v0.4, `age.years-range@1` v0.5); the site builds requests with it, the demo wallet reads each request under the profiles its credential fits (an mdoc fits a profile whose required mdoc attributes it has: the demo mdocs are v0.4; the BBS credential fits both), and the response route reads the session's profile for what a verified presentation shows. **/tech:** a "Demo profile" dropdown (`POST /api/tech/demo-profile`; switching resets the demo, a later demo reset keeps the profile), the rulebook version and date, links to the rulebook and the commit on GitHub, the build commit (from `.git`, `NUXT_PUBLIC_BUILD_COMMIT`), and "What this version defines". A pending proof system shows "pending" and cannot be accepted (`409 pending_system`); the Benchmark shows the active profile's runs (each record carries `profile`; older records are v0.4). **/dev:** the profile, rulebook and commit links in the header; pending switches. The native addons take `rulebook` ("0.4" when absent) in the prove and verify input. **v0.5 as built (Peter: v0.5 circuits with bsc and psc are on their way; "keep today's per-phone colours"):** `age_check` is `{ fn_id, params: { range } }` without `return` ("13-17", "18+", "17-" from the gate), no output in `results`; the wallet and the provers compute E and C from the range and the UTC date of `proof_time` (C on or before D minus A years, E after D minus (B + 1) years; 29 February clamps), the verifiers from the presentation's `proof_time` after checking it within the tolerance, and report the bounds (`bounds`), which the site records as the proven range. BBS works end to end: its presentation carries `proof_time` (tag 0, `YYYY-MM-DDThh:mm:ssZ`) when the request has an age check, and the scheme registry accepts `range`. Vega and Longfellow read v0.5 requests and verify them on the v0.4 circuits in tests (`nym-longfellow` test `rulebook_v05_request_side`, vega-check G5), but are pending in the profile: the demo mdocs and circuits are v0.4 (`birth_date`, `ssc`), so the site offers no mdoc system under v0.5 and the mdoc phones answer "Unsupported Request". Not done: the flow file and its coverage check (`docs/profiles-plan.md`), and the addons taking the statement instead of parsing requests. flows-check group Q. |
 | Encrypted responses | **Changed 2026-10-22 (Peter: "Implement encryption in the real flow please"):** `response_mode` `direct_post.jwt`. Each session makes an ephemeral ECDH-ES P-256 key (`server/utils/response-key.ts`) and puts the public half in `client_metadata.jwks` (`use` `enc`, `alg` `ECDH-ES`, a `kid`; no `encrypted_response_enc_values_supported`, so A128GCM). The wallet posts `response` = a JWE of `{ vp_token, state }` or `{ error, state }` with the key's `kid` (`app/wallet/transport.ts`). The handover's jwkThumbprint is the key's RFC 7638 thumbprint (`shared/utils/jwe.ts`), on both sides, so a proof verifies only for the key its response was encrypted to; the circuits take the handover through e2 or the audience, so no circuit changed. The wallet refuses a request without `direct_post.jwt` and a usable key (`invalid_request`, which it sends unencrypted, as OpenID4VP allows). response_uri: 400 `invalid_response` for a JWE that does not decrypt with the session key, 400 `unencrypted` for a vp_token sent as form fields, and an unencrypted error response is accepted; none of these changes the session. Was: `direct_post` without encryption (Peter, 2026-10-20: "do not change the transport at all"); the rulebook PR note that the demo does not encrypt no longer holds. |
 | Developer view | **Added 2026-10-22 (Peter, from verifier-demo.zip):** `/dev`, a developer view of the same flow: a sequence diagram of the site's page, its backend and the wallet, with the OID4VP-extension and ZKP highlights, step details, a collapsible inspector (DCQL, request, JWE header and decrypted response with the decoded ZkpPresentation, checks), the `nym_auth` attestation popup with the demo credentials' values, the age picker (None, 18+, 13–17) and keys 1 2 3, S, R, E, Z, I. A switch in both headers, Community and Developer, flips between the two views; `/dev` follows this browser's newest session, whichever view started it. Its requests (purpose `dev`) create the Community account or log in and record the proven age range, like a sign-up at a gated community. The QR popup holds the real request (a phone with a wallet that runs `zkp_req` and `direct_post.jwt`, and can reach the site, can scan it); **Simulate scan** lists the three demo phones beside it, each with its credential's encoding and whether `/tech` accepts a proof system for it (Peter: "Let me pick which one and then click scan"); **Scan** starts the picked phone, and **Change phone** goes back to the list until it has scanned. The popup stays until Close on the phone's success screen. The rows come from the session trace; the demo phone reports its own steps (`POST /api/wallet/trace`: verifier authenticated, attestation matched, the holder's answer, response encrypted), a real wallet does not. Not copied from the zip: its demo-settings button, and its proof-system switch. **Changed 2026-10-23 (Peter):** the side panel lists the proof systems by name only, VegaMC, Longfellow and BBS (VegaMC in `/dev` only; the rest of the site says Vega), grouped in the same framed boxes as the phone list (Circuits, BBS), each with an on/off switch that does what `/tech`'s does (`POST /api/tech/accept`); no account panel. Was (2026-10-22, Peter: "only show an informative window based on what goes on in /tech"): a read-only list with ids and formats, and the Community account. No guide in `/dev`. |
 | Headers | **Added 2026-10-23 (Peter):** every header (the site, `/dev`, `/tech`, `/mod`) has one-letter links, c (Community), d (`/dev`), t (`/tech`), m (`/mod`) (`components/QuickNav.vue`), and the short routes `/c`, `/d`, `/t`, `/m` redirect to them (`routeRules` in `nuxt.config.ts`). The site's header has no Sign up or Log in (Peter: "One single signup and login is enough"): the home page's and the open communities' notice offers them, and the gates offer their own buttons; logged in, the account menu. |
@@ -162,7 +169,7 @@ app/
   wallet/holder.ts               the holder material and the credential decoded for the screens
   wallet/engine.ts               wallet-side rulebook checks, circuit selection, the consent model (product fields
                                  for the request screen, the technical account for the guide)
-  wallet/rulebook.ts             the rulebook's properties of each pseudonym configuration
+  wallet/rulebook.ts             the properties of each pseudonym configuration, from the request's profile
   wallet/transport.ts            HTTP transport; verifies the signed Request Object (ES256, x5c, SAN = host);
                                  encrypts the response (direct_post.jwt)
   wallet/prover.ts               the phone's native steps through /api/wallet/sign and /api/wallet/prove (BBS: prove only)
@@ -196,6 +203,9 @@ server/
   api/tech/profiling.post.ts     /tech's Profiling switch
   api/tech/profile.get.ts        a Benchmark row's profiles
   utils/issuers.ts               trusted issuers added at runtime ("Trust new issuers")
+  utils/demo-profile.ts          the demo profile the site runs; checks every profile against its schema
+  plugins/profiles.ts            checks the profiles at start
+  api/tech/demo-profile.post.ts  /tech's Demo profile dropdown: switches the profile, resets the demo
   api/tech/issuers.post.ts       /tech's "Trust new issuers" switch, and Remove
   api/vp/session.post.ts         create session → { id, authorizationUrl }; URLs from the page's origin
   api/vp/request/[id].ts         request_uri, GET or POST (wallet_metadata, wallet_nonce), returns signed JWT
@@ -209,7 +219,13 @@ server/
   api/test/fault.post.ts         test only (COMMUNITY_TEST_FAULTS=1), 404 otherwise
   api/wallet/*.ts                mocked phone → prover (capabilities, sign, prove); trace (the phone's own steps)
   api/me, logout, notice, comments, mod/*, demo/reset, tech/overview
+profiles/                        demo profiles, one rulebook version each (README.md); schema/profile.schema.json
+  nym-auth-v0.4/profile.json     v0.4 (docs/nym_auth_rulebook.md)
+  nym-auth-v0.5/                 v0.5 (docs/nym_auth_rulebook-v0.5.md), with the credential metadata files
 shared/
+  profiles/index.ts              the profiles, their manifest for /tech and /dev, links to GitHub
+  protocol/request.ts            the request interpreter: writes and reads _req from a profile's function specs
+  protocol/operators.ts          the operators a function spec names (age bounds as dates, age range in years)
   registry/circuits.ts           approved circuit registry (Vega and Longfellow, as the addons load them), scheme
                                  registry (BBS), PROOF_SYSTEMS (/tech's switches)
   utils/mdoc.ts                  reads an IssuerSigned (wallet screens)
@@ -248,6 +264,7 @@ scripts/vega-check.mjs           npm run vega:check: real proofs, pseudonym, ref
 scripts/demo-flow.mjs            headless run of the presentation order: guide steps, phone traffic, screenshots
 scripts/flows-check.mjs          every flow, happy and unhappy, in the browser and over HTTP (Longfellow: group L;
                                  BBS: group M; threads and measurements: group P; developer view: group V;
+                                 demo profiles and v0.5: group Q; a real phone: group R;
                                  encryption refusals: S21); screenshots 19-33
 ```
 
@@ -258,6 +275,13 @@ is not: the holder binding (the device key and the seed sit in the page), the PI
 and the phone's speed (proofs run on the server's CPU).
 
 ## 4. What needs to be done
+
+0. **v0.5 mdoc** (row Demo profiles): with Peter's v0.5 circuits (`bsc`, `psc`), the witness opens
+   `bsc` with the wallet's `secret_seed` and 10-byte `birth_date`, `nym-issuer` issues v0.5 mdocs
+   (`bsc` digestID 0, `psc` digestID 1, the stricter compact profile), the wallet file holds
+   `secret_seed`, `birth_date` and `private_seed`, and the profile's Vega and Longfellow entries
+   become `available` (with the registry's new artifact hashes). Then set `source.commit` of
+   `nym-auth-v0.5` to the commit it is based on.
 
 1. **Confirm the registry values** in `shared/registry/circuits.ts` with Peter: circuit ids, proof
    system ids, and the public-input order. The Vega and Longfellow entries match what the addons load

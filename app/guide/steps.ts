@@ -127,8 +127,11 @@ function ageSection(c: ConsentView, site: string): GuideSection | null {
     heading: 'Age check',
     rows: [
       { label: 'Requested', value: c.age.text },
-      { label: 'Bounds', value: c.age.range },
-      { label: `${site} receives`, value: 'true, if the birth date lies within the bounds' },
+      { label: 'Bounds', value: c.age.boundsDate === 'proof_time' ? `${c.age.range}, computed from the age range and today's UTC date (the date of proof_time)` : c.age.range },
+      // v0.4: a value function (true under its handle); v0.5: an assertion, with no output.
+      c.age.handle
+        ? { label: `${site} receives`, value: 'true, if the birth date lies within the bounds' }
+        : { label: `${site} receives`, value: 'nothing for it: a presentation exists only if the birth date lies within the bounds' },
     ],
   }
 }

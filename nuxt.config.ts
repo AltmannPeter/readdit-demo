@@ -1,4 +1,22 @@
+import { existsSync, readFileSync } from 'node:fs'
 import tailwindcss from '@tailwindcss/vite'
+
+/** The commit the site is built from, read from .git without the git binary ('' outside a
+ *  checkout). NUXT_PUBLIC_BUILD_COMMIT overrides it. */
+function gitCommit(): string {
+  try {
+    const head = readFileSync('.git/HEAD', 'utf8').trim()
+    if (!head.startsWith('ref:')) return /^[0-9a-f]{40}$/.test(head) ? head : ''
+    const ref = head.slice(4).trim()
+    if (existsSync(`.git/${ref}`)) return readFileSync(`.git/${ref}`, 'utf8').trim()
+    const line = readFileSync('.git/packed-refs', 'utf8')
+      .split('\n')
+      .find((l) => l.endsWith(` ${ref}`))
+    return line?.split(' ')[0] ?? ''
+  } catch {
+    return ''
+  }
+}
 
 export default defineNuxtConfig({
   compatibilityDate: '2026-10-01',
@@ -27,6 +45,9 @@ export default defineNuxtConfig({
     // BBS backend (bbs_cd): the Rust Node addon and the issuer parameters the verifier trusts.
     bbsAddon: 'native/bbs/community-bbs.node',
     bbsIssuerParams: 'native/bbs/demo/issuer-params.bin',
+    // The demo profile at start (profiles/<id>): nym-auth-v0.4 or nym-auth-v0.5; /tech switches it.
+    // Empty: the default (shared/profiles).
+    demoProfile: '',
     // How far proof_time may lie from the verifier's clock, in seconds.
     proofTimeToleranceS: 300,
     // Comma-separated system ids the site can accept, circuits (mso_mdoc) and schemes (bbs_cd), in
@@ -59,6 +80,9 @@ export default defineNuxtConfig({
       siteName: 'Community',
       // DNS name in the access certificate. client_id = x509_san_dns:<siteHost>
       siteHost: 'community.example',
+      // The repository and the commit the site is built from (/tech and /dev link to it).
+      repository: 'https://github.com/AltmannPeter/readdit-demo',
+      buildCommit: gitCommit(),
     },
   },
   app: {

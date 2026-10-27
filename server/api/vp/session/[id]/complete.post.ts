@@ -57,7 +57,7 @@ export default defineEventHandler(async (event) => {
     } else {
       const { account, created } = getOrCreateAccount(pseudonym, undefined, s.outcome.format)
       const gate = DEV_GATES[s.purpose.age]
-      if (gate && s.outcome.age) recordAgeProof(account, gate)
+      if (gate && s.outcome.age) recordAgeProof(account, gate, s.outcome.ageBounds)
       await b.update({ pseudonym })
       s.completion = { ok: true, kind: created ? 'created' : 'logged_in', handle: account.handle, ...(gate && s.outcome.age && { age: true as const }) }
     }
@@ -72,7 +72,7 @@ export default defineEventHandler(async (event) => {
     } else {
       const { account, created } = getOrCreateAccount(pseudonym, undefined, s.outcome.format)
       const gate = s.purpose.community ? findCommunity(s.purpose.community)?.gate : undefined
-      if (gate && s.outcome.age) recordAgeProof(account, gate)
+      if (gate && s.outcome.age) recordAgeProof(account, gate, s.outcome.ageBounds)
       await b.update({ pseudonym })
       s.completion = { ok: true, kind: created ? 'created' : 'logged_in', handle: account.handle, ...(gate && s.outcome.age && { age: true as const }) }
     }
@@ -90,7 +90,7 @@ export default defineEventHandler(async (event) => {
     } else if (!gate || !s.outcome.age) {
       s.completion = { ok: false, kind: 'invalid' }
     } else {
-      recordAgeProof(current, gate)
+      recordAgeProof(current, gate, s.outcome.ageBounds)
       s.completion = { ok: true, kind: 'age', handle: current.handle }
     }
   }

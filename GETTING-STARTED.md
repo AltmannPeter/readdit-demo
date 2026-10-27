@@ -163,6 +163,15 @@ Logged-in users can vote, join communities and comment.
 session; the chips above the tiles select earlier ones, and name the phone that was on
 screen.
 
+- **Demo profile.** Which version of the nym_auth rulebook the site runs: **nym_auth v0.4** (at
+  start; `NUXT_DEMO_PROFILE`) or **nym_auth v0.5**. Switching resets the demo; **Reset demo** keeps
+  the choice. Next to it: the rulebook's version and date, links to the rulebook and to the commit
+  the profile is based on on GitHub ("not committed yet" until it is), and the commit the site is
+  built from. **What this version defines** lists the credential, the functions (and how each side
+  reads them), the pseudonym configurations and the proof systems. Under v0.5 the age check asks
+  for an age range in years and the BBS phone proves it; Vega and Longfellow show **pending** until
+  their v0.5 circuits are in, so the mdoc phones answer "Unsupported Request". `/dev` shows the
+  profile in its header. More in `profiles/README.md`.
 - **Proof systems.** A switch per proof system: Vega and Longfellow (circuits over the mdoc,
   `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**: tick one before
   the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the same
@@ -341,6 +350,8 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
+| `NUXT_DEMO_PROFILE` | `nym-auth-v0.4` | The demo profile at start (`profiles/`); /tech switches it |
+| `NUXT_PUBLIC_BUILD_COMMIT` | read from `.git` | The commit /tech links as the build |
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |

@@ -143,9 +143,9 @@ async function present(ctx, request, wallet, circuit = VEGA) {
   return p.body
 }
 /** bbs_cd: one prove call with the BBS credential and its device key. */
-async function presentBbs(ctx, request, wallet = teenBbs) {
+async function presentBbs(ctx, request, wallet = teenBbs, rulebook) {
   const q = queryOf(request, 'bbs_cd')
-  const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key } })
+  const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key, ...(rulebook && { rulebook }) } })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
@@ -2701,6 +2701,158 @@ async function groupR() {
   await closeDialog()
 }
 
+/** The birth-date bounds of an age gate on a UTC date (rulebook v0.5: C on or before D minus A
+ *  years, E after D minus (B + 1) years; 29 February clamps), computed here independently. */
+function boundsOn(gate, date) {
+  const [y, m, d] = date.split('-').map(Number)
+  const pad = (n) => String(n).padStart(2, '0')
+  const back = (n) => {
+    const ty = y - n
+    const last = new Date(Date.UTC(ty, m, 0)).getUTCDate()
+    return `${ty}-${pad(m)}-${pad(Math.min(d, last))}`
+  }
+  const next = (iso) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+  return { ...(gate.maxAge != null && { ge: next(back(gate.maxAge + 1)) }), ...(gate.minAge != null && { le: back(gate.minAge) }) }
+}
+
+/** Demo profiles: /tech's dropdown switches the rulebook version (and resets the demo); v0.5 asks
+ *  for age_check as an assertion with a range in years, the BBS presentation carries proof_time,
+ *  and both sides compute the bounds from its date; the mdoc circuits are pending in v0.5. */
+async function groupQ() {
+  const ctx = await client()
+  const setProfile = (id) => call(ctx, 'POST', '/api/tech/demo-profile', { data: { profile: id } })
+  await setProfile('nym-auth-v0.4')
+  await resetDemo(['vega-v1'])
+  await openPage()
+
+  begin('Q1', '/tech: the demo profile, its version and the commit it is based on')
+  let o = await overview()
+  eq('the profiles', o.profiles.map((p) => p.id), ['nym-auth-v0.4', 'nym-auth-v0.5'])
+  eq('v0.4 runs', o.profile, 'nym-auth-v0.4')
+  const v04 = o.profiles[0]
+  check('v0.4: a GitHub commit', /^[0-9a-f]{40}$/.test(v04.commit) && v04.commitUrl === `https://github.com/AltmannPeter/readdit-demo/commit/${v04.commit}`, v04.commitUrl)
+  eq('v0.4: version and rulebook', [v04.version, v04.documentUrl], ['0.4', `https://github.com/AltmannPeter/readdit-demo/blob/${v04.commit}/docs/nym_auth_rulebook.md`])
+  eq('v0.4 age_check: a value function from the request', [v04.functions.find((f) => f.id === 'age_check').kind, v04.functions.find((f) => f.id === 'age_check').boundsDate], ['value', 'request'])
+  eq('v0.5 age_check: an assertion from proof_time', [o.profiles[1].functions.find((f) => f.id === 'age_check').kind, o.profiles[1].functions.find((f) => f.id === 'age_check').boundsDate], ['assertion', 'proof_time'])
+  expectAnswer('server: an unknown profile', await setProfile('nym-auth-v9'), 400, 'bad_request')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-demo-profile]').waitFor()
+  eq('/tech: the dropdown', await tech.locator('[data-demo-profile]').inputValue(), 'nym-auth-v0.4')
+  check('/tech: version, rulebook and commit', (await tech.locator('[data-profile-version]').textContent()).includes('Rulebook v0.4') && (await tech.locator('[data-profile-commit]').getAttribute('href')) === v04.commitUrl)
+  // An account under v0.4, so the switch's reset shows.
+  {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, s)
+    const p = await present(ctx, r, teen)
+    await respond(ctx, r, vpForm(r, p.presentation))
+    eq('a v0.4 sign-up verifies', (await sessionView(s.id)).status, 'verified')
+    await call(ctx, 'POST', `/api/vp/session/${s.id}/complete`)
+  }
+  check('an account exists', (await accounts()).length > 0)
+
+  begin('Q2', '/tech: switching to v0.5 resets the demo; the mdoc circuits are pending')
+  await tech.locator('[data-demo-profile]').selectOption('nym-auth-v0.5')
+  for (let k = 0; k < 30 && (await overview()).profile !== 'nym-auth-v0.5'; k++) await page.waitForTimeout(100)
+  o = await overview()
+  eq('server: v0.5', o.profile, 'nym-auth-v0.5')
+  eq('the demo was reset', (await accounts()).length, 0)
+  eq('a pending system is not accepted', o.acceptedProofSystems, [])
+  await tech.locator('[data-pending="vega-v1"]').waitFor()
+  check('/tech: Vega and Longfellow pending', (await tech.locator('[data-pending]').count()) === 2 && (await tech.locator('[data-accept="vega-v1"]').isDisabled()))
+  check('/tech: v0.5 is not committed yet', (await tech.locator('[data-profile-commit]').textContent()).includes('not committed yet'))
+  expectAnswer('server: Vega cannot be switched on under v0.5', await accept('vega-v1', true), 409, 'pending_system')
+  eq('server: BBS can', (await accept(BBS_SYSTEM, true)).body.acceptedProofSystems, [BBS_SYSTEM])
+  await tech.close()
+  const dev = await ctxBrowser.newPage()
+  await dev.goto('/dev')
+  await dev.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
+  check('/dev: the profile in the header', true)
+  check('/dev: Vega pending', (await dev.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await dev.locator('[data-accept="vega-v1"]').isDisabled()))
+  await dev.close()
+
+  begin('Q3', 'v0.5 over HTTP: age_check as a range, proof_time in the BBS presentation, bounds from its date')
+  const bbsOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } } })
+  let s = await newSession(ctx, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+  let r = await fetchRequest(ctx, s, bbsOnly)
+  eq('the _req: pseudonym, then age_check without return', r.dcql_query.credentials[0]._req, [
+    { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'hashdh-bls12381g1' } },
+    { fn_id: 'age_check', params: { range: '13-17' } },
+  ])
+  let failed = ''
+  try {
+    await presentBbs(ctx, r, teenBbs, '0.4')
+  } catch (e) {
+    failed = e.message
+  }
+  check('read as v0.4, the request is refused', failed.includes('400 unsupported_request'), failed)
+  const p = await presentBbs(ctx, r, teenBbs, '0.5')
+  check('proof_time: UTC, to the second', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(p.proof_time ?? ''), p.proof_time)
+  eq('results: the pseudonym only', Object.keys(p.results), ['nym'])
+  const expected = boundsOn({ minAge: 13, maxAge: 17 }, p.proof_time.slice(0, 10))
+  eq("the prover's bounds", p.statement.age_bounds, expected)
+  await respond(ctx, r, bbsForm(r, p.presentation))
+  let sv = await sessionView(s.id)
+  eq('verified', sv.status, 'verified')
+  const vt = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+  eq("the verifier's bounds, from proof_time", vt?.age_bounds, expected)
+  eq('under v0.5', vt?.profile, 'nym-auth-v0.5')
+  eq('completed: the account, with the age', (await call(ctx, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+  eq('the proven range is the bounds', (await call(ctx, 'GET', '/api/me')).body.account?.birthDateRange, expected)
+  o = await overview()
+  check('Benchmark: the v0.5 run, under v0.5', o.measurements.profile === 'nym-auth-v0.5' && o.measurements.rows.length > 0 && o.measurements.rows.every((x) => x.profile === 'nym-auth-v0.5'), JSON.stringify(o.measurements.rows.map((x) => x.profile)))
+  expectAnswer('c/afterdark: refused by the site from the v0.5 bounds', await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'age', community: 'afterdark' } }), 403, 'age_refused')
+  {
+    const other = await client()
+    const s2 = await newSession(other, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r2 = await fetchRequest(other, s2, bbsOnly)
+    eq('18+ as a range', r2.dcql_query.credentials[0]._req[1], { fn_id: 'age_check', params: { range: '18+' } })
+    let refused = ''
+    try {
+      await presentBbs(other, r2, teenBbs, '0.5')
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    await other.dispose()
+  }
+
+  begin('Q4', "v0.5 in the browser: the teen's BBS phone at c/teenspace; the mdoc phone has no v0.5 credential")
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await openDetails()
+  await guideSays('the date of proof_time')
+  await guideSays('a presentation exists only if the birth date lies within the bounds')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  const st = sv.trace.find((t) => t.step === 'prove')?.data?.statement
+  check('the wallet read the request as v0.5', st?.rulebook === '0.5' && !!st?.age_bounds?.le, JSON.stringify(st))
+  await closeFromPhone()
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Unsupported Request')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+
+  begin('Q5', 'back to v0.4: reset, Vega available again')
+  eq('server: v0.4', (await setProfile('nym-auth-v0.4')).body.profile, 'nym-auth-v0.4')
+  eq('the demo was reset', (await accounts()).length, 0)
+  eq('Vega can be switched on', (await accept('vega-v1', true)).body.acceptedProofSystems, ['vega-v1'])
+  await ctx.dispose()
+}
+
 /** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
  *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
 async function groupV() {
@@ -2846,9 +2998,9 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, R: groupR, V: groupV, G: groupG }
+    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, Q: groupQ, P: groupP, R: groupR, V: groupV, G: groupG }
     // In the full run's order: G reads the sessions the groups before it leave.
-    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'R', 'V', 'K', 'G']
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'Q', 'P', 'R', 'V', 'K', 'G']
     for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2864,6 +3016,7 @@ try {
   await groupM()
   await groupL()
   await groupN()
+  await groupQ()
   await groupP()
   await groupR()
   await groupV()

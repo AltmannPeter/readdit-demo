@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AltmannPeter/readdit-demo/profiles/schema/profile.schema.json",
+  "title": "Community demo profile",
+  "description": "One version of the nym_auth rulebook as Community runs it: the credential, the functions a request can ask for and how the site and the wallet read them, the pseudonym configurations, and which proof systems the version can use. server/utils/profiles.ts checks every profile against this schema at start.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "label", "rulebook", "source", "credential", "functions", "pseudonym_configs", "systems"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
+    "label": { "type": "string", "minLength": 1 },
+    "rulebook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "version", "date", "document"],
+      "properties": {
+        "title": { "type": "string" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "The version the native addons are told (rulebook in the prove and verify input)." },
+        "date": { "type": "string", "format": "date" },
+        "document": { "type": "string", "description": "The rulebook's path in the repository." }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+$" },
+        "commit": {
+          "description": "The commit the profile is based on (40 hex digits), or null until it is committed.",
+          "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{40}$" }, { "type": "null" }]
+        },
+        "branch": { "type": "string", "description": "Where the document is linked while commit is null." }
+      }
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "encodings"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "encodings": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "mso_mdoc": { "$ref": "#/$defs/mdocEncoding" },
+            "bbs_cd": { "$ref": "#/$defs/bbsEncoding" }
+          }
+        },
+        "metadata": {
+          "type": "array",
+          "description": "Credential metadata files in the profile folder (type metadata, schema metadata).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "file"],
+            "properties": { "label": { "type": "string" }, "file": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pseudonym", "age_check"],
+      "properties": {
+        "pseudonym": { "$ref": "#/$defs/function" },
+        "age_check": { "$ref": "#/$defs/function" }
+      }
+    },
+    "pseudonym_configs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/pseudonymConfig" }
+    },
+    "systems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["proof_system", "system_id", "status"],
+        "properties": {
+          "proof_system": { "enum": ["vega-v1", "longfellow-libzk-v1", "bbs-cd-plugins-v0.1"] },
+          "system_id": { "type": "string" },
+          "status": { "enum": ["available", "pending"], "description": "pending: the version cannot use it yet; /tech shows it switched off, with the note." },
+          "note": { "type": "string" },
+          "proof_time": { "enum": ["always", "with-age_check", "never"], "description": "When the presentation carries proof_time." }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "attribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "description"],
+      "properties": {
+        "id": { "type": "string" },
+        "role": {
+          "enum": ["value", "commitment", "hidden"],
+          "description": "value: a data element holding the value; commitment: a hash the circuit opens (opens: what the wallet holds for it); hidden: a BBS message, signed but never disclosed."
+        },
+        "opens": { "type": "array", "items": { "type": "string" } },
+        "presence": { "enum": ["required", "optional"] },
+        "description": { "type": "string" }
+      }
+    },
+    "mdocEncoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doctype", "attributes"],
+      "properties": {
+        "doctype": { "type": "string" },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } }
+      }
+    },
+    "bbsEncoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_digest", "attributes"],
+      "properties": {
+        "schema_id": { "type": "string" },
+        "schema_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } }
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "wire", "meaning", "translation", "proof"],
+      "properties": {
+        "kind": { "enum": ["value", "assertion"], "description": "value: its output goes in results under return; assertion: no return, no output." },
+        "return": { "type": "string", "description": "The return handle the site asks for (value functions only)." },
+        "wire": {
+          "type": "string",
+          "description": "The operator that writes and reads this function's params in a request (shared/protocol/operators.ts)."
+        },
+        "bounds_date": {
+          "enum": ["request", "proof_time"],
+          "description": "age_check: where the birth-date bounds come from. request: they are the params; proof_time: computed from the params and the UTC date of proof_time, by both sides."
+        },
+        "params": { "type": "object", "description": "JSON Schema of the params object." },
+        "meaning": { "type": "string" },
+        "translation": { "type": "array", "items": { "type": "string" } },
+        "proof": { "type": "string" },
+        "source_attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "value" } } }, "then": { "required": ["return"] } },
+        { "if": { "properties": { "kind": { "const": "assertion" } } }, "then": { "not": { "required": ["return"] } } }
+      ]
+    },
+    "pseudonymConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "seed", "prf", "properties"],
+      "properties": {
+        "id": { "type": "string" },
+        "seed": { "enum": ["secret_seed", "private_seed"] },
+        "seed_attribute": {
+          "type": "object",
+          "description": "Per encoding: the attribute the seed is opened from.",
+          "additionalProperties": { "type": "string" }
+        },
+        "prf": {
+          "type": "object",
+          "description": "The PRF per encoding; an encoding not listed does not define the configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "mso_mdoc": { "const": "sha-256" },
+            "bbs_cd": { "const": "hashdh-bls12381g1" }
+          }
+        },
+        "requested": { "type": "boolean", "description": "The configuration Community asks for." },
+        "properties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["distinctPerVerifier", "sameAcrossVerifiers", "issuerCanLink", "knownOffenderMatching"],
+          "properties": {
+            "distinctPerVerifier": { "type": "boolean" },
+            "sameAcrossVerifiers": { "type": "boolean" },
+            "issuerCanLink": { "type": "boolean" },
+            "knownOffenderMatching": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}

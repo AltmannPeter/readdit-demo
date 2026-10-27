@@ -1,6 +1,10 @@
-//! The `bbs_cd` encoding of the nym_auth attestation (rulebook v0.4, "BBS committed-disclosure
-//! encoding"; `docs/bbs_cd.md`): the credential schema, and the BBS request that both sides derive
-//! from an OpenID4VP Request Object, its `zkp_req` credential query over `bbs_cd` and the handover.
+//! The `bbs_cd` encoding of the nym_auth attestation (rulebook v0.4 and v0.5, "BBS committed-
+//! disclosure encoding"; `docs/bbs_cd.md`): the credential schema, and the BBS request that both
+//! sides derive from an OpenID4VP Request Object, its `zkp_req` credential query over `bbs_cd` and
+//! the handover. The schema is the same in both versions; `age_check` differs: v0.4 sends the
+//! birth-date bounds (`ge`, `le`) and returns `true` under a handle, v0.5 sends a `range` in whole
+//! years, has no handle and no output, and both sides compute the bounds from the UTC date of
+//! `proof_time` ([`crate::dates`]).
 //!
 //! | BBS request | From |
 //! | --- | --- |
@@ -84,11 +88,37 @@ pub struct CredentialQuery {
   pub require_cryptographic_holder_binding: Option<bool>,
 }
 
+/// The rulebook version a request is read under (the demo profile; `rulebook` in the prove and
+/// verify input, "0.4" when absent).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rulebook {
+  #[default]
+  V04,
+  V05,
+}
+
+impl Rulebook {
+  pub fn parse(v: Option<&str>) -> Result<Rulebook, Refusal> {
+    match v {
+      None | Some("0.4") => Ok(Rulebook::V04),
+      Some("0.5") => Ok(Rulebook::V05),
+      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4 and 0.5"))),
+    }
+  }
+
+  /// v0.5: `age_check` takes a range in years and is an assertion; the presentation carries
+  /// `proof_time` when it is asked.
+  pub fn years(self) -> bool {
+    self == Rulebook::V05
+  }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReqItem {
   pub fn_id: String,
-  #[serde(rename = "return")]
-  pub handle: String,
+  /// Present for value functions; absent for assertions (v0.5's age_check).
+  #[serde(rename = "return", default)]
+  pub handle: Option<String>,
   #[serde(default)]
   pub params: serde_json::Map<String, Json>,
 }
@@ -183,11 +213,14 @@ pub struct Statement {
   pub pseudonym: PseudonymParams,
   pub nym_handle: String,
   pub age: Option<DateRangeParams>,
+  /// v0.4: the age check's return handle; v0.5: none (an assertion).
   pub age_handle: Option<String>,
+  /// v0.5: the age range the bounds were computed from.
+  pub age_range: Option<crate::dates::AgeRange>,
   /// Position of each plugin in `request.plugins`.
   pub index_pseudonym: usize,
   pub index_age: Option<usize>,
-  /// The `return` handles, in req order.
+  /// The `return` handles of the value functions, in req order.
   pub handles: Vec<String>,
 }
 
@@ -201,8 +234,10 @@ fn iso_date(what: &str, v: &Json) -> Result<Ymd, Refusal> {
 }
 
 /// The BBS request and what it must show, from the Request Object, the `zkp_req` query over `bbs_cd`
-/// `query_id`, the handover and the issuer's parameters.
-pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issuer: &IssuerParams) -> Result<Statement, Refusal> {
+/// `query_id`, the handover and the issuer's parameters, read under `rulebook`. `date`: D, the UTC
+/// date of `proof_time`, for a v0.5 age range (the prover's clock when it proves, the presentation's
+/// `proof_time` when the verifier checks).
+pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issuer: &IssuerParams, rulebook: Rulebook, date: Option<(i64, u32, u32)>) -> Result<Statement, Refusal> {
   if handover.client_id != req.client_id || handover.nonce != req.nonce || handover.response_uri != req.response_uri {
     return Err(Refusal::bad_request("the handover does not match the request"));
   }
@@ -246,13 +281,24 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
   }
 
   let mut nym: Option<(String, String)> = None;
-  let mut age: Option<(String, DateRangeParams)> = None;
-  let mut handles = Vec::new();
+  let mut age: Option<(Option<String>, DateRangeParams)> = None;
+  let mut age_range = None;
+  let mut handles: Vec<String> = Vec::new();
   for r in &q.req {
-    if handles.contains(&r.handle) {
-      return Err(Refusal::unsupported_request(format!("return handle {} is not unique", r.handle)));
+    // pseudonym is a value function in both versions; age_check is one in v0.4 and an assertion
+    // in v0.5.
+    let value = r.fn_id != FUNCTION_AGE || !rulebook.years();
+    match (&r.handle, value) {
+      (None, true) => return Err(Refusal::unsupported_request(format!("{} is a value function: return is required", r.fn_id))),
+      (Some(_), false) => return Err(Refusal::unsupported_request(format!("{} is an assertion: return must not be present", r.fn_id))),
+      (Some(h), true) => {
+        if handles.contains(h) {
+          return Err(Refusal::unsupported_request(format!("return handle {h} is not unique")));
+        }
+        handles.push(h.clone());
+      }
+      (None, false) => {}
     }
-    handles.push(r.handle.clone());
     match r.fn_id.as_str() {
       FUNCTION_PSEUDONYM => {
         if nym.is_some() {
@@ -272,7 +318,21 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
         if config != CONFIG_KNOWN_OFFENDER_MATCHING_SSC {
           return Err(Refusal::unsupported_config(format!("pseudonym configuration {config}")));
         }
-        nym = Some((r.handle.clone(), config.to_string()));
+        nym = Some((r.handle.clone().unwrap_or_default(), config.to_string()));
+      }
+      FUNCTION_AGE if rulebook.years() => {
+        if age.is_some() {
+          return Err(Refusal::unsupported_request("more than one age_check in req"));
+        }
+        if r.params.keys().any(|k| k != "range") {
+          return Err(Refusal::unsupported_request("age_check takes range only"));
+        }
+        let range = r.params.get("range").and_then(Json::as_str).ok_or_else(|| Refusal::unsupported_request("age_check without range"))?;
+        let range = crate::dates::AgeRange::parse(range).map_err(Refusal::unsupported_request)?;
+        let d = date.ok_or_else(|| Refusal::bad_request("age_check needs the date of proof_time"))?;
+        let (ge, le) = range.bounds(d).map_err(Refusal::unsupported_request)?;
+        age = Some((None, DateRangeParams { ge, le }));
+        age_range = Some(range);
       }
       FUNCTION_AGE => {
         if age.is_some() {
@@ -317,7 +377,8 @@ pub fn statement(req: &RequestObject, query_id: &str, handover: &Handover, issue
     verifier_id,
     pseudonym,
     nym_handle,
-    age_handle: age.as_ref().map(|(h, _)| h.clone()),
+    age_handle: age.as_ref().and_then(|(h, _)| h.clone()),
+    age_range,
     age: age.map(|(_, p)| p),
     index_pseudonym: 1,
     index_age,

@@ -21,7 +21,7 @@ use crate::error::Refusal;
 use crate::handover::{self, Handover};
 use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
-use crate::request::{RequestObject, Statement, statement};
+use crate::request::{RequestObject, Rulebook, Statement, statement_for};
 use crate::witness::{self, Private, Public};
 use crate::x509::PublicKey;
 use crate::zk::{Circuits, ZkProverPair};
@@ -73,6 +73,9 @@ pub struct WitnessInput {
   pub secret_seed: String,
   /// r ‖ s, hex, from [`Prover::sign`].
   pub device_signature: String,
+  /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
+  #[serde(default)]
+  pub rulebook: Option<String>,
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -203,7 +206,10 @@ impl Prover {
     if input.system_id != CIRCUIT_ID {
       return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
     }
-    let s: Statement = statement(&input.request, &input.credential_query_id, &input.handover)?;
+    // The time of the proof (proof_time), read first: v0.5 computes an age range's bounds from its date.
+    let now = dates::now().map_err(Refusal::bad_request)?;
+    let rulebook = Rulebook::parse(input.rulebook.as_deref())?;
+    let s: Statement = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, Some(now.date))?;
     if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
@@ -240,7 +246,6 @@ impl Prover {
       .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))?;
 
     // Holder data against the request: validity now, and the birth date in [E, C].
-    let now = dates::now().map_err(Refusal::bad_request)?;
     let (now_s, from_s, until_s) = (dates::unix(&now), dates::unix(&m.valid_from), dates::unix(&m.valid_until));
     if !(from_s <= now_s && now_s < until_s) {
       return Err(Refusal::unsatisfiable(format!(

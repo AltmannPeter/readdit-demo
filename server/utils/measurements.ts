@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { availableParallelism, cpus, arch, platform, totalmem } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
+import { DEFAULT_PROFILE_ID } from '#shared/profiles'
 import type { SourceFormat } from '#shared/types/oid4vp'
 import type { VpSessionRecord } from './store'
 import type { SizePart } from './services'
@@ -60,11 +61,18 @@ export interface Measurement {
   /** Run with Profiling on: the sampler costs a little time, so the Benchmark leaves these runs
    *  out of its figures when the row has others. */
   profiled?: boolean
+  /** The demo profile the run was made under (absent in records made before profiles: v0.4). */
+  profile?: string
 }
 
+/** The profile of a record: records made before profiles are nym_auth v0.4. */
+export const profileOfRecord = (m: { profile?: string }) => m.profile ?? DEFAULT_PROFILE_ID
+
 /** The Benchmark row of a record: proof system, statement, prover threads, machine. */
-export function rowKey(m: Pick<Measurement, 'proof_system' | 'statement' | 'machine'> & { prove: { threads: number | null } }): string {
-  return [m.proof_system, m.statement, m.prove.threads, m.machine.cpu, m.machine.cores, m.machine.platform].join('|')
+export function rowKey(m: Pick<Measurement, 'proof_system' | 'statement' | 'machine' | 'profile'> & { prove: { threads: number | null } }): string {
+  // The default profile's rows keep the key they had before profiles (Profiling's records use it).
+  const profile = profileOfRecord(m) === DEFAULT_PROFILE_ID ? [] : [profileOfRecord(m)]
+  return [m.proof_system, m.statement, m.prove.threads, m.machine.cpu, m.machine.cores, m.machine.platform, ...profile].join('|')
 }
 
 /** `named` steps with their times, and "Other" for the rest of `total`. */
@@ -171,6 +179,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
     },
     machine: machine(),
     ...(s.detail && Object.keys(s.detail.profiles).length && { profiled: true }),
+    profile: sessionProfile(s).id,
   }
   measurements().push(m)
   try {
@@ -205,6 +214,8 @@ function spread(values: Array<number | null>): Spread | null {
 }
 
 export interface MeasurementRow {
+  /** The demo profile of the row's runs. */
+  profile: string
   proof_system: string
   label: string
   statement: Measurement['statement']
@@ -263,7 +274,10 @@ export async function measurementSummary() {
   const list = measurements()
   const profiled = await profiledRuns()
   const groups = new Map<string, Measurement[]>()
-  for (const m of list) {
+  // The active profile's runs; the others are counted, not shown.
+  const active = activeProfile().id
+  const mine = list.filter((m) => profileOfRecord(m) === active)
+  for (const m of mine) {
     const key = rowKey(m)
     groups.set(key, [...(groups.get(key) ?? []), m])
   }
@@ -276,6 +290,7 @@ export async function measurementSummary() {
     const latest = <T>(f: (x: Measurement) => T | null | undefined) => [...ms].reverse().map(f).find((x) => x != null) ?? null
     const peaks = ms.flatMap((x) => [x.prove.peak_memory_mb, x.verify.peak_memory_mb]).filter((x): x is number => x != null)
     return {
+      profile: profileOfRecord(m),
       proof_system: m.proof_system,
       label: PROOF_SYSTEMS.find((p) => p.id === m.proof_system)?.label ?? m.proof_system,
       statement: m.statement,
@@ -298,5 +313,5 @@ export async function measurementSummary() {
     }
   })
   rows.sort((a, b) => order(a.proof_system) - order(b.proof_system) || a.statement.localeCompare(b.statement) || (a.threads ?? 0) - (b.threads ?? 0))
-  return { runs: list.length, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
+  return { runs: list.length, profileRuns: mine.length, profile: active, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
 }

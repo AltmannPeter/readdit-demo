@@ -200,3 +200,60 @@ fn prove_verify_and_refusals() {
   assert_eq!(v2["ok"], true, "{v2}");
   assert_eq!(v2["results"]["nym"].as_str().unwrap(), nym);
 }
+
+/// Rulebook v0.5's request side, on the v0.4 circuits and credential (the v0.5 circuits over bsc
+/// and psc are not here yet): age_check is an assertion with a `range` in whole years, and the
+/// prover and the verifier compute E and C from it and the UTC date of `proof_time`.
+#[test]
+fn rulebook_v05_request_side() {
+  use nym_longfellow::dates::{AgeRange, range_bounds};
+  let dir = here("circuits/mdoc");
+  let prover = Prover::load(&dir).unwrap();
+  let pem = std::fs::read_to_string(root("native/vega/demo/document-signer.pem")).unwrap();
+  let verifier = Verifier::load(&dir, &pem, 300).unwrap();
+  let wallet = json_file(root("app/wallet/demo-wallet.json"));
+  let holders = wallet["holders"].as_array().unwrap();
+  let birth = |h: &Value| mdoc::parse(h["credential"]["issuer_signed"].as_str().unwrap()).unwrap().birth_date;
+  let teen = holders.iter().find(|h| birth(h).year >= 2009).expect("a teen");
+  let v05 = |range: &str, nonce: &str| {
+    let mut req = request("community.example", nonce, Some(json!({})));
+    req["dcql_query"]["credentials"][0]["_req"][1] = json!({ "fn_id": "age_check", "params": { "range": range } });
+    req
+  };
+  let present05 = |req: &Value| -> Result<Value, nym_longfellow::error::Refusal> {
+    let sign: SignInput = serde_json::from_value(json!({ "device_key": teen["device_key"], "doc_type": DOC_TYPE, "handover": handover(req) })).unwrap();
+    let signed = prover.sign(&sign)?;
+    let input: WitnessInput = serde_json::from_value(json!({
+      "system_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
+      "request": req, "handover": handover(req), "credential": teen["credential"],
+      "secret_seed": teen["secret_seed"], "device_signature": signed.device_signature, "rulebook": "0.5",
+    }))
+    .unwrap();
+    let w = prover.witness(&input)?;
+    Ok(prover.prove(w).unwrap())
+  };
+  let verify05 = |req: &Value, pres: &str, rulebook: &str| {
+    let input: VerifyInput = serde_json::from_value(json!({
+      "request": req, "credential_query_id": "nym_attestation", "presentation": pres, "handover": handover(req), "now": now(), "rulebook": rulebook,
+    }))
+    .unwrap();
+    verifier.verify(&input)
+  };
+
+  let req = v05("13-17", "v05-request-side-0123456789abcdef");
+  let out = present05(&req).expect("the teen proves 13-17");
+  let pres = out["presentation"].as_str().unwrap();
+  let v = verify05(&req, pres, "0.5");
+  assert_eq!(v["ok"], true, "{v}");
+  assert!(v["results"].get("age").is_none(), "an assertion has no output");
+  let pt = nym_longfellow::dates::now().unwrap().date;
+  let (e, c) = range_bounds(&AgeRange::parse("13-17").unwrap(), &pt);
+  assert_eq!(v["bounds"], json!({ "ge": e.map(|d| d.text()), "le": c.map(|d| d.text()) }));
+  // Read as v0.4, the same request lacks the age check's return handle.
+  assert_eq!(verify05(&req, pres, "0.4")["code"], "request");
+  // 18+: the teen cannot prove it; a return handle on the assertion: unsupported.
+  assert_eq!(present05(&v05("18+", "v05-request-side-18plus-012345678")).unwrap_err().error, "unsatisfiable");
+  let mut with_return = req.clone();
+  with_return["dcql_query"]["credentials"][0]["_req"][1]["return"] = json!("age");
+  assert_eq!(present05(&with_return).unwrap_err().error, "unsupported_request");
+}

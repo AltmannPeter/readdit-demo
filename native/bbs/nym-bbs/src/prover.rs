@@ -27,7 +27,8 @@ use crate::credential::CredentialJson;
 use crate::error::Refusal;
 use crate::measure::{mb, ms, Heap, Peak};
 use crate::presentation::{Presentation, ResultValue};
-use crate::profile::{self, Handover, RequestObject, BIRTH_DATE, DEVICE_KEY, LIMB_BITS, PROOF_SYSTEM, SYSTEM_ID};
+use crate::dates::{self, Utc};
+use crate::profile::{self, Handover, RequestObject, Rulebook, BIRTH_DATE, DEVICE_KEY, LIMB_BITS, PROOF_SYSTEM, SYSTEM_ID};
 use crate::{b64url, hex, unb64url};
 
 /// The device key as the wallet holds it (P-256 JWK with its private part).
@@ -50,6 +51,9 @@ pub struct ProveInput {
   /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
+  #[serde(default)]
+  pub rulebook: Option<String>,
 }
 
 /// The /tech switch as the plugins take it.
@@ -94,6 +98,7 @@ impl Prover {
       handover: &input.handover,
       credential: &input.credential,
       parallel: input.parallel,
+      rulebook: Rulebook::parse(input.rulebook.as_deref())?,
     };
     self.present(&present, || {
       let jwk = &input.device_key;
@@ -121,7 +126,10 @@ impl Prover {
     let peak = Peak::start();
     let heap = Heap::start();
     let cred = input.credential.decode().map_err(Refusal::bad_credential)?;
-    let s = profile::statement(input.request, input.credential_query_id, input.handover, &cred.issuer)?;
+    // v0.5: proof_time is now, UTC, to the second; an age range's bounds are computed for its date.
+    let now = if input.rulebook.years() { Some(Utc::now().map_err(Refusal::bad_request)?) } else { None };
+    let s = profile::statement(input.request, input.credential_query_id, input.handover, &cred.issuer, input.rulebook, now.map(|t| t.date()))?;
+    let proof_time = if s.age_range.is_some() { now.map(|t| t.text()) } else { None };
 
     if let Some(age) = &s.age {
       let birth = cred
@@ -178,7 +186,7 @@ impl Prover {
       }
     }
     // ZkpPresentation: the envelope as the proof, the issuer key as a set of one.
-    let zkp = Presentation { system_id: SYSTEM_ID.into(), proof: presentation.clone(), issuer_key_set: vec![cred.issuer.pk.clone()], results: values }
+    let zkp = Presentation { system_id: SYSTEM_ID.into(), proof: presentation.clone(), issuer_key_set: vec![cred.issuer.pk.clone()], proof_time: proof_time.clone(), results: values }
       .encode()
       .map_err(Refusal::bad_request)?;
 
@@ -215,7 +223,10 @@ impl Prover {
       "presentation": b64url(&zkp),
       "results": results,
       "metrics": metrics,
+      "proof_time": proof_time,
       "statement": {
+        "rulebook": if input.rulebook.years() { "0.5" } else { "0.4" },
+        "age_bounds": s.age.as_ref().map(|a| json!({ "ge": a.ge.as_ref().map(dates::iso), "le": a.le.as_ref().map(dates::iso) })),
         "audience": hex(&s.request.audience),
         "nonce": input.request.nonce,
         "verifier_input": String::from_utf8_lossy(&s.verifier_id),
@@ -235,6 +246,8 @@ pub struct PresentInput<'a> {
   pub credential: &'a CredentialJson,
   /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false.
   pub parallel: bool,
+  /// The rulebook version the request is read under ([`Rulebook::V04`] by default).
+  pub rulebook: Rulebook,
 }
 
 /// The device key: held here ([`Prover::prove`]), or signing elsewhere ([`Prover::prove_with`]).

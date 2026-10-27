@@ -55,7 +55,8 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
 }
 
 /** Steps 2 and 3: the witness from the credential, then the proof. */
-export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
+/** `rulebook`: the version the wallet read the request under (shared/protocol/request.ts). */
+export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number; rulebook?: string }): Promise<ProveOutput> {
   const m = mdocMaterial(o.credential)
   try {
     return await $fetch<ProveOutput>('/api/wallet/prove', {
@@ -67,6 +68,7 @@ export async function prove(o: { request: RequestObject; queryId: string; system
         credential: m.credential,
         secret_seed: m.secret_seed,
         device_signature: o.deviceSignature,
+        ...(o.rulebook && { rulebook: o.rulebook }),
       },
     })
   } catch (e) {
@@ -96,12 +98,12 @@ export interface BbsProveOutput {
 
 /** bbs_cd, once the PIN screen has unlocked the wallet: one step. The device key signs inside the
  *  ecdsa-pop plugin; the phone sends the BBS credential and the device key, as for the mdoc. */
-export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number }): Promise<BbsProveOutput> {
+export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number; rulebook?: string }): Promise<BbsProveOutput> {
   const m = holders[o.credential]!
   try {
     return await $fetch<BbsProveOutput>('/api/wallet/prove', {
       method: 'POST',
-      body: { request: o.request, credential_query_id: o.queryId, credential: m.credential, device_key: m.device_key },
+      body: { request: o.request, credential_query_id: o.queryId, credential: m.credential, device_key: m.device_key, ...(o.rulebook && { rulebook: o.rulebook }) },
     })
   } catch (e) {
     throw failure('/api/wallet/prove', e)

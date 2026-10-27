@@ -63,7 +63,7 @@ export default defineEventHandler(async (event) => {
   if (JSON.stringify(offer) !== JSON.stringify(s.offer)) {
     addTrace(s, 'offer', 'Offer updated: the accepted proof systems changed', { was: s.offer, now: offer })
     s.offer = offer
-    s.dcql = buildDcqlQuery(offer, s.age)
+    s.dcql = buildDcqlQuery(offer, sessionProfile(s), s.ageParams)
   }
   const { formats, tailored } = tailorFormats(s.offer, walletMetadata?.vp_formats_supported)
   const cfg = useRuntimeConfig(event)

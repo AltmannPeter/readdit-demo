@@ -45,8 +45,9 @@ pub struct CredentialQuery {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReqItem {
   pub fn_id: String,
-  #[serde(rename = "return")]
-  pub handle: String,
+  /// Present for value functions; absent for assertions (v0.5's age_check).
+  #[serde(rename = "return", default)]
+  pub handle: Option<String>,
   #[serde(default)]
   pub params: serde_json::Map<String, Json>,
 }
@@ -144,13 +145,42 @@ fn param_str<'a>(params: &'a serde_json::Map<String, Json>, key: &str) -> Result
   }
 }
 
-/// The statement of `credential_query_id` in `request`, bound to `handover`. Refuses what the
+/// The rulebook version a request is read under (the demo profile; `rulebook` in the input, "0.4"
+/// when absent). v0.5: `age_check` is an assertion with a `range` in whole years, and both sides
+/// compute E and C from it and the UTC date of `proof_time` ([`dates::range_bounds`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rulebook {
+  #[default]
+  V04,
+  V05,
+}
+
+impl Rulebook {
+  pub fn parse(v: Option<&str>) -> Result<Rulebook, Refusal> {
+    match v {
+      None | Some("0.4") => Ok(Rulebook::V04),
+      Some("0.5") => Ok(Rulebook::V05),
+      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4 and 0.5"))),
+    }
+  }
+}
+
+/// The statement of `credential_query_id` in `request`, bound to `handover`, under rulebook v0.4.
+pub fn statement(request: &RequestObject, credential_query_id: &str, handover: &Handover) -> Result<Statement, Refusal> {
+  statement_for(request, credential_query_id, handover, Rulebook::V04, None)
+}
+
+/// The statement of `credential_query_id` in `request`, bound to `handover`, read under
+/// `rulebook`. `date`: D, the UTC date of `proof_time`, for a v0.5 age range (the prover's clock
+/// when it proves, the presentation's `proof_time` when the verifier checks). Refuses what the
 /// rulebook makes unsatisfiable independently of the holder's data, and what this circuit cannot
 /// prove.
-pub fn statement(
+pub fn statement_for(
   request: &RequestObject,
   credential_query_id: &str,
   handover: &Handover,
+  rulebook: Rulebook,
+  date: Option<Date>,
 ) -> Result<Statement, Refusal> {
   if handover.client_id != request.client_id
     || handover.nonce != request.nonce
@@ -184,10 +214,20 @@ pub fn statement(
   let mut age = None;
   let mut handles = Vec::new();
   for r in &q.req {
-    if handles.contains(&r.handle.as_str()) {
-      return Err(Refusal::unsupported_request(format!("return handle {} is not unique", r.handle)));
+    // pseudonym is a value function in both versions; age_check is one in v0.4 and an assertion
+    // in v0.5.
+    let value = r.fn_id != "age_check" || rulebook == Rulebook::V04;
+    match (&r.handle, value) {
+      (None, true) => return Err(Refusal::unsupported_request(format!("{} is a value function: return is required", r.fn_id))),
+      (Some(_), false) => return Err(Refusal::unsupported_request(format!("{} is an assertion: return must not be present", r.fn_id))),
+      (Some(h), true) => {
+        if handles.contains(&h.as_str()) {
+          return Err(Refusal::unsupported_request(format!("return handle {h} is not unique")));
+        }
+        handles.push(h.as_str());
+      }
+      (None, false) => {}
     }
-    handles.push(r.handle.as_str());
     match r.fn_id.as_str() {
       "pseudonym" => {
         if nym_handle.is_some() {
@@ -214,7 +254,20 @@ pub fn statement(
         if !request.client_id.starts_with(CLIENT_ID_PREFIX) || request.client_id.len() == CLIENT_ID_PREFIX.len() {
           return Err(Refusal::unsupported_request("the x509_san_dns verifier_id needs an x509_san_dns client_id"));
         }
-        nym_handle = Some(r.handle.clone());
+        nym_handle = r.handle.clone();
+      }
+      "age_check" if rulebook == Rulebook::V05 => {
+        if age.is_some() {
+          return Err(Refusal::unsupported_request("more than one age_check item"));
+        }
+        if let Some(k) = r.params.keys().find(|k| *k != "range") {
+          return Err(Refusal::unsupported_request(format!("unknown age_check parameter {k}")));
+        }
+        let range = param_str(&r.params, "range")?.ok_or_else(|| Refusal::unsupported_request("age_check without range"))?;
+        let range = dates::AgeRange::parse(range).map_err(Refusal::unsupported_request)?;
+        let d = date.ok_or_else(|| Refusal::bad_request("age_check needs the date of proof_time"))?;
+        let (born_from, born_by) = dates::range_bounds(&range, &d);
+        age = Some((None, AgeBounds { born_from, born_by }));
       }
       "age_check" => {
         if age.is_some() {
@@ -253,7 +306,7 @@ pub fn statement(
     session_transcript,
     age: age.as_ref().map_or(AgeBounds { born_from: None, born_by: None }, |(_, b)| *b),
     nym_handle,
-    age_handle: age.map(|(h, _)| h),
+    age_handle: age.and_then(|(h, _)| h),
     offered_ids: formats.system_id_values.clone(),
     offered_systems: formats.proof_system_values.clone(),
   })

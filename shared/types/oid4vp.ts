@@ -1,4 +1,5 @@
-// OpenID4VP 1.0 with the `zkp_req` format of the Nym-authentication rulebook (v0.4): one DCQL
+// OpenID4VP 1.0 with the `zkp_req` format of the Nym-authentication rulebook (v0.4 and v0.5, by
+// demo profile, shared/profiles): one DCQL
 // format for zero-knowledge presentations over either encoding of the nym_auth attestation,
 // ISO/IEC 18013-5 (`mso_mdoc`, proved with circuits) and BBS committed disclosures (`bbs_cd`,
 // proved with a scheme and its plugins).
@@ -30,10 +31,13 @@ export interface PseudonymReq {
   }
 }
 
+/** age_check: a value function in v0.4 (`return`, params `ge`/`le` birth-date bounds), an
+ *  assertion in v0.5 (no `return`, param `range` in whole years). The profile decides
+ *  (shared/protocol/request.ts). */
 export interface AgeCheckReq {
   fn_id: 'age_check'
-  return: string
-  params: { ge?: string; le?: string }
+  return?: string
+  params: { ge?: string; le?: string; range?: string }
 }
 
 export type ReqItem = PseudonymReq | AgeCheckReq

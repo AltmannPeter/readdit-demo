@@ -39,7 +39,7 @@ export interface CircuitEntry {
   profile: 'any' | 'compact'
   functions: {
     pseudonym?: PseudonymSupport
-    age_check?: { params: Array<'ge' | 'le'> }
+    age_check?: { params: Array<'ge' | 'le' | 'range'> }
   }
   issuer_key_set: 'x509-ds-cert-list'
   checks_validity: boolean
@@ -131,7 +131,7 @@ export interface SchemeEntry {
   plugins: Array<{ id: string; attribute: string; proves: string }>
   functions: {
     pseudonym: PseudonymSupport
-    age_check: { params: Array<'ge' | 'le'> }
+    age_check: { params: Array<'ge' | 'le' | 'range'> }
   }
   /** The issuer key set: one BBS issuer public key (96 bytes), so the Verifier sees the issuer. */
   issuer_key_set: 'bbs-issuer-pk'
@@ -154,7 +154,8 @@ export const SCHEME_REGISTRY: SchemeEntry[] = [
     ],
     functions: {
       pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['hashdh-bls12381g1'], ver: [1], required: true },
-      age_check: { params: ['ge', 'le'] },
+      // ge/le: rulebook v0.4; range (ages in years, bounds from the date of proof_time): v0.5.
+      age_check: { params: ['ge', 'le', 'range'] },
     },
     issuer_key_set: 'bbs-issuer-pk',
     statement: [
@@ -162,7 +163,7 @@ export const SCHEME_REGISTRY: SchemeEntry[] = [
       { name: 'nonce', derivation: 'the request nonce' },
       { name: 'credential', derivation: "the issuer's BBS public key and the schema digest, nothing disclosed" },
       { name: 'pseudonym.verifier_input', derivation: 'UTF-8(verifier_id), verifier_id = client_id (x509_san_dns form)' },
-      { name: 'age_check', derivation: 'ge and le as sent, as YYYYMMDD' },
+      { name: 'age_check', derivation: 'v0.4: ge and le as sent; v0.5: E and C from range and the UTC date of proof_time; as YYYYMMDD' },
     ],
   },
 ]

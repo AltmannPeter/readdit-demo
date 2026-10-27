@@ -8,9 +8,11 @@ import type { RequestObject } from '#shared/types/oid4vp'
  * bbs_cd (BBS): one step. The phone sends its BBS credential and its device key, which signs inside
  * the ecdsa-pop plugin; the prover keeps neither.
  * `credential_query_id` names the query the wallet answers (DCQL credential_sets: one of them).
+ * `rulebook`: the rulebook version the wallet reads the request under ("0.4" when absent; the demo
+ * wallet picks it from the request, shared/protocol/request.ts).
  */
 export default defineEventHandler(async (event) => {
-  const { request, system_id, credential, secret_seed, device_signature, device_key, credential_query_id } = await readObject<{
+  const { request, system_id, credential, secret_seed, device_signature, device_key, credential_query_id, rulebook } = await readObject<{
     request: RequestObject
     system_id: unknown
     credential: WalletCredential | BbsCredential
@@ -18,10 +20,13 @@ export default defineEventHandler(async (event) => {
     device_signature: unknown
     device_key: DeviceKeyJwk
     credential_query_id: unknown
+    rulebook: unknown
   }>(event)
+  if (rulebook !== undefined && (typeof rulebook !== 'string' || !/^\d+\.\d+$/.test(rulebook))) throw refusal(400, 'bad_request', proverMessage('bad_request'))
+  const version = typeof rulebook === 'string' ? rulebook : undefined
   const queries = Array.isArray(request?.dcql_query?.credentials) ? request.dcql_query.credentials : []
   const query = typeof credential_query_id === 'string' ? queries.find((q) => q.id === credential_query_id) : queries[0]
-  if (credential?.format === 'bbs_cd') return proveBbs(request as RequestObject, query?.id, credential as BbsCredential, device_key as DeviceKeyJwk)
+  if (credential?.format === 'bbs_cd') return proveBbs(request as RequestObject, query?.id, credential as BbsCredential, device_key as DeviceKeyJwk, version)
   if (
     typeof query?.id !== 'string' ||
     typeof request?.client_id !== 'string' ||
@@ -50,6 +55,7 @@ export default defineEventHandler(async (event) => {
       credential: credential as WalletCredential,
       secret_seed,
       device_signature,
+      ...(version && { rulebook: version }),
     })
     keepProfile(s, 'witness', result.profiles.witness)
     keepProfile(s, 'prove', result.profiles.prove)
@@ -75,7 +81,7 @@ export default defineEventHandler(async (event) => {
 })
 
 /** bbs_cd: one call to the BBS prover. */
-async function proveBbs(request: RequestObject, queryId: string | undefined, credential: BbsCredential, deviceKey: DeviceKeyJwk) {
+async function proveBbs(request: RequestObject, queryId: string | undefined, credential: BbsCredential, deviceKey: DeviceKeyJwk, rulebook?: string) {
   if (
     typeof queryId !== 'string' ||
     typeof request?.client_id !== 'string' ||
@@ -96,6 +102,7 @@ async function proveBbs(request: RequestObject, queryId: string | undefined, cre
       handover: await handoverOf(request),
       credential,
       device_key: deviceKey,
+      ...(rulebook && { rulebook }),
     })
     keepProfile(s, 'prove', profile)
     keepParts(s, result.presentation, proof_parts)

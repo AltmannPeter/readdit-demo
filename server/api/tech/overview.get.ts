@@ -1,4 +1,5 @@
 import { findCircuit, findScheme } from '#shared/registry/circuits'
+import { PROFILES, profileManifest } from '#shared/profiles'
 
 /** Technical view: services and the latest sessions with their traces. */
 export default defineEventHandler(async () => {
@@ -6,6 +7,9 @@ export default defineEventHandler(async () => {
   const signer = await requestSigner()
   return {
     services: await servicesStatus(),
+    // The demo profiles, the active one first in the dropdown's sense: /tech switches between them.
+    profile: activeProfile().id,
+    profiles: PROFILES.map(profileManifest),
     acceptedProofSystems: store().acceptedProofSystems,
     multithreading: store().multithreading,
     profiling: store().profiling,
