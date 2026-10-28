@@ -30,6 +30,11 @@
 //! attribute 22 and 23, the `ssc` attribute 24 to 26, the pseudonym's message 28 and 29, and the
 //! secret seed's message 30; positions 27 and 31 hold no message. Every message but the signed
 //! one chains from the initial value.
+//!
+//! The rulebook v0.5 statement ([`crate::bsc::BSC_MDOC`]) has a table of 16 positions
+//! ([`Layout::positions`]): the Sig_structure 0 to 6, hashed whole (its core holds the start state
+//! to the initial value), the `bsc` item 7 and 8, the opening 9, the pseudonym's message 10 and 11;
+//! 12 to 15 hold no message.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -40,9 +45,10 @@ use vega_prover::provider::pt256::t256;
 
 use crate::gadgets::lc::{Lc, from_be};
 
-/// The number of positions. Setup pads the number of step instances to a power of two, so the
-/// table uses all of them. The real SD-JWT PID needs 23 blocks after the skipped ones, and the
-/// real mdoc PID 20, so 16 positions are too few.
+/// The number of positions of the PID and v0.4 layouts. Setup pads the number of step instances
+/// to a power of two, so the table uses all of them. The real SD-JWT PID needs 23 blocks after the
+/// skipped ones, and the real mdoc PID 20, so 16 positions are too few for them. A layout sets its
+/// own ([`Layout::positions`]): the rulebook v0.5 attestation's needs 12 ([`BSC_MDOC`], 16).
 pub const POSITIONS: usize = 32;
 
 /// Every byte offset into the table, and every character offset into its base64url text, is
@@ -58,10 +64,14 @@ pub const CHUNKS_PER_BLOCK: usize = 4;
 const CELLS_PER_POSITION: usize = CHUNKS_PER_BLOCK + 2;
 
 /// The two halves of the start state follow the cells of the last position.
-const START: usize = CELLS_PER_POSITION * POSITIONS;
+const fn start(positions: usize) -> usize {
+  CELLS_PER_POSITION * positions
+}
 
 /// An SD-JWT's scan entries follow the start state.
-const SCAN: usize = START + 2;
+const fn scan_at(positions: usize) -> usize {
+  start(positions) + 2
+}
 
 /// A run of positions that holds one message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +110,8 @@ pub struct Layout {
   pub per_instance: usize,
   /// The rules and the padded values every circuit of the layout fits in (`crate::app`).
   pub budget: usize,
+  /// The table's positions, a power of two: [`POSITIONS`] but in [`BSC_MDOC`].
+  pub positions: usize,
 }
 
 /// The positions of the full statement's messages.
@@ -121,6 +133,7 @@ pub const AGE: Layout = Layout {
   pseudonym: None,
   per_instance: 1,
   budget: 1 << 15,
+  positions: POSITIONS,
 };
 
 /// The full statement's regions, the same for both formats. Every region starts at an even
@@ -141,6 +154,7 @@ pub const FULL_MDOC: Layout = Layout {
   pseudonym: Some(FULL_REGIONS),
   per_instance: 1,
   budget: 1 << 15,
+  positions: POSITIONS,
 };
 
 /// The full statement's layout for an SD-JWT VC. Its core passes 2^15 (the `ssc` disclosure's
@@ -152,13 +166,14 @@ pub const FULL_SD_JWT: Layout = Layout { per_instance: 2, budget: 1 << 16, ..FUL
 impl Layout {
   /// The step instances: the positions over the compressions each checks.
   pub const fn instances(&self) -> usize {
-    POSITIONS / self.per_instance
+    assert!(self.positions.is_power_of_two() && 64 * self.positions <= 1 << OFFSET_BITS);
+    self.positions / self.per_instance
   }
 
   /// Whether every chain starts at an instance's first compression, so that each later
   /// compression of an instance continues from the one before it (`crate::step`).
   pub fn chains_within_instances(&self) -> bool {
-    (0..POSITIONS)
+    (0..self.positions)
       .filter(|j| j % self.per_instance != 0)
       .all(|j| j != self.signed.first && !self.starts_from_iv(j))
   }
@@ -281,7 +296,7 @@ impl Table {
     let (before, kept) = signed.split_at((64 * skipped).min(signed.len()));
     let mut start = IV;
     compress(&mut start, before);
-    let mut blocks = vec![[0u8; 64]; POSITIONS];
+    let mut blocks = vec![[0u8; 64]; layout.positions];
     let padded: Vec<(Region, Vec<u8>)> = std::iter::once((layout.signed, kept.to_vec()))
       .chain(messages.iter().map(|(region, message)| (*region, pad(message))))
       .collect();
@@ -309,7 +324,7 @@ impl Table {
   /// [`Table::from_blocks`] in `layout`: every region but the signed message's chains from the
   /// initial value.
   pub fn from_blocks_in(layout: Layout, blocks: Vec<[u8; 64]>, start: [u8; 32]) -> Self {
-    assert_eq!(blocks.len(), POSITIONS);
+    assert_eq!(blocks.len(), layout.positions);
     let mut state = IV;
     let states = blocks
       .iter()
@@ -336,7 +351,7 @@ impl Table {
   /// The value of chunk `c` of the shared segment, as [`Cells::chunk`] reads it: counting from
   /// the first chunk of position 0, or zero past the end.
   pub fn chunk_value(&self, c: usize) -> t256::Scalar {
-    if c < CHUNKS_PER_BLOCK * POSITIONS {
+    if c < CHUNKS_PER_BLOCK * self.layout.positions {
       let k = c % CHUNKS_PER_BLOCK;
       from_be(&self.blocks[c / CHUNKS_PER_BLOCK][CHUNK_BYTES * k..CHUNK_BYTES * (k + 1)])
     } else {
@@ -377,13 +392,26 @@ static SYNTHESES: AtomicUsize = AtomicUsize::new(0);
 /// circuit both allocate it with this function, so both lay it out the same way (clause 5.6). Setup
 /// passes no table.
 pub fn allocate<CS: ConstraintSystem<t256::Scalar>>(
+  cs: CS,
+  table: Option<&Table>,
+  scan: bool,
+) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
+  allocate_positions(cs, POSITIONS, table, scan)
+}
+
+/// [`allocate`] for a table of `positions` positions ([`Layout::positions`]).
+pub fn allocate_positions<CS: ConstraintSystem<t256::Scalar>>(
   mut cs: CS,
+  positions: usize,
   table: Option<&Table>,
   scan: bool,
 ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
   SYNTHESES.fetch_add(1, Ordering::Relaxed);
-  let mut cells = Vec::with_capacity(SCAN + 6);
-  for j in 0..POSITIONS {
+  if table.is_some_and(|t| t.layout.positions != positions) {
+    return Err(SynthesisError::Unsatisfiable);
+  }
+  let mut cells = Vec::with_capacity(scan_at(positions) + 6);
+  for j in 0..positions {
     for k in 0..CHUNKS_PER_BLOCK {
       let value = table.map(|t| from_be(&t.blocks[j][CHUNK_BYTES * k..CHUNK_BYTES * (k + 1)]));
       cells.push(AllocatedNum::alloc(cs.namespace(|| format!("block {j} chunk {k}")), || {
@@ -418,13 +446,23 @@ pub fn allocate<CS: ConstraintSystem<t256::Scalar>>(
   Ok(cells)
 }
 
-/// The shared segment as the circuits read it.
-pub struct Cells<'a>(pub &'a [AllocatedNum<t256::Scalar>]);
+/// The shared segment as the circuits read it, and the table's positions.
+pub struct Cells<'a>(pub &'a [AllocatedNum<t256::Scalar>], pub usize);
 
-impl Cells<'_> {
+impl<'a> Cells<'a> {
+  /// The shared segment of a table of [`POSITIONS`] positions.
+  pub fn new(shared: &'a [AllocatedNum<t256::Scalar>]) -> Self {
+    Cells(shared, POSITIONS)
+  }
+
+  /// The shared segment of a table of `layout`'s positions.
+  pub fn of(shared: &'a [AllocatedNum<t256::Scalar>], layout: &Layout) -> Self {
+    Cells(shared, layout.positions)
+  }
+
   /// Chunk `c` of the table, counting from the first chunk of position 0, or zero past the end.
   pub fn chunk(&self, c: usize) -> Lc {
-    if c < CHUNKS_PER_BLOCK * POSITIONS {
+    if c < CHUNKS_PER_BLOCK * self.1 {
       let j = c / CHUNKS_PER_BLOCK;
       Lc::num(&self.0[CELLS_PER_POSITION * j + c % CHUNKS_PER_BLOCK])
     } else {
@@ -447,7 +485,7 @@ impl Cells<'_> {
   /// value before every other region, and otherwise the state after position j − 1.
   pub fn state_before_in(&self, layout: &Layout, j: usize, h: usize) -> Lc {
     if j == layout.signed.first {
-      Lc::num(&self.0[START + h])
+      Lc::num(&self.0[start(self.1) + h])
     } else if layout.starts_from_iv(j) {
       Lc::constant(state_half(&iv_bytes(), h))
     } else {
@@ -458,7 +496,7 @@ impl Cells<'_> {
   /// An SD-JWT's scan entries: the four phase bits, of which the one at the payload's phase is
   /// set, and the flags that the payload lacks nbf and exp.
   pub fn scan(&self) -> ([Lc; 4], [Lc; 2]) {
-    let entry = |i: usize| Lc::num(&self.0[SCAN + i]);
+    let entry = |i: usize| Lc::num(&self.0[scan_at(self.1) + i]);
     (std::array::from_fn(entry), std::array::from_fn(|i| entry(4 + i)))
   }
 }

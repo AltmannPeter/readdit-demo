@@ -219,7 +219,12 @@ impl VegaCircuit<T256HyraxEngine> for Step {
     &self,
     cs: &mut CS,
   ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
-    table::allocate(cs.namespace(|| "table"), self.table.as_deref(), self.scan)
+    table::allocate_positions(
+      cs.namespace(|| "table"),
+      self.layout.positions,
+      self.table.as_deref(),
+      self.scan,
+    )
   }
 
   /// All rules of the step. They go in the precommitted segment, which the prover commits to
@@ -235,7 +240,7 @@ impl VegaCircuit<T256HyraxEngine> for Step {
       cs.extend_aux(&self.precommitted_values()?.0);
       return Ok(vec![]);
     }
-    let cells = Cells(shared);
+    let cells = Cells::of(shared, &self.layout);
     let layout = &self.layout;
 
     // The selector's index is the public position (clause 5.3, steps 1 to 3).

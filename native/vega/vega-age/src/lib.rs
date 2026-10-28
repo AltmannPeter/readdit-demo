@@ -14,6 +14,7 @@
 //! | [`table`] | The shared table of signed blocks and hash states | 5.3, 5.4 |
 //! | [`step`] | The step circuit, one SHA-256 compression at a public position | 4.2, 5.3 |
 //! | [`mdoc`], [`sdjwt`] | The core circuits, with the checks that happen once | 4.2, 5.3 |
+//! | [`bsc`] | The core circuit of the nym_auth rulebook v0.5 attestation (`bsc`, `psc`) | 4.2, 5.3 |
 //! | [`presentation`] | The presentation-specific rules and the public values of both cores | 4.4, 5.4, 5.6 |
 //! | [`request`] | The patterns of the credential type and the attribute name the verifier asks for | 4.4, 5.4 |
 //! | [`app`] | Setup, the witness, proving and acceptance by the application | 4.3, 4.4, 5.6 |
@@ -30,6 +31,7 @@
 #![doc(test(attr(forbid(unsafe_code))))]
 
 pub mod app;
+pub mod bsc;
 pub mod challenge;
 pub mod fixtures;
 pub mod gadgets;

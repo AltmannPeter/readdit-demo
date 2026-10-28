@@ -8,6 +8,7 @@
 //! | [`window`] | Reading bytes of a signed message at a private offset |
 //! | [`base64`] | Decoding base64url text inside the rules |
 //! | [`p256`] | P-256 point arithmetic and ECDSA verification |
+//! | [`padding`] | SHA-256 padding checked in the rules, at a private length |
 //! | [`sha256`] | The values of bellpepper's SHA-256 compression, which the step circuit checks |
 //! | [`values`] | Values in a witness generator's order, computed natively |
 
@@ -15,6 +16,7 @@ pub mod base64;
 pub mod bits;
 pub mod lc;
 pub mod p256;
+pub mod padding;
 pub mod select;
 pub mod sha256;
 pub mod values;

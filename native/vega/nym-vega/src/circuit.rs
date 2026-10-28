@@ -8,6 +8,11 @@ use vega_age::table::{FULL_MDOC, Layout};
 /// shipped, `circuits/mdoc/shapes.zst`.
 pub const CIRCUIT_ID: &str = "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df";
 
+/// Rulebook v0.5's circuits (`vega_age::bsc`, which read `bsc`): `urn:circuits:sha256:` and the
+/// SHA-256 of `circuits/mdoc-bsc/shapes.zst` as shipped ([`crate::bsc::system_id`]). The loaders
+/// refuse a file with another hash.
+pub const CIRCUIT_ID_V05: &str = "urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794";
+
 /// The proof system: Microsoft vega-prover `c0ee259`, `VegaMcZkSNARK` over `T256HyraxEngine`.
 pub const PROOF_SYSTEM: &str = "vega-v1";
 
@@ -64,5 +69,11 @@ mod tests {
   fn circuit_id_is_the_archive_hash() {
     let file = std::fs::read(format!("{}/../circuits/mdoc/shapes.zst", env!("CARGO_MANIFEST_DIR"))).unwrap();
     assert_eq!(super::CIRCUIT_ID, format!("urn:circuits:sha256:{}", crate::hex(&vega_age::table::sha256(&file))));
+  }
+
+  #[test]
+  fn v05_circuit_id_is_the_archive_hash() {
+    let file = std::fs::read(format!("{}/../circuits/mdoc-bsc/shapes.zst", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    assert_eq!(super::CIRCUIT_ID_V05, crate::bsc::system_id(&file));
   }
 }

@@ -169,9 +169,9 @@ screen.
   the profile is based on on GitHub ("not committed yet" until it is), and the commit the site is
   built from. **What this version defines** lists the credential, the functions (and how each side
   reads them), the pseudonym configurations and the proof systems. Under v0.5 the age check asks
-  for an age range in years and the BBS phone proves it; Vega and Longfellow show **pending** until
-  their v0.5 circuits are in, so the mdoc phones answer "Unsupported Request". `/dev` shows the
-  profile in its header. More in `profiles/README.md`.
+  for an age range in years. Vega, Longfellow and BBS all prove it: Vega and Longfellow with their
+  v0.5 circuits, and the mdoc phones answer with their v0.5 mdoc (same pseudonym as v0.4). `/dev`
+  shows the profile in its header. More in `profiles/README.md`.
 - **Proof systems.** A switch per proof system: Vega and Longfellow (circuits over the mdoc,
   `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**: tick one before
   the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the same
@@ -348,6 +348,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | --- | --- | --- |
 | `NUXT_VEGA_ADDON` | `native/vega/community-vega.node` | The Vega addon (`npm run build:native`) |
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
+| `NUXT_VEGA_SHAPES_V05` | `native/vega/circuits/mdoc-bsc/shapes.zst` | Rulebook v0.5's circuits; empty: Vega proves v0.4 only |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
 | `NUXT_DEMO_PROFILE` | `nym-auth-v0.4` | The demo profile at start (`profiles/`); /tech switches it |
@@ -355,7 +356,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
-| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Longfellow v0.5, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
@@ -433,9 +434,9 @@ cargo run --release -p bbs-issuer -- --wallet ../../app/wallet/demo-wallet.json 
 ## Checks
 
 ```sh
-npm run vega:check                              # real proofs of both credentials: pseudonyms, refusals, any PIN, 18+ (needs build:native)
+npm run vega:check                              # real proofs of both credentials, v0.4 and v0.5: pseudonyms, refusals, any PIN, 18+ (needs build:native)
 npm run vectors:check                           # the site's pseudonyms and age ranges against the rulebook v0.5 test vectors
-(cd native/vega && cargo test -p nym-vega)      # the OpenID4VP handover against the spec's example, age_check mapping
+(cd native/vega && cargo test --release -p nym-vega)  # the handover against the spec's example, age_check mapping, v0.5 end to end
 (cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
 (cd native/bbs && cargo test --release -p nym-bbs)  # BBS: prove, verify, the same pseudonym, refusals
 (cd native/bbs && sha256sum -c --quiet VENDOR-SHA256SUMS)  # vendored bbs-cd-plugins unchanged

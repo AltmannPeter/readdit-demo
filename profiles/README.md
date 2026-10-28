@@ -9,7 +9,7 @@ fit stops the built server.
 | Profile | Rulebook | Proof systems |
 | --- | --- | --- |
 | `nym-auth-v0.4` | [v0.4](../docs/nym_auth_rulebook.md), 2026-10-20 | Vega, Longfellow, BBS |
-| `nym-auth-v0.5` | [v0.5](../docs/nym_auth_rulebook-v0.5.md), 2026-10-27 | Longfellow (the `nym-auth-zk` bsc circuits), BBS; Vega pending |
+| `nym-auth-v0.5` | [v0.5](../docs/nym_auth_rulebook-v0.5.md), 2026-10-27 | Vega and Longfellow (their bsc circuits), BBS |
 
 ## What a profile holds
 

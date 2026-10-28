@@ -132,9 +132,9 @@
   "systems": [
     {
       "proof_system": "vega-v1",
-      "status": "pending",
-      "proof_time": "always",
-      "note": "Waiting for the v0.5 Vega circuits (bsc)."
+      "system_id": "urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794",
+      "status": "available",
+      "proof_time": "always"
     },
     {
       "proof_system": "longfellow-libzk-v1",

@@ -72,7 +72,7 @@ export interface ServiceCircuit {
   artifact_sha256?: string | null
   public_inputs?: string[]
   /** The rulebook version these circuits are for, when an addon loads one set per version
-   *  (Longfellow: "0.4" and "0.5"); absent: v0.4. */
+   *  (Vega, Longfellow: "0.4" and "0.5"); absent: v0.4. */
   rulebook?: string
   /** The artifact's file name. */
   artifact?: string
@@ -255,9 +255,10 @@ interface NativeVerifier {
   verify(input: string): Promise<string>
 }
 interface NativeAddon {
-  /** Vega: the path of shapes.zst; Longfellow: the directory of circuits.zst. */
-  loadProver(circuits: string): Promise<NativeProver>
-  loadVerifier(circuits: string, trustAnchorsPem: string, toleranceS: number): Promise<NativeVerifier>
+  /** Vega: the path of shapes.zst, and of rulebook v0.5's (mdoc-bsc) when set; Longfellow: the
+   *  directory of circuits.zst (its v0.5 circuits are built into the addon). */
+  loadProver(circuits: string, circuitsV05?: string): Promise<NativeProver>
+  loadVerifier(circuits: string, trustAnchorsPem: string, toleranceS: number, circuitsV05?: string): Promise<NativeVerifier>
 }
 interface Native {
   prover: NativeProver
@@ -274,8 +275,8 @@ const g = globalThis as unknown as { __communityCircuits?: Partial<Record<Circui
 function backendPaths(name: CircuitBackend) {
   const cfg = useRuntimeConfig()
   return name === 'vega'
-    ? { addon: cfg.vegaAddon, circuits: cfg.vegaShapes, anchors: cfg.vegaTrustAnchors }
-    : { addon: cfg.longfellowAddon, circuits: cfg.longfellowCircuits, anchors: cfg.longfellowTrustAnchors }
+    ? { addon: cfg.vegaAddon, circuits: cfg.vegaShapes, circuitsV05: cfg.vegaShapesV05, anchors: cfg.vegaTrustAnchors }
+    : { addon: cfg.longfellowAddon, circuits: cfg.longfellowCircuits, circuitsV05: '', anchors: cfg.longfellowTrustAnchors }
 }
 
 /**
@@ -296,10 +297,11 @@ export function loadCircuitBackend(name: CircuitBackend): Promise<Native> {
       throw new Error(`The ${LABELS[name]} addon ${path(paths.addon)} could not be loaded. (${(e as Error).message})`)
     }
     const circuits = path(paths.circuits)
+    const v05 = paths.circuitsV05 ? path(paths.circuitsV05) : undefined
     const anchors = await readFile(path(paths.anchors), 'utf8')
     const [prover, verifier] = await Promise.all([
-      addon.loadProver(circuits),
-      addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS)),
+      v05 ? addon.loadProver(circuits, v05) : addon.loadProver(circuits),
+      v05 ? addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS), v05) : addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS)),
     ])
     return { prover, verifier }
   })()

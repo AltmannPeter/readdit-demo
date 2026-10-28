@@ -69,6 +69,14 @@ impl KeyPair {
     KeyPair { secret, public: PublicKey::from_point(&point) }
   }
 
+  /// The key pair of a secret scalar given as big-endian bytes (below the group order, not
+  /// zero), such as a test vector's.
+  pub fn from_secret(secret: &[u8; 32]) -> Option<Self> {
+    let secret = crate::gadgets::p256::scalar(secret).filter(|s| !bool::from(s.is_zero()))?;
+    let point = (Secp256r1::generator() * secret).to_affine();
+    Some(KeyPair { secret, public: PublicKey::from_point(&point) })
+  }
+
   /// Signs the SHA-256 digest of `message` (FIPS 186-5, clause 6.4.1). The signature has the
   /// smaller of the two valid values of s.
   pub fn sign(&self, message: &[u8]) -> EcdsaSignature {

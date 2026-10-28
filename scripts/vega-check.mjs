@@ -9,7 +9,9 @@
 //   G3  the verifier refuses, with the expected code and input: a flipped proof byte, a changed results.nym,
 //       a handover with another nonce, a proof_time outside the tolerance, a changed proof_time, other age bounds;
 //   G4  the prover takes no PIN: sign inputs with two different PINs both sign, and both proofs
-//       verify; the adult credential proves 18+, and the 18+ request refuses the teen with 422 unsatisfiable.
+//       verify; the adult credential proves 18+, and the 18+ request refuses the teen with 422 unsatisfiable;
+//   G5  rulebook v0.5 on the v0.5 circuits (bsc) and the holders' v0.5 credentials: the same pseudonym as
+//       v0.4, the bounds from the date of proof_time, and each circuit refused under the other version.
 import { createRequire } from 'node:module'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -20,10 +22,12 @@ const require = createRequire(import.meta.url)
 const addon = require(`${root}native/vega/community-vega.node`)
 const [teen, adult] = JSON.parse(readFileSync(`${root}app/wallet/demo-wallet.json`, 'utf8')).holders
 const SHAPES = `${root}native/vega/circuits/mdoc/shapes.zst`
+const SHAPES_V05 = `${root}native/vega/circuits/mdoc-bsc/shapes.zst`
 const ANCHORS = readFileSync(`${root}native/vega/demo/document-signer.pem`, 'utf8')
 const HOST = 'community.example'
 const CLIENT_ID = `x509_san_dns:${HOST}`
 const CIRCUIT = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
+const CIRCUIT_V05 = 'urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'
 const DOCTYPE = 'eu.europa.ec.eudi.nym_auth.1'
 
 let failures = 0
@@ -64,10 +68,10 @@ function request(age, nonce = randomBytes(16).toString('hex')) {
 const handoverOf = (r) => ({ client_id: r.client_id, nonce: r.nonce, response_uri: r.response_uri, jwk_thumbprint: null })
 
 let t = performance.now()
-const prover = await addon.loadProver(SHAPES)
+const prover = await addon.loadProver(SHAPES, SHAPES_V05)
 const proverLoad = performance.now() - t
 t = performance.now()
-const verifier = await addon.loadVerifier(SHAPES, ANCHORS, 300)
+const verifier = await addon.loadVerifier(SHAPES, ANCHORS, 300, SHAPES_V05)
 const verifierLoad = performance.now() - t
 console.log(`load: prover ${proverLoad.toFixed(0)} ms, verifier ${verifierLoad.toFixed(0)} ms (wall, includes the addon's own load_ms ${JSON.parse(prover.info).load_ms} / ${JSON.parse(verifier.info).load_ms})`)
 
@@ -184,20 +188,23 @@ check('G4 18+ request, adult credential: proves, verifies, age true', vAdult.ok 
 const teen18 = await present(request(ADULT), teen)
 check('G4 18+ request, teen credential: 422 unsatisfiable', teen18.ok === false && teen18.status === 422 && teen18.error === 'unsatisfiable', JSON.stringify(teen18))
 
-// G5: rulebook v0.5's request side on the v0.4 circuit and credential (the v0.5 circuits over bsc
-// and psc are not here yet): age_check is an assertion with a range in years, and both sides
-// compute the bounds from the UTC date of proof_time.
+// G5: rulebook v0.5 on its own circuits (circuits/mdoc-bsc, which read bsc) and the holders' v0.5
+// credentials: age_check is an assertion with a range in years, and both sides compute the bounds
+// from the UTC date of proof_time.
 {
+  const info = JSON.parse(verifier.info)
+  check('G5 the verifier lists both circuits', info.circuits.map((c) => c.system_id).join() === `${CIRCUIT},${CIRCUIT_V05}`, info.circuits.map((c) => c.system_id).join())
   const v05 = (range) => {
     const req = request(TEEN)
     const q = req.dcql_query.credentials[0]
-    return { ...req, dcql_query: { credentials: [{ ...q, _req: [q._req[0], { fn_id: 'age_check', params: { range } }] }] } }
+    const formats = { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [CIRCUIT_V05] } }
+    return { ...req, client_metadata: { ...req.client_metadata, vp_formats_supported: formats }, dcql_query: { credentials: [{ ...q, _req: [q._req[0], { fn_id: 'age_check', params: { range } }] }] } }
   }
-  const present05 = async (r5, wallet = teen) => {
+  const present05 = async (r5, wallet = teen, system_id = CIRCUIT_V05) => {
     const s5 = await sign(r5, wallet)
     const w = await prover.witness(JSON.stringify({
-      system_id: CIRCUIT, credential_query_id: 'nym_attestation', request: r5, handover: handoverOf(r5),
-      credential: wallet.credential, secret_seed: wallet.secret_seed, device_signature: s5.device_signature, rulebook: '0.5',
+      system_id, credential_query_id: 'nym_attestation', request: r5, handover: handoverOf(r5),
+      credential: wallet.v05.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v05.birth_date, device_signature: s5.device_signature, rulebook: '0.5',
     }))
     if (typeof w === 'string') return JSON.parse(w)
     return JSON.parse(await prover.prove(w))
@@ -207,14 +214,17 @@ check('G4 18+ request, teen credential: 422 unsatisfiable', teen18.ok === false 
   const r5 = v05('13-17')
   const p5 = await present05(r5)
   const v5 = p5.ok ? await verify05(r5, p5.presentation) : p5
-  check('G5 v0.5 13-17: proves and verifies, no age output', v5.ok === true && Object.keys(v5.results).join() === 'nym' && v5.results.nym === expectedNym, JSON.stringify(v5.results ?? v5))
+  check('G5 v0.5 13-17: proves and verifies, no age output, the v0.4 pseudonym', v5.ok === true && Object.keys(v5.results).join() === 'nym' && v5.results.nym === expectedNym, JSON.stringify(v5.results ?? v5))
+  check('G5 v0.5 prepares in the witness step', typeof p5.metrics?.prebuild_ms === 'number' && p5.metrics.prebuild_ms <= p5.metrics.witness_ms, JSON.stringify(p5.metrics))
   check('G5 v0.5 bounds from the date of proof_time', v5.bounds?.ge === TEEN.ge && v5.bounds?.le === TEEN.le, JSON.stringify(v5.bounds))
   const t18 = await present05(v05('18+'))
   check('G5 v0.5 18+, teen: 422 unsatisfiable', t18.ok === false && t18.status === 422, JSON.stringify(t18))
   const a18 = await present05(v05('18+'), adult)
   const va = a18.ok ? await verify05(v05('18+'), a18.presentation) : a18
   check('G5 v0.5 18+, adult: proves; another request (nonce) does not verify', a18.ok === true && va.ok === false, JSON.stringify(va.code ?? va))
-  expectRefusal('G5 v0.5 presentation read as v0.4', await verify05(r5, p5.presentation, '0.4'), 'request')
+  expectRefusal('G5 v0.5 presentation read as v0.4', await verify05(r5, p5.presentation, '0.4'), 'circuit')
+  const old = await present05(r5, teen, CIRCUIT)
+  check('G5 the v0.4 circuits refuse a v0.5 request: 400 unsupported_circuit', old.ok === false && old.error === 'unsupported_circuit', JSON.stringify(old))
 }
 
 console.log(failures ? `${failures} check(s) failed` : 'all checks passed')

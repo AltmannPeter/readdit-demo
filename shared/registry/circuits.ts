@@ -98,6 +98,20 @@ const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the transcript starts from "nym_auth/v1/mdoc-bsc/longfellow" ‖ e2' },
 ]
 
+// Vega nym_auth under rulebook v0.5: vega-age 0.2.0's bsc core (Peter's package nym-auth-vega v1,
+// INTEGRATION.md §3), with its own id. 15 core public values in this order; the verifier names the
+// first 13, the proof reports the last 2.
+const VEGA_V05_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (x, y)' },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'E as YYYYMMDD from the range on the UTC date of proof_time; 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'C as YYYYMMDD from the range on the UTC date of proof_time; 99999999 when absent' },
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'YYYYMMDDhhmmss (UTC), checked against the verifier clock within tolerance' },
+  { name: 'session_transcript', source: 'verifier', values: 2, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure), two 16-byte halves; SessionTranscript [null, null, OpenID4VPHandover]' },
+  { name: 'doctype', source: 'verifier', values: 3, derivation: 'pattern of the docType eu.europa.ec.eudi.nym_auth.1' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 3, derivation: 'SHA-256(verifier_id), verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, two halves' },
+]
+
 export const CIRCUIT_REGISTRY: CircuitEntry[] = [
   {
     system_id: circuitId('b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'),
@@ -115,6 +129,23 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     public_inputs: VEGA_PUBLIC_INPUTS,
     artifact: { name: 'shapes.zst', sha256: 'b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df' },
     rulebook: '0.4',
+  },
+  {
+    system_id: circuitId('7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'),
+    proof_system: 'vega-v1',
+    label: 'Vega nym_auth v0.5 (bsc)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'compact',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: VEGA_V05_PUBLIC_INPUTS,
+    artifact: { name: 'shapes.zst', sha256: '7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794' },
+    rulebook: '0.5',
   },
   {
     system_id: circuitId('f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'),

@@ -46,8 +46,8 @@ RUN npm install --no-audit --no-fund && npm run build
 
 # 5. Runtime: the built site, the addons, the circuits as data and the verifiers' trust anchors, at
 #    the paths runtimeConfig expects relative to /app (nuxt.config.ts: vegaAddon, vegaShapes,
-#    vegaTrustAnchors, longfellowAddon, longfellowCircuits, longfellowTrustAnchors, bbsAddon,
-#    bbsIssuerParams).
+#    vegaShapesV05, vegaTrustAnchors, longfellowAddon, longfellowCircuits, longfellowTrustAnchors,
+#    bbsAddon, bbsIssuerParams).
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY --from=build /app/.output ./.output
@@ -55,6 +55,7 @@ COPY --from=native /native/community-vega.node ./native/vega/community-vega.node
 COPY --from=native-longfellow /native/community-longfellow.node ./native/longfellow/community-longfellow.node
 COPY --from=native-bbs /native/community-bbs.node ./native/bbs/community-bbs.node
 COPY native/vega/circuits/mdoc/shapes.zst ./native/vega/circuits/mdoc/shapes.zst
+COPY native/vega/circuits/mdoc-bsc/shapes.zst ./native/vega/circuits/mdoc-bsc/shapes.zst
 COPY native/vega/demo/document-signer.pem ./native/vega/demo/document-signer.pem
 COPY native/longfellow/circuits/mdoc/circuits.zst native/longfellow/circuits/mdoc/params.tsv native/longfellow/circuits/mdoc/hash-semantic.tsv ./native/longfellow/circuits/mdoc/
 COPY native/bbs/demo/issuer-params.bin ./native/bbs/demo/issuer-params.bin

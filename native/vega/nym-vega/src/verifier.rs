@@ -2,11 +2,13 @@
 //! `proof_time` and `results` from the presentation and computes every other public input itself
 //! from the request and handover it holds and from its clock:
 //!
-//! 1. `system_id` is this circuit, and the request offered it;
+//! 1. `system_id` is a loaded circuit of the request's rulebook version (v0.4's, or v0.5's
+//!    `bsc` circuits), and the request offered it;
 //! 2. `issuer_key_set` holds one Document Signer certificate, valid against the trust anchors;
 //! 3. `proof_time` lies within the tolerance of `now`;
 //! 4. the keys of `results` are the `return` handles of `req`;
-//! 5. the proof verifies with the public inputs in the registry order ([`PUBLIC_INPUTS`]).
+//! 5. the proof verifies with the public inputs in the registry order ([`PUBLIC_INPUTS`], or
+//!    [`crate::bsc::PUBLIC_INPUTS`] for v0.5).
 //!
 //! A refusal names its rule (`code`) and, for a public input the proof does not match, the input.
 
@@ -20,15 +22,16 @@ use vega_age::presentation::{Public, TimeEncoding};
 use vega_age::pseudonym::NymPublic;
 use vega_age::request::Request;
 
-use crate::circuit::{BIRTH_DATE, CIRCUIT_ID, DOC_TYPE, LAYOUT, PROOF_SYSTEM, PUBLIC_INPUTS, PUBLIC_VALUES, input_at};
+use crate::circuit::{BIRTH_DATE, CIRCUIT_ID, CIRCUIT_ID_V05, DOC_TYPE, LAYOUT, PROOF_SYSTEM, PUBLIC_VALUES, input_at};
 use crate::handover::Handover;
 use crate::measure::{Heap, Peak, mb, ms};
 use crate::presentation::{Presentation, ResultValue};
 use crate::request::{RequestObject, Rulebook, statement_for};
 use crate::x509::TrustAnchors;
-use crate::{dates, hex, keys, threads};
+use crate::{bsc, dates, hex, keys, threads};
 
-/// The largest proof the verifier decodes. A proof of this circuit is 96,079 bytes.
+/// The largest proof the verifier decodes. A proof of the v0.4 circuits is 96,079 bytes, of v0.5's
+/// 86,861.
 const MAX_PROOF_BYTES: u64 = 1 << 20;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -80,11 +83,14 @@ pub struct Verifier {
   pub keys_mb: Option<f64>,
   anchors: TrustAnchors,
   tolerance_s: i64,
+  /// Rulebook v0.5's circuits, when loaded.
+  pub v05: Option<keys::Loaded<VerifierKey>>,
 }
 
 impl Verifier {
-  /// Builds the verifier key from `shapes.zst` and reads the trust anchors (PEM).
-  pub fn load(shapes: &Path, trust_anchors_pem: &str, tolerance_s: i64) -> Result<Self, String> {
+  /// Builds the verifier key from `shapes.zst`, and v0.5's from `shapes_v05` when given, and reads
+  /// the trust anchors (PEM).
+  pub fn load(shapes: &Path, shapes_v05: Option<&Path>, trust_anchors_pem: &str, tolerance_s: i64) -> Result<Self, String> {
     if tolerance_s <= 0 {
       return Err("the proof_time tolerance must be positive".into());
     }
@@ -92,7 +98,8 @@ impl Verifier {
     let heap = Heap::start();
     let anchors = TrustAnchors::from_pem(trust_anchors_pem)?;
     let loaded = keys::verifier_key(shapes)?;
-    Ok(Verifier { vk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, keys_mb: mb(heap.held()), anchors, tolerance_s })
+    let v05 = shapes_v05.map(keys::v05_verifier_key).transpose()?;
+    Ok(Verifier { vk: loaded.key, shapes_sha256: loaded.shapes_sha256, load_ms: loaded.load_ms, keys_mb: mb(heap.held()), anchors, tolerance_s, v05 })
   }
 
   pub fn info(&self) -> Json {
@@ -101,15 +108,10 @@ impl Verifier {
       "implementation": "Vega: microsoft/vega-prover c0ee259 (VegaMcZkSNARK, T256HyraxEngine), nym-auth-circuits vega-age; Node addon",
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": [{
-        "system_id": CIRCUIT_ID,
-        "proof_system": PROOF_SYSTEM,
-        "shapes_sha256": hex(&self.shapes_sha256),
-        "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
-      }],
+      "circuits": crate::prover::circuits(&self.shapes_sha256, self.v05.as_ref().map(|l| &l.shapes_sha256)),
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
-      "load_ms": self.load_ms,
+      "load_ms": self.load_ms + self.v05.as_ref().map_or(0.0, |l| l.load_ms),
       "keys_mb": self.keys_mb,
       "max_threads": threads::cores(),
     })
@@ -142,12 +144,19 @@ impl Verifier {
     metrics.insert("proof_bytes".into(), json!(p.proof.len()));
     let now = dates::rfc3339(&input.now).map_err(|e| refuse("request", format!("now: {e}")))?;
 
-    // 1. The circuit.
-    if p.system_id != CIRCUIT_ID {
-      return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
-    }
-    // v0.5: an age range's bounds come from the UTC date of proof_time (checked against the clock in 3.).
+    // 1. The circuit: v0.4's, or v0.5's (bsc) when loaded, each under its own rulebook version.
     let rulebook = Rulebook::parse(input.rulebook.as_deref()).map_err(|r| refuse("request", r.detail))?;
+    let v05 = match p.system_id.as_str() {
+      CIRCUIT_ID if rulebook == Rulebook::V04 => None,
+      CIRCUIT_ID_V05 if rulebook == Rulebook::V05 => {
+        Some(self.v05.as_ref().ok_or_else(|| refuse("circuit", format!("the circuit {} is not loaded", p.system_id)))?)
+      }
+      CIRCUIT_ID | CIRCUIT_ID_V05 => {
+        return Err(refuse("circuit", format!("the circuit {} reads requests of another rulebook version", p.system_id)));
+      }
+      _ => return Err(refuse("circuit", format!("unknown circuit {}", p.system_id))),
+    };
+    // v0.5: an age range's bounds come from the UTC date of proof_time (checked against the clock in 3.).
     // Rulebook v0.4: `results` holds at least one entry ({ + tstr => ResultValue }); v0.5 allows it
     // empty, and step 4 refuses a missing handle (`results`).
     if rulebook == Rulebook::V04 && p.results.is_empty() {
@@ -159,7 +168,7 @@ impl Verifier {
     };
     let s = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, date)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
-    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
+    if s.offered_ids.as_ref().is_some_and(|ids| !ids.contains(&p.system_id))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
       return Err(refuse("circuit", "the request did not offer this circuit"));
@@ -220,6 +229,23 @@ impl Verifier {
         .deserialize(&p.proof)
         .map_err(|e| refuse("proof_encoding", format!("the proof does not decode: {e}")))?
     };
+    let pool = threads::pool(input.parallel);
+    if let Some(keys) = v05 {
+      // v0.5 (bsc): the verifier's values from its statement; E and C as the request's range on
+      // the UTC date of proof_time, a missing bound the widest.
+      let public = bsc::public(signer.key, &s, proof_time, *nym).map_err(|e| refuse("request", e))?;
+      let accepted = pool.install(|| bsc::accept(&keys.key, &proof, &public));
+      metrics.insert("threads".into(), json!(pool.current_num_threads()));
+      metrics.insert("verify_ms".into(), json!(ms(t)));
+      if let Err((code, input)) = accepted {
+        let reason = match input {
+          Some(i) => format!("the proof does not match the public input {i}"),
+          None => "the proof does not verify".into(),
+        };
+        return Err(Refused { code, input, certificate: None, reason });
+      }
+      return Ok(self.accepted(&s, nym, rulebook, &p.system_id));
+    }
     let request = Request::mdoc(DOC_TYPE, BIRTH_DATE).map_err(|e| refuse("request", e))?;
     let public = Public {
       issuer_key: signer.key,
@@ -234,7 +260,6 @@ impl Verifier {
     if expected.len() + 2 != PUBLIC_VALUES {
       return Err(refuse("request", format!("{} public values computed, the registry lists {}", expected.len() + 2, PUBLIC_VALUES)));
     }
-    let pool = threads::pool(input.parallel);
     let accepted = pool.install(|| app::accept_pseudonym(&LAYOUT, &self.vk, &proof, &expected));
     metrics.insert("threads".into(), json!(pool.current_num_threads()));
     metrics.insert("verify_ms".into(), json!(ms(t)));
@@ -265,6 +290,12 @@ impl Verifier {
       });
     }
 
+    Ok(self.accepted(&s, nym, rulebook, &p.system_id))
+  }
+
+  /// What an accepted presentation showed: the results, the circuit, and the birth-date bounds
+  /// (with an age check).
+  fn accepted(&self, s: &crate::request::Statement, nym: &[u8; 32], rulebook: Rulebook, system_id: &str) -> (Map<String, Json>, String, Option<Json>) {
     let mut results = Map::new();
     results.insert(s.nym_handle.clone(), Json::String(hex(nym)));
     if let Some(h) = &s.age_handle {
@@ -272,6 +303,6 @@ impl Verifier {
     }
     let bounds = s.age_handle.is_some() || rulebook == Rulebook::V05 && (s.age.born_from.is_some() || s.age.born_by.is_some());
     let bounds = bounds.then(|| json!({ "ge": s.age.born_from.map(|d| d.text()), "le": s.age.born_by.map(|d| d.text()) }));
-    Ok((results, CIRCUIT_ID.to_string(), bounds))
+    (results, system_id.to_string(), bounds)
   }
 }

@@ -77,6 +77,7 @@ const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
 const LONGFELLOW = 'urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'
 const LONGFELLOW_V05 = 'urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'
+const VEGA_V05 = 'urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'
 /** A circuit id of the same length that names no circuit: the last hex digit changed. */
 const otherId = (id) => id.slice(0, -1) + (id.endsWith('0') ? '1' : '0')
 const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
@@ -2769,26 +2770,25 @@ async function groupQ() {
   }
   check('an account exists', (await accounts()).length > 0)
 
-  begin('Q2', '/tech: switching to v0.5 resets the demo; Vega is pending, Longfellow has its v0.5 circuits')
+  begin('Q2', '/tech: switching to v0.5 resets the demo; Vega and Longfellow have their v0.5 circuits')
   await tech.locator('[data-demo-profile]').selectOption('nym-auth-v0.5')
   for (let k = 0; k < 30 && (await overview()).profile !== 'nym-auth-v0.5'; k++) await page.waitForTimeout(100)
   o = await overview()
   eq('server: v0.5', o.profile, 'nym-auth-v0.5')
   eq('the demo was reset', (await accounts()).length, 0)
-  eq('a pending system is not accepted', o.acceptedProofSystems, [])
-  await tech.locator('[data-pending="vega-v1"]').waitFor()
-  check('/tech: Vega pending, Longfellow available', (await tech.locator('[data-pending]').count()) === 1 && (await tech.locator('[data-accept="vega-v1"]').isDisabled()) && !(await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+  eq('the reset accepts what the configuration names (none)', o.acceptedProofSystems, [])
+  await tech.locator('[data-profile-version]', { hasText: 'Rulebook v0.5' }).waitFor()
+  check('/tech: nothing pending; Vega and Longfellow available', (await tech.locator('[data-pending]').count()) === 0 && !(await tech.locator('[data-accept="vega-v1"]').isDisabled()) && !(await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
   const v05 = o.profiles[1]
   check('/tech: the commit v0.5 is based on', (await tech.locator('[data-profile-commit]').getAttribute('href')) === v05.commitUrl && /^[0-9a-f]{40}$/.test(v05.commit ?? ''), v05.commitUrl)
-  expectAnswer('server: Vega cannot be switched on under v0.5', await accept('vega-v1', true), 409, 'pending_system')
-  eq('server: BBS can', (await accept(BBS_SYSTEM, true)).body.acceptedProofSystems, [BBS_SYSTEM])
+  eq('server: Vega can be switched on under v0.5', (await accept('vega-v1', true)).body.acceptedProofSystems, ['vega-v1'])
+  eq('server: BBS too (Vega off again)', [(await accept('vega-v1', false)).status, (await accept(BBS_SYSTEM, true)).body.acceptedProofSystems], [200, [BBS_SYSTEM]])
   await tech.close()
   const dev = await ctxBrowser.newPage()
   await dev.goto('/dev')
   await dev.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
   check('/dev: the profile in the header', true)
-  check('/dev: Vega pending', (await dev.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await dev.locator('[data-accept="vega-v1"]').isDisabled()))
-  check('/dev: Longfellow not pending', !(await dev.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).textContent()).includes('pending'))
+  check('/dev: Vega and Longfellow not pending', !(await dev.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && !(await dev.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).textContent()).includes('pending'))
   await dev.close()
 
   begin('Q3', 'v0.5 over HTTP: age_check as a range, proof_time in the BBS presentation, bounds from its date')
@@ -2967,6 +2967,126 @@ async function groupQ() {
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
+
+  begin('Q8', 'Vega under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym, refusals')
+  eq('server: Vega on, Longfellow off', [(await accept('vega-v1', true)).status, (await accept(LONGFELLOW_SYSTEM, false)).body.acceptedProofSystems], [200, ['vega-v1']])
+  const vegaOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA_V05] } } })
+  o = await overview()
+  const vInfo = o.services?.verifier?.circuits ?? []
+  check('the verifier lists both Vega circuit sets, each under its own id', vInfo.some((c) => c.system_id === VEGA_V05 && c.rulebook === '0.5') && vInfo.some((c) => c.system_id === VEGA && c.rulebook === '0.4'), JSON.stringify(vInfo.map((c) => [c.system_id, c.rulebook])))
+  {
+    const c8 = await client()
+    s = await newSession(c8, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c8, s)
+    eq('the offer under v0.5 with Vega on: the v0.5 Vega circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05])
+    let refused = ''
+    try {
+      await presentV05(c8, r, { ...teen, v05: { ...teen.v05, credential: teen.credential } }, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 mdoc is refused by the v0.5 circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c8, r, { ...teen, v05: { ...teen.v05, birth_date: '2011-03-15' } }, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c8, r, teen, VEGA)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 Vega circuits refuse a v0.5 request', refused.includes('unsupported_circuit'), refused)
+    const vp = await presentV05(c8, r, teen, VEGA_V05)
+    eq('prove: the v0.5 Vega circuits', vp.system_id, VEGA_V05)
+    eq('results: the pseudonym only', Object.keys(vp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 and with Longfellow', vp.results.nym, v04Nym)
+    await respond(c8, r, vpForm(r, vp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.5, the bsc public inputs', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name)], ['0.5', ['issuer_key_set', 'age_check.ge', 'age_check.le', 'proof_time', 'session_transcript', 'doctype', 'pseudonym.verifier_input', 'results.nym']])
+    check('the prepare phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const vv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    eq("the verifier's bounds, from proof_time", vv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, new Date().toISOString().slice(0, 10)))
+    eq('completed: logs in to the account Longfellow created in Q6 (one person, one account under either system)', (await call(c8, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'logged_in')
+    o = await overview()
+    const vRow = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.5' && x.proof_system === 'vega-v1')
+    check('Benchmark: a Vega run under v0.5, with its Prebuild (consent) step', !!vRow && JSON.stringify(vRow.steps?.prove ?? vRow).includes('Prebuild (consent)'), JSON.stringify(vRow ?? o.measurements.rows.map((x) => x.proof_system)))
+    const tampers = { ...TAMPER, 'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA_V05), Buffer.from(otherId(VEGA_V05))) }
+    const expected = {
+      'a flipped proof byte': ['proof_invalid', 'proof_encoding'],
+      'a changed results.nym': ['public_input:results.nym'],
+      'a results key that is not the request handle': ['results'],
+      'proof_time changed by one second': ['public_input:proof_time'],
+      'another system_id': ['circuit'],
+    }
+    for (const [what, tamper] of Object.entries(tampers)) {
+      const t = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const rt = await fetchRequest(c8, t, vegaOnly)
+      const pt = await presentV05(c8, rt, teen, VEGA_V05)
+      const changed = tamper(Buffer.from(pt.presentation, 'base64url'), pt).toString('base64url')
+      await respond(c8, rt, vpForm(rt, changed))
+      const v = await sessionView(t.id)
+      const got = rejectedTrace(v)
+      const label = got ? (got.input ? `${got.code}:${got.input}` : got.code) : 'accepted'
+      check(`${what}: refused as ${expected[what].join(' or ')}`, v.status === 'failed' && expected[what].includes(label), `${v.status}, ${label}`)
+    }
+    {
+      const a = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const ra = await fetchRequest(c8, a, vegaOnly)
+      const pa = await presentV05(c8, ra, teen, VEGA_V05)
+      const b = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const rb = await fetchRequest(c8, b, vegaOnly)
+      await respond(c8, rb, vpForm(rb, pa.presentation))
+      const got = rejectedTrace(await sessionView(b.id))
+      check("another session's presentation: refused, public_input session_transcript", got?.code === 'public_input' && got?.input === 'session_transcript', got ? `${got.code}:${got.input}` : 'accepted')
+    }
+    await c8.dispose()
+    const c9 = await client()
+    const s9 = await newSession(c9, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r9 = await fetchRequest(c9, s9, vegaOnly)
+    refused = ''
+    try {
+      await presentV05(c9, r9, teen, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV05(c9, r9, adult, VEGA_V05)
+    await respond(c9, r9, vpForm(r9, ap.presentation))
+    eq('the adult proves 18+', (await sessionView(s9.id)).status, 'verified')
+    await c9.dispose()
+  }
+
+  begin('Q9', "Vega under v0.5 in the browser: the teen's phone answers with its v0.5 mdoc; /tech renders")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('the phone answered with the v0.5 Vega circuits and its v0.5 mdoc', [sv.circuit?.system_id, sv.trace.find((t) => t.step === 'witness')?.data?.rulebook], [VEGA_V05, '0.5'])
+  await closeFromPhone()
+  {
+    const t9 = await ctxBrowser.newPage()
+    const broken = []
+    t9.on('pageerror', (e) => broken.push(e.message))
+    await t9.goto('/tech')
+    await t9.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t9.waitForTimeout(1000)
+    check('/tech renders after a v0.5 Vega presentation', !broken.length, broken.join('; '))
+    await t9.close()
+  }
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('both circuits on: the offer, Vega first', (await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'login' }))).client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05, LONGFELLOW_V05])
 
   begin('Q5', 'back to v0.4: reset, Vega available again')
   eq('server: v0.4', (await setProfile('nym-auth-v0.4')).body.profile, 'nym-auth-v0.4')
