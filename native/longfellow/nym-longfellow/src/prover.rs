@@ -465,7 +465,10 @@ impl Prover {
       "rulebook": "0.5",
       "results": results,
       "public_inputs": public,
-      "counts": { "hash": { "public": 278 }, "signature": { "public": 1155 } },
+      "counts": {
+        "hash": { "inputs": self.v5.counts[0].0, "public": self.v5.counts[0].1 },
+        "signature": { "inputs": self.v5.counts[1].0, "public": self.v5.counts[1].1 },
+      },
       "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()) },
     });
     Ok(WitnessData {

@@ -2942,6 +2942,18 @@ async function groupQ() {
   sv = await sessionView(lastSession())
   check('the phone sent its v0.5 mdoc', sv.trace.find((t) => t.step === 'witness')?.data?.rulebook === '0.5', JSON.stringify(sv.trace.find((t) => t.step === 'witness')?.data?.rulebook))
   await closeFromPhone()
+  {
+    // /tech after a v0.5 Longfellow presentation (Peter's report: it stayed white, the witness
+    // counts had no inputs).
+    const t7 = await ctxBrowser.newPage()
+    const broken = []
+    t7.on('pageerror', (e) => broken.push(e.message))
+    await t7.goto('/tech')
+    await t7.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t7.getByText(/hash circuit [\d,]+ inputs/).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    check('/tech renders after a v0.5 Longfellow presentation, with the circuits\' input counts', !broken.length && (await t7.getByText(/hash circuit [\d,]+ inputs \(278 public\)/).count()) > 0, broken.join('; '))
+    await t7.close()
+  }
   await goto('/c/afterdark')
   await pageShows("You can't enter c/afterdark")
   await page.locator('header [data-user-menu]').click()

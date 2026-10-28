@@ -51,12 +51,18 @@ pub struct Loaded<T> {
   /// SHA-256 of the archive, which the registry pins.
   pub sha256: [u8; 32],
   pub load_ms: f64,
+  /// Each circuit's inputs and public inputs (with the constant 1): hash, then signature.
+  pub counts: [(usize, usize); 2],
 }
 
 fn load<T>(make: impl FnOnce(v5::Circuits) -> T) -> Result<Loaded<T>, String> {
   let t = Instant::now();
   let circuits = crate::bsc::circuits()?;
-  Ok(Loaded { side: make(circuits), sha256: crate::bsc::archive_sha256(), load_ms: ms(t) })
+  let counts = [
+    (circuits.hash.raw.ninput, circuits.hash.raw.npublic_input),
+    (circuits.sig.raw.ninput, circuits.sig.raw.npublic_input),
+  ];
+  Ok(Loaded { side: make(circuits), sha256: crate::bsc::archive_sha256(), load_ms: ms(t), counts })
 }
 
 pub fn load_prover() -> Result<Loaded<v5::Prover>, String> {

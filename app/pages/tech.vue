@@ -142,7 +142,8 @@ const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000)
 const mb = (n?: number | null) => (n == null ? '' : `${n < 10 ? n.toFixed(1) : Math.round(n)} MB`)
 const mbSpread = (s: Spread | null) => (!s ? '–' : s.min === s.max ? mb(s.median) : `${mb(s.median)} (${mb(s.min).replace(' MB', '')}–${mb(s.max)})`)
 type Counts = { shared: number; precommitted: number; rest: number; public: number } | { hash: { inputs: number; public: number }; signature: { inputs: number; public: number } }
-const n = (x: number) => x.toLocaleString('en-GB')
+/** A count as text; '–' when an addon did not report it (a missing field must not stop the page rendering). */
+const n = (x?: number | null) => (typeof x === 'number' ? x.toLocaleString('en-GB') : '–')
 const values = (c?: Counts | null) =>
   !c
     ? ''
