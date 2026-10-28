@@ -20,6 +20,12 @@ use crate::measure::ms;
 /// The v0.5 circuits' artifact, as the registry names it (`shared/registry/circuits.ts`).
 pub const ARTIFACT: &str = "nym_auth_mdoc_bsc.lfa2.zst";
 
+/// The v0.5 circuits' id: `urn:circuits:sha256:` and the SHA-256 of the archive as shipped
+/// (`nym_auth_zk::system_id()`).
+pub fn circuit_id() -> String {
+  crate::bsc::system_id()
+}
+
 /// The public inputs of the v0.5 circuits, grouped by the input they encode, with the elements
 /// each takes in the hash circuit (GF(2^128)) and in the signature circuit (P-256), in circuit
 /// order (the package's INTEGRATION.md §7). Each circuit's constant 1 is left out. Hash: 277 + 1 =
@@ -37,9 +43,9 @@ pub const PUBLIC_INPUTS: [(&str, usize, usize); 10] = [
   ("session_transcript", 0, 256),
 ];
 
-/// The v0.5 circuits, loaded once: the archive compiled into `nym-auth-zk` (the same bytes as
-/// `nym-auth-zk/circuits/nym_auth_mdoc_bsc.lfa2.zst`), each circuit checked against its
-/// Longfellow id.
+/// The v0.5 circuits, loaded once: the archive compiled into `nym-auth-zk` (`zk::CIRCUITS`, the
+/// file `nym-auth-zk/circuits/nym_auth_mdoc_bsc.lfa2.zst` byte for byte), each circuit checked
+/// against its Longfellow id.
 pub struct Loaded<T> {
   pub side: T,
   /// SHA-256 of the archive, which the registry pins.
@@ -49,8 +55,8 @@ pub struct Loaded<T> {
 
 fn load<T>(make: impl FnOnce(v5::Circuits) -> T) -> Result<Loaded<T>, String> {
   let t = Instant::now();
-  let circuits = crate::bsc::circuits(v5::zk::CIRCUITS)?;
-  Ok(Loaded { side: make(circuits), sha256: crate::sha256(v5::zk::CIRCUITS), load_ms: ms(t) })
+  let circuits = crate::bsc::circuits()?;
+  Ok(Loaded { side: make(circuits), sha256: crate::bsc::archive_sha256(), load_ms: ms(t) })
 }
 
 pub fn load_prover() -> Result<Loaded<v5::Prover>, String> {
@@ -109,6 +115,13 @@ mod tests {
     let hash: usize = PUBLIC_INPUTS.iter().map(|p| p.1).sum();
     let sig: usize = PUBLIC_INPUTS.iter().map(|p| p.2).sum();
     assert_eq!((hash + 1, sig + 1), (278, 1155));
+  }
+
+  #[test]
+  fn circuit_id_is_the_archive_hash() {
+    let file = std::fs::read(format!("{}/../nym-auth-zk/circuits/{ARTIFACT}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    assert_eq!(circuit_id(), format!("urn:circuits:sha256:{}", crate::hex(&crate::sha256(&file))));
+    assert_eq!(circuit_id(), "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52");
   }
 
   #[test]

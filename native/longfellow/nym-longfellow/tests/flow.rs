@@ -104,7 +104,7 @@ fn request(host: &str, nonce: &str, age: Option<Value>) -> Value {
     "response_uri": format!("https://{host}/api/vp/response/s1"),
     "dcql_query": { "credentials": [{ "id": "nym_attestation", "format": "zkp_req", "meta": { "source_format": "mso_mdoc", "doctype_value": DOC_TYPE }, "_req": req }] },
     "client_metadata": { "vp_formats_supported": { "zkp_req": {
-      "system_id_values": ["urn:circuits:vega:nym_auth:v1", "urn:circuits:longfellow:nym_auth:v1"],
+      "system_id_values": ["urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df", "urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b"],
       "proof_system_values": ["vega-v1", "longfellow-libzk-v1"] } } },
   })
 }
@@ -118,7 +118,7 @@ fn present(p: &Prover, holder: &Value, req: &Value) -> Result<Value, nym_longfel
     serde_json::from_value(json!({ "device_key": holder["device_key"], "doc_type": DOC_TYPE, "handover": handover(req) })).unwrap();
   let signed = p.sign(&sign)?;
   let input: WitnessInput = serde_json::from_value(json!({
-    "system_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
+    "system_id": "urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b", "credential_query_id": "nym_attestation",
     "request": req, "handover": handover(req), "credential": holder["credential"],
     "secret_seed": holder["secret_seed"], "device_signature": signed.device_signature,
   }))
@@ -182,6 +182,9 @@ fn prove_verify_and_refusals() {
   assert_eq!((r["code"].as_str(), r["input"].as_str()), (Some("proof_invalid"), Some("hash")), "{r}");
   let bytes = nym_longfellow::unb64url("p", pres).unwrap();
   let mut p = nym_longfellow::presentation::Presentation::decode(&bytes).unwrap();
+  let mut empty = p.clone();
+  empty.results.clear();
+  assert_eq!(verify(&verifier, &req, &b64url(&empty.encode().unwrap()), &now())["code"], "presentation", "v0.4: results holds at least one entry");
   p.results[0].1 = nym_longfellow::presentation::ResultValue::Pseudonym([7; 32]);
   assert_eq!(verify(&verifier, &req, &b64url(&p.encode().unwrap()), &now())["code"], "proof_invalid");
 
@@ -201,31 +204,29 @@ fn prove_verify_and_refusals() {
   assert_eq!(v2["results"]["nym"].as_str().unwrap(), nym);
 }
 
-/// Rulebook v0.5's request side against a v0.4 credential: a v0.5 request is read (age_check an
-/// assertion with a `range`), but the v0.5 circuits read `bsc`, so the prover refuses the v0.4
-/// credential (`bad_credential`, from `nym_auth_zk::mdoc::parse`), and a return handle on the
-/// assertion is refused before any credential is read. The v0.5 flow on v0.5 credentials is
-/// `tests/bsc_flow.rs`.
+/// Rulebook v0.5's request side against the v0.4 circuits and credential: each circuit reads the
+/// requests of its own version (v0.4's id with a v0.5 request: `unsupported_circuit`), the v0.5
+/// circuits read `bsc`, so they refuse a v0.4 credential (`bad_credential`, from
+/// `nym_auth_zk::mdoc::parse`), and a return handle on the assertion is refused before any
+/// credential is read. The v0.5 flow on v0.5 credentials is `tests/bsc_flow.rs`.
 #[test]
 fn rulebook_v05_request_side() {
   let dir = here("circuits/mdoc");
   let prover = Prover::load(&dir).unwrap();
   let wallet = json_file(root("app/wallet/demo-wallet.json"));
-  let holders = wallet["holders"].as_array().unwrap();
-  let v04 = holders
-    .iter()
-    .find(|h| h["credential"]["rulebook"].as_str().unwrap_or("0.4") == "0.4")
-    .expect("a v0.4 credential");
+  let v04 = &wallet["holders"][0];
+  let v05_id = nym_longfellow::v05::circuit_id();
   let v05 = |range: &str, nonce: &str| {
     let mut req = request("community.example", nonce, Some(json!({})));
     req["dcql_query"]["credentials"][0]["_req"][1] = json!({ "fn_id": "age_check", "params": { "range": range } });
+    req["client_metadata"]["vp_formats_supported"]["zkp_req"]["system_id_values"] = json!([v05_id, nym_longfellow::circuit::CIRCUIT_ID]);
     req
   };
-  let present05 = |req: &Value| -> Result<Value, nym_longfellow::error::Refusal> {
+  let present05 = |req: &Value, system_id: &str| -> Result<Value, nym_longfellow::error::Refusal> {
     let sign: SignInput = serde_json::from_value(json!({ "device_key": v04["device_key"], "doc_type": DOC_TYPE, "handover": handover(req) })).unwrap();
     let signed = prover.sign(&sign)?;
     let input: WitnessInput = serde_json::from_value(json!({
-      "system_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
+      "system_id": system_id, "credential_query_id": "nym_attestation",
       "request": req, "handover": handover(req), "credential": v04["credential"],
       "secret_seed": v04["secret_seed"], "birth_date": "2011-03-14", "device_signature": signed.device_signature, "rulebook": "0.5",
     }))
@@ -234,8 +235,9 @@ fn rulebook_v05_request_side() {
     Ok(prover.prove(w).unwrap())
   };
   let req = v05("13-17", "v05-request-side-0123456789abcdef");
-  assert_eq!(present05(&req).unwrap_err().error, "bad_credential");
+  assert_eq!(present05(&req, nym_longfellow::circuit::CIRCUIT_ID).unwrap_err().error, "unsupported_circuit");
+  assert_eq!(present05(&req, &v05_id).unwrap_err().error, "bad_credential");
   let mut with_return = req.clone();
   with_return["dcql_query"]["credentials"][0]["_req"][1]["return"] = json!("age");
-  assert_eq!(present05(&with_return).unwrap_err().error, "unsupported_request");
+  assert_eq!(present05(&with_return, &v05_id).unwrap_err().error, "unsupported_request");
 }

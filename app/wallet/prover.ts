@@ -17,7 +17,7 @@ export interface ProveOutput {
   presentation: string
   results: Record<string, string | true>
   witness_ms?: number
-  metrics: { witness_ms?: number; prove_ms?: number; total_ms?: number; proof_bytes?: number; presentation_bytes?: number }
+  metrics: { witness_ms?: number; prebuild_ms?: number; prove_ms?: number; total_ms?: number; proof_bytes?: number; presentation_bytes?: number }
 }
 
 export type ProveError = 'unsatisfiable' | 'unavailable' | 'error'

@@ -73,8 +73,12 @@ const otherFingerprint = createHash('sha256')
   .digest('hex')
 const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
 const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
-const VEGA = 'urn:circuits:vega:nym_auth:v1'
-const LONGFELLOW = 'urn:circuits:longfellow:nym_auth:v1'
+// Circuit ids: urn:circuits:sha256:<the archive's SHA-256> (Vega v0.4, Longfellow v0.4 and v0.5).
+const VEGA = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
+const LONGFELLOW = 'urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'
+const LONGFELLOW_V05 = 'urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'
+/** A circuit id of the same length that names no circuit: the last hex digit changed. */
+const otherId = (id) => id.slice(0, -1) + (id.endsWith('0') ? '1' : '0')
 const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
 const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } } })
 /** The zkp_req query over `source` (mso_mdoc or bbs_cd) in a request. */
@@ -144,7 +148,7 @@ async function present(ctx, request, wallet, circuit = VEGA) {
 }
 /** mso_mdoc under rulebook v0.5: the holder's v0.5 mdoc (demo-wallet.json `v05`) with the birth
  *  date that opens its bsc, `rulebook` "0.5". */
-async function presentV05(ctx, request, wallet, circuit = LONGFELLOW) {
+async function presentV05(ctx, request, wallet, circuit = LONGFELLOW_V05) {
   const q = queryOf(request, 'mso_mdoc')
   const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
   if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
@@ -255,7 +259,7 @@ const TAMPER = {
     out[at] = out[at] === 0x30 ? 0x31 : out[at] - 1
     return out
   },
-  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
+  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(otherId(VEGA))),
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2324,7 +2328,7 @@ async function groupL() {
   begin('L7', 'over HTTP: the Longfellow verifier refuses tampering and a presentation for another request')
   const tampers = {
     ...TAMPER,
-    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
+    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(otherId(LONGFELLOW))),
   }
   const expected = {
     'a flipped proof byte': ['proof_invalid:hash', 'proof_invalid:signature', 'proof_encoding'],
@@ -2864,15 +2868,15 @@ async function groupQ() {
 
   begin('Q6', 'Longfellow under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym')
   eq('server: Longfellow on, BBS off', [(await accept(LONGFELLOW_SYSTEM, true)).status, (await accept(BBS_SYSTEM, false)).body.acceptedProofSystems], [200, [LONGFELLOW_SYSTEM]])
-  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })
+  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V05] } } })
   o = await overview()
   const lfInfo = o.services?.lfVerifier?.circuits ?? []
-  check('the verifier lists the v0.5 bsc circuits', lfInfo.some((c) => c.system_id === LONGFELLOW && c.rulebook === '0.5' && c.artifact_sha256 === 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'), JSON.stringify(lfInfo))
+  check('the verifier lists both circuit sets, each under its own id', lfInfo.some((c) => c.system_id === LONGFELLOW_V05 && c.rulebook === '0.5' && LONGFELLOW_V05.endsWith(c.artifact_sha256)) && lfInfo.some((c) => c.system_id === LONGFELLOW && LONGFELLOW.endsWith(c.artifact_sha256)), JSON.stringify(lfInfo))
   {
     const c6 = await client()
     s = await newSession(c6, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
     r = await fetchRequest(c6, s, lfOnly)
-    eq('the offer: Longfellow', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW])
+    eq('the offer: the v0.5 Longfellow circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW_V05])
     eq('the mdoc _req: pseudonym, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
       { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } },
       { fn_id: 'age_check', params: { range: '13-17' } },
@@ -2899,13 +2903,15 @@ async function groupQ() {
     eq('verified', sv.status, 'verified')
     const wt = sv.trace.find((t) => t.step === 'witness')?.data
     eq('the witness: v0.5, the bsc public inputs', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.5', ['doctype', 'proof_time']])
+    check('the prebuild phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
     const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
     const today = new Date().toISOString().slice(0, 10)
     eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
     eq('under v0.5', lv?.profile, 'nym-auth-v0.5')
     eq('completed: the account, with the age', (await call(c6, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
     o = await overview()
-    check('Benchmark: a Longfellow run under v0.5', o.measurements.rows.some((x) => x.profile === 'nym-auth-v0.5' && /longfellow/i.test(`${x.proofSystem ?? ''}${x.systemId ?? ''}${x.label ?? ''}${JSON.stringify(x)}`)), JSON.stringify(o.measurements.rows.map((x) => x.label ?? x.proofSystem)))
+    const lfRow = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.5' && JSON.stringify(x).includes(LONGFELLOW_SYSTEM))
+    check('Benchmark: a Longfellow run under v0.5, with its Prebuild (consent) step', !!lfRow && JSON.stringify(lfRow.steps?.prove ?? lfRow).includes('Prebuild (consent)'), JSON.stringify(lfRow?.steps ?? o.measurements.rows.map((x) => x.proof_system)))
     await c6.dispose()
     const c7 = await client()
     const s7 = await newSession(c7, { purpose: 'signin', intent: 'signup', community: 'afterdark' })

@@ -10,6 +10,8 @@ export type WalletScreen = 'home' | 'detail' | 'presentations' | 'scan' | 'reque
 export interface ProofMetrics {
   sign_ms?: number
   witness_ms?: number
+  /** Longfellow v0.5: the prebuild phase of the witness step (a wallet can run it during consent). */
+  prebuild_ms?: number
   prove_ms?: number
   proof_bytes?: number
   presentation_bytes?: number

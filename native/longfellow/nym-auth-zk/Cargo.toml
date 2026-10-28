@@ -1,6 +1,6 @@
 [package]
 name = "nym-auth-zk"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
@@ -20,13 +20,12 @@ runtime-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a7
 zstd = "0.13"
 # SHA-256 (the transcript-independent hashes: verifier_input, the session's handover, e2).
 sha2 = "0.10"
-# P-256 field and scalar arithmetic for the signature circuit's witness.
-p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field"] }
+# P-256 field and scalar arithmetic for the signature circuit's witness; ECDSA verification for
+# the prover's checks before proving.
+p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field", "ecdsa"] }
 
 [dev-dependencies]
 serde_json = "1"
-# The synthetic holders' device signatures (tests/synthetic.rs).
-p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field", "ecdsa"] }
 
 [profile.release]
 debug = false

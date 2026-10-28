@@ -18,15 +18,18 @@ const list = (v: unknown) =>
  * is a configuration error and fails the offer.
  */
 async function circuitOffer(systems: string[]): Promise<string[]> {
-  const accepted = list(useRuntimeConfig().acceptedCircuits).filter((id) => systems.includes(findCircuit(id)?.proof_system ?? ''))
-  if (!accepted.length) return []
-  // The entry and the loaded circuits of the demo profile's rulebook version: a verifier lists a
-  // circuit once per version it loads (Longfellow: v0.4 and v0.5), or once without a version (v0.4).
+  // The circuits of the demo profile's rulebook version: each reads that version's credential and
+  // requests (a circuit's id names its archive, so v0.4's and v0.5's Longfellow circuits differ).
   const version = activeProfile().rulebook.version
+  const accepted = list(useRuntimeConfig().acceptedCircuits).filter((id) => {
+    const e = findCircuit(id)
+    return !!e && e.rulebook === version && systems.includes(e.proof_system)
+  })
+  if (!accepted.length) return []
   const info = await verifier.info()
   const ids = accepted.filter((id) => {
-    const entry = findCircuit(id, version)
-    const listed = info.circuits.find((c) => c.system_id === id && (c.rulebook ?? '0.4') === version) ?? info.circuits.find((c) => c.system_id === id && !c.rulebook)
+    const entry = findCircuit(id)
+    const listed = info.circuits.find((c) => c.system_id === id)
     if (!entry || !listed) return false
     const names = entry.public_inputs.map((p) => p.name).join()
     if (listed.proof_system !== entry.proof_system) throw new Error(`verifier circuit ${id}: proof system ${listed.proof_system}, registry ${entry.proof_system}`)

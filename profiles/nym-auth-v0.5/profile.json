@@ -132,14 +132,13 @@
   "systems": [
     {
       "proof_system": "vega-v1",
-      "system_id": "urn:circuits:vega:nym_auth:v1",
       "status": "pending",
       "proof_time": "always",
       "note": "Waiting for the v0.5 Vega circuits (bsc)."
     },
     {
       "proof_system": "longfellow-libzk-v1",
-      "system_id": "urn:circuits:longfellow:nym_auth:v1",
+      "system_id": "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52",
       "status": "available",
       "proof_time": "always"
     },

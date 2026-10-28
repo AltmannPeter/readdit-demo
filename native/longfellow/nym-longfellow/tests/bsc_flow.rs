@@ -39,7 +39,7 @@ fn request(host: &str, nonce: &str, range: Option<&str>) -> Value {
     "response_uri": format!("https://{host}/api/vp/response/s1"),
     "dcql_query": { "credentials": [{ "id": "nym_attestation", "format": "zkp_req", "meta": { "source_format": "mso_mdoc", "doctype_value": DOC_TYPE }, "_req": req }] },
     "client_metadata": { "vp_formats_supported": { "zkp_req": {
-      "system_id_values": ["urn:circuits:longfellow:nym_auth:v1"], "proof_system_values": ["longfellow-libzk-v1"] } } },
+      "system_id_values": ["urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52"], "proof_system_values": ["longfellow-libzk-v1"] } } },
   })
 }
 
@@ -75,7 +75,7 @@ fn present(p: &Prover, h: &Holder, req: &Value) -> Result<Value, nym_longfellow:
   let sign: SignInput = serde_json::from_value(json!({ "device_key": h.device_key, "doc_type": DOC_TYPE, "handover": handover(req) })).unwrap();
   let signed = p.sign(&sign)?;
   let input: WitnessInput = serde_json::from_value(json!({
-    "system_id": "urn:circuits:longfellow:nym_auth:v1", "credential_query_id": "nym_attestation",
+    "system_id": "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52", "credential_query_id": "nym_attestation",
     "request": req, "handover": handover(req), "credential": h.credential,
     "secret_seed": h.secret_seed, "birth_date": h.birth_date, "device_signature": signed.device_signature, "rulebook": "0.5",
   }))
@@ -164,18 +164,21 @@ fn v05_holders_prove_and_the_verifier_refuses() {
   let truncated = edit(&pres, |p| p.proof.truncate(p.proof.len() / 2));
   assert_eq!(code(&verify(&verifier, &req, &truncated, &now)), "proof_encoding");
   assert_eq!(code(&verify(&verifier, &req, &pres, &now_plus(3600))), "proof_time");
+  // v0.5 allows an empty results map; these circuits still need the pseudonym's handle.
+  let empty = edit(&pres, |p| p.results.clear());
+  assert_eq!(code(&verify(&verifier, &req, &empty, &now)), "results");
   let missing = edit(&pres, |p| p.results[0].0 = "pseudonym".into());
   assert_eq!(code(&verify(&verifier, &req, &missing, &now)), "results");
   let extra = edit(&pres, |p| p.results.push(("age".into(), ResultValue::True)));
   assert_eq!(code(&verify(&verifier, &req, &extra, &now)), "results");
   let other_nym = edit(&pres, |p| p.results[0].1 = ResultValue::Pseudonym([7; 32]));
   assert_eq!(code(&verify(&verifier, &req, &other_nym, &now)), "proof_invalid");
-  // Read as v0.4, the request lacks the age check's return handle.
+  // Read as v0.4: these circuits are for v0.5 requests.
   let as04: VerifyInput = serde_json::from_value(json!({
     "request": req, "credential_query_id": "nym_attestation", "presentation": pres, "handover": handover(&req), "now": now, "rulebook": "0.4",
   }))
   .unwrap();
-  assert_eq!(code(&verifier.verify(&as04)), "request");
+  assert_eq!(code(&verifier.verify(&as04)), "circuit");
 
   // An unknown issuer: refused with its certificate, accepted once learned.
   let other = holders(root("scripts/fixtures/other-issuer-wallet.json")).remove(0);
@@ -205,7 +208,7 @@ fn v05_holders_prove_and_the_verifier_refuses() {
 
 /// validUntil is inclusive (rulebook v0.5): the rulebook vector's credential proves at
 /// proof_time = validUntil and the verifier accepts it at that time; one second later the crate
-/// refuses to prove (`Unsatisfied`). Fixed times, through the crate's prover (the addon's takes the clock).
+/// refuses to prove (`Holder`, with its reason). Fixed times, through the crate's prover (the addon's takes the clock).
 #[test]
 fn valid_until_is_inclusive() {
   let dir = here("circuits/mdoc");
@@ -240,7 +243,7 @@ fn valid_until_is_inclusive() {
   };
   let p = prove_at(&until).expect("proves at validUntil");
   let wire = Presentation {
-    system_id: "urn:circuits:longfellow:nym_auth:v1".into(),
+    system_id: "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52".into(),
     proof: p.proof,
     issuer_key_set: vec![der.clone()],
     proof_time: until.clone(),
@@ -249,5 +252,5 @@ fn valid_until_is_inclusive() {
   let v = verify_with(&verifier, &req, &b64url(&wire.encode().unwrap()), &until, &[learned]);
   assert_eq!(v["ok"], true, "{v}");
   let after = dates::from_unix(dates::unix(&dates::date_time(&until).unwrap()) + 1).unwrap().text();
-  assert_eq!(prove_at(&after).unwrap_err(), v5::Error::Unsatisfied);
+  assert_eq!(prove_at(&after).unwrap_err(), v5::Error::Holder("the credential is not valid at proof_time"));
 }

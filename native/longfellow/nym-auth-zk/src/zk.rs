@@ -15,9 +15,9 @@ use runtime_algebra::{
     ElementOf, SupportsFFT,
 };
 use runtime_ligero::param::LigeroConfig;
-use runtime_proto::ZkProof;
+use runtime_proto::{ZkProof, ZkProofGeometry};
 use runtime_random::{RandomEngine, Transcript};
-use runtime_zk::{common::ZkContext, ZkProver, ZkVerifier};
+use runtime_zk::{common::ZkContext, prover::ZkCommitResult, ZkProver, ZkVerifier};
 
 use crate::Error;
 
@@ -146,25 +146,51 @@ fn p_elts(f: &P256Field, xs: &[[u8; 32]]) -> Result<Vec<ElementOf<P256Field>>, E
         .collect()
 }
 
-/// What the prover needs once it has committed: computes the public inputs from the MAC
-/// challenge.
-pub(crate) struct ProverInputs<'a> {
-    pub hash_private: Vec<u128>,
-    pub sig_private: Vec<[u8; 32]>,
-    pub publics: &'a dyn Fn(u128) -> (Vec<u128>, Vec<[u8; 32]>, [u128; 6]),
-}
-
 pub(crate) fn transcript_init(device_digest: &[u8; 32]) -> Vec<u8> {
     let mut v = TRANSCRIPT_DOMAIN.to_vec();
     v.extend_from_slice(device_digest);
     v
 }
 
-/// Commits, draws the MAC challenge, proves; returns the proof bytes.
-pub(crate) fn prove<R: RandomEngine>(
+/// The first phase's state: the transcript after the hash circuit's commitment, with that
+/// commitment and the hash circuit's witness. It holds the holder's secrets and the commitment's
+/// randomness, so it is used once (consumed by [`finish`]) and never copied.
+pub(crate) struct HashCommitted {
+    tp: Transcript,
+    wh: Vec<ElementOf<Gf2_128Field>>,
+    commit: ZkCommitResult<2, Gf2_128Field>,
+    geom: ZkProofGeometry,
+}
+
+/// Phase 1: starts the transcript and commits the hash circuit's private inputs. Needs no device
+/// signature.
+pub(crate) fn commit_hash<R: RandomEngine>(
     pv: &Prover,
     init: &[u8],
-    inputs: ProverInputs<'_>,
+    hash_private: &[u128],
+    rng: &mut R,
+) -> Result<HashCommitted, Error> {
+    let fl = Fields::new();
+    let mi_hash = Lch14InterpolatorFactory::new(&fl.gf2, &fl.sf_hash);
+    let ctx_hash = ZkContext { f: &fl.gf2, make_interpolator: &mi_hash };
+    let ch = &pv.hash.circuit;
+    if hash_private.len() != ch.raw.ninput - ch.raw.npublic_input {
+        return Err(Error::Internal("witness length"));
+    }
+    let wh = gf_elts(&fl.gf2, hash_private);
+    let mut tp = Transcript::new(init);
+    let (commit, geom) = pv.hash.commit(&wh, &ctx_hash, &mut tp, rng, &fl.sf_hash);
+    Ok(HashCommitted { tp, wh, commit, geom })
+}
+
+/// Phase 2: commits the signature circuit's private inputs, draws the MAC challenge, proves both
+/// circuits; returns the proof bytes. `publics` computes the public inputs and the tags from the
+/// challenge.
+pub(crate) fn finish<R: RandomEngine>(
+    pv: &Prover,
+    hc: HashCommitted,
+    sig_private: &[[u8; 32]],
+    publics: &dyn Fn(u128) -> (Vec<u128>, Vec<[u8; 32]>, [u128; 6]),
     rng: &mut R,
 ) -> Result<Vec<u8>, Error> {
     let fl = Fields::new();
@@ -176,21 +202,15 @@ pub(crate) fn prove<R: RandomEngine>(
     let ctx_sig = ZkContext { f: &fl.p256, make_interpolator: &mi_sig };
 
     let (ch, cs) = (&pv.hash.circuit, &pv.sig.circuit);
-    let nh = ch.raw.ninput - ch.raw.npublic_input;
-    let ns = cs.raw.ninput - cs.raw.npublic_input;
-    if inputs.hash_private.len() != nh || inputs.sig_private.len() != ns {
+    if sig_private.len() != cs.raw.ninput - cs.raw.npublic_input {
         return Err(Error::Internal("witness length"));
     }
-    let wh = gf_elts(&fl.gf2, &inputs.hash_private);
-    let ws = p_elts(&fl.p256, &inputs.sig_private)?;
-
-    let mut tp = Transcript::new(init);
-    let (prover_hash, prover_sig) = (&pv.hash, &pv.sig);
-    let (commit_hash, geom_hash) = prover_hash.commit(&wh, &ctx_hash, &mut tp, rng, &fl.sf_hash);
-    let (commit_sig, geom_sig) = prover_sig.commit(&ws, &ctx_sig, &mut tp, rng, &sf_sig);
+    let ws = p_elts(&fl.p256, sig_private)?;
+    let HashCommitted { mut tp, wh, commit: commit_hash, geom: geom_hash } = hc;
+    let (commit_sig, geom_sig) = pv.sig.commit(&ws, &ctx_sig, &mut tp, rng, &sf_sig);
 
     let challenge = tp.u128();
-    let (ph, ps, tags) = (inputs.publics)(challenge);
+    let (ph, ps, tags) = publics(challenge);
     if ph.len() != ch.raw.npublic_input - 1 || ps.len() != cs.raw.npublic_input - 1 {
         return Err(Error::Internal("public input length"));
     }
@@ -202,10 +222,12 @@ pub(crate) fn prove<R: RandomEngine>(
     let mut pub_sig = vec![one];
     pub_sig.extend_from_slice(&ps);
 
-    let proof_hash = prover_hash
+    let proof_hash = pv
+        .hash
         .prove(gf_elts(&fl.gf2, &pub_hash), wh, &commit_hash, &mut tp, &ctx_hash)
         .map_err(|_| Error::Unsatisfied)?;
-    let proof_sig = prover_sig
+    let proof_sig = pv
+        .sig
         .prove(p_elts(&fl.p256, &pub_sig)?, ws, &commit_sig, &mut tp, &ctx_sig)
         .map_err(|_| Error::Unsatisfied)?;
 

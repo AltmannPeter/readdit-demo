@@ -86,11 +86,12 @@ pub struct WitnessInput {
   pub birth_date: Option<String>,
 }
 
-/// What the prove step proves from: v0.4's two input vectors, or v0.5's request and holder
-/// material (the crate builds the witness inside its prove).
+/// What the prove step proves from: v0.4's two input vectors, or v0.5's first phase
+/// (`nym_auth_zk::Prebuilt`: the checks, the statement, the MAC keys, the hash circuit's witness and
+/// its commitment) and the device signature for the second.
 enum Body {
   V04 { witness: witness::Witness, transcript_seed: Vec<u8> },
-  V05 { request: v5::Request, credential: Vec<u8>, secret_seed: [u8; 16], birth_date: [u8; 10], device_signature: [u8; 64] },
+  V05 { prebuilt: v5::Prebuilt, device_signature: [u8; 64] },
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -99,6 +100,9 @@ pub struct WitnessData {
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
+  /// v0.5: the first phase's time (`prebuild`), which a wallet can run while the consent screen
+  /// is shown; part of witness_ms.
+  prebuild_ms: Option<f64>,
   /// The heap held before the witness step, and the most it held during it (measure::Heap).
   heap_base: usize,
   witness_high: usize,
@@ -142,8 +146,8 @@ pub fn circuit_info(sha256: &[u8; 32], v05_sha256: &[u8; 32]) -> Json {
       "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
     },
     {
-      "system_id": CIRCUIT_ID,
-      "proof_system": PROOF_SYSTEM,
+      "system_id": v05::circuit_id(),
+      "proof_system": v5::PROOF_SYSTEM,
       "rulebook": "0.5",
       "artifact": v05::ARTIFACT,
       "artifact_sha256": hex(v05_sha256),
@@ -233,14 +237,24 @@ impl Prover {
   pub fn witness(&self, input: &WitnessInput) -> Result<WitnessData, Refusal> {
     let t = Instant::now();
     let heap = Heap::start();
-    if input.system_id != CIRCUIT_ID {
-      return Err(Refusal::unsupported_circuit(format!("{} is not {CIRCUIT_ID}", input.system_id)));
-    }
+    // The circuit id names the circuits: v0.4's (circuits/mdoc, ssc) or v0.5's (nym-auth-zk, bsc),
+    // each read under its own rulebook version.
+    let v05_id = v05::circuit_id();
+    let (circuit_id, needs) = if input.system_id == CIRCUIT_ID {
+      (CIRCUIT_ID, Rulebook::V04)
+    } else if input.system_id == v05_id {
+      (v05_id.as_str(), Rulebook::V05)
+    } else {
+      return Err(Refusal::unsupported_circuit(format!("{} is neither {CIRCUIT_ID} nor {v05_id}", input.system_id)));
+    };
     // The time of the proof (proof_time), read first: v0.5 computes an age range's bounds from its date.
     let now = dates::now().map_err(Refusal::bad_request)?;
     let rulebook = Rulebook::parse(input.rulebook.as_deref())?;
+    if rulebook != needs {
+      return Err(Refusal::unsupported_circuit(format!("{circuit_id} reads requests of another rulebook version")));
+    }
     let s: Statement = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, Some(now.date))?;
-    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == CIRCUIT_ID))
+    if s.offered_ids.as_ref().is_some_and(|ids| !ids.iter().any(|id| id == circuit_id))
       || s.offered_systems.as_ref().is_some_and(|ps| !ps.iter().any(|p| p == PROOF_SYSTEM))
     {
       return Err(Refusal::unsupported_circuit("the request does not offer this circuit"));
@@ -325,6 +339,7 @@ impl Prover {
     });
     Ok(WitnessData {
       body: Body::V04 { witness: w, transcript_seed: s.session_transcript.clone() },
+      prebuild_ms: None,
       presentation: Presentation {
         system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
@@ -347,12 +362,11 @@ impl Prover {
     let t = Instant::now();
     let proved = match w.body {
       Body::V04 { witness, transcript_seed } => self.pair.prove(witness, &transcript_seed)?,
-      Body::V05 { request, credential, secret_seed, birth_date, device_signature } => {
-        let holder = v5::Holder { credential: &credential, secret_seed, birth_date };
+      Body::V05 { prebuilt, device_signature } => {
         let p = self
           .v5
           .side
-          .prove(&request, &holder, &device_signature, &mut runtime_random::SecureRandomEngine::new())
+          .prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new())
           .map_err(|e| format!("the v0.5 circuits: {e:?}"))?;
         let rest = p.proof.len().saturating_sub(96);
         let parts = json!([
@@ -368,15 +382,17 @@ impl Prover {
     // was held before the witness step (the witness itself stays held between the two).
     let heap_mb = mb(heap.high().max(w.witness_high).saturating_sub(w.heap_base));
     let proof_bytes = proved.proof.len();
+    let system_id = w.presentation.system_id.clone();
     let presentation = Presentation { proof: proved.proof, ..w.presentation }.encode()?;
     Ok(json!({
-      "system_id": CIRCUIT_ID,
+      "system_id": system_id,
       "presentation": crate::b64url(&presentation),
       "results": w.results,
       "metrics": {
         "load_ms": self.load_ms,
         "keys_mb": self.keys_mb,
         "witness_ms": w.witness_ms,
+        "prebuild_ms": w.prebuild_ms,
         "prove_ms": prove_ms,
         "total_ms": ((w.witness_ms + prove_ms) * 1e3).round() / 1e3,
         "heap_mb": heap_mb,
@@ -393,26 +409,20 @@ impl Prover {
 }
 
 impl Prover {
-  /// Step 2 under rulebook v0.5: the holder-side checks of the package's INTEGRATION.md §6, in
-  /// its order, so a refusal says why (`nym_auth_zk`'s prove refuses all of them too, without a
-  /// reason): the credential is the compact profile the circuits read, the issuer signature
-  /// verifies under the x5chain key, (secret_seed, birth_date) opens bsc, the device signature
-  /// verifies, validFrom <= proof_time <= validUntil (both inclusive), and the birth date lies in
-  /// [E, C] on the UTC date of proof_time.
+  /// Step 2 under rulebook v0.5 (the circuit `v05::circuit_id()`): the device signature, then the
+  /// crate's first phase, `prebuild`, which makes the holder-side checks with their reasons
+  /// (INTEGRATION.md §6: the issuer signature, the opening of bsc, validity at proof_time, the birth
+  /// date's form and range), builds the hash circuit's witness and commits it. A wallet can run
+  /// `prebuild` while the consent screen is shown, before the device signs; the demo phone signs
+  /// first, so this step checks the signature here for a refusal with its reason, and reports
+  /// `prebuild` apart (`prebuild_ms`, the Benchmark's "Prebuild (consent)").
   fn witness_v05(&self, input: &WitnessInput, s: &Statement, now: &dates::Time, t: Instant, heap: Heap) -> Result<WitnessData, Refusal> {
     let issuer_signed = unb64url("issuer_signed", &input.credential.issuer_signed).map_err(bad)?;
     let c = v05::credential(&issuer_signed).map_err(bad)?;
     let signer = x509::parse(&c.document_signer).map_err(|e| bad(format!("x5chain: {e}")))?;
-    verifying_key(&signer.key)
-      .and_then(|vk| ecdsa(&c.parsed.issuer_sig).and_then(|sig| vk.verify(&c.parsed.sig_structure, &sig).map_err(|e| e.to_string())))
-      .map_err(|e| bad(format!("the issuer signature does not verify under the Document Signer's key: {e}")))?;
     let seed: [u8; 16] = unhex("secret_seed", &input.secret_seed).map_err(bad)?;
     let birth_text = input.birth_date.as_deref().ok_or_else(|| bad("v0.5: birth_date is required (it opens bsc)"))?;
-    let birth = dates::date(birth_text).map_err(|e| bad(format!("birth_date: {e}")))?;
     let birth_date: [u8; 10] = birth_text.as_bytes().try_into().map_err(|_| bad("birth_date is not 10 bytes"))?;
-    if crate::sha256(&[&seed[..], &birth_date[..]].concat()) != c.parsed.bsc {
-      return Err(bad("secret_seed and birth_date do not open the credential's bsc"));
-    }
     let device: [u8; 64] = unhex("device_signature", &input.device_signature).map_err(bad)?;
     let device_key = PublicKey { x: c.parsed.device_x, y: c.parsed.device_y };
     verifying_key(&device_key)
@@ -421,21 +431,13 @@ impl Prover {
         vk.verify(&handover::device_message(&s.session_transcript, DOC_TYPE), &sig).map_err(|e| e.to_string())
       })
       .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))?;
-    let (now_s, from_s, until_s) = (dates::unix(now), dates::unix(&c.valid_from), dates::unix(&c.valid_until));
-    if !(from_s <= now_s && now_s <= until_s) {
-      return Err(Refusal::unsatisfiable(format!(
-        "the credential is valid from {} until {}, not at {}",
-        c.valid_from.text(),
-        c.valid_until.text(),
-        now.text()
-      )));
-    }
-    if !s.age.holds(&birth) {
-      return Err(Refusal::unsatisfiable("the birth date lies outside the requested range"));
-    }
     let request = bsc::request(&signer.key, &now.text(), &input.request, &input.credential_query_id, &input.handover).map_err(Refusal::bad_request)?;
     let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
-    let nym = v5::witness::pseudonym(&seed, &statement.verifier_input);
+    let holder = v5::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
+    let tp = Instant::now();
+    let prebuilt = self.v5.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()).map_err(|e| bsc::prover_refusal(&e))?;
+    let prebuild_ms = ms(tp);
+    let nym = prebuilt.pseudonym();
     let witness_ms = ms(t);
 
     let mut results = Map::new();
@@ -464,12 +466,12 @@ impl Prover {
       "results": results,
       "public_inputs": public,
       "counts": { "hash": { "public": 278 }, "signature": { "public": 1155 } },
-      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()) },
+      "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()) },
     });
     Ok(WitnessData {
-      body: Body::V05 { request, credential: issuer_signed, secret_seed: seed, birth_date, device_signature: device },
+      body: Body::V05 { prebuilt, device_signature: device },
       presentation: Presentation {
-        system_id: CIRCUIT_ID.into(),
+        system_id: v05::circuit_id(),
         proof: Vec::new(),
         issuer_key_set: vec![c.document_signer.clone()],
         proof_time: now.text(),
@@ -477,6 +479,7 @@ impl Prover {
       },
       results,
       witness_ms,
+      prebuild_ms: Some(prebuild_ms),
       heap_base: heap.base(),
       witness_high: heap.high(),
       summary,

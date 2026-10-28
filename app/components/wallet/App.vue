@@ -211,10 +211,7 @@ async function onScanned() {
 
 /** The request against the chosen credential: the request screen, or Requirement Not Met. */
 async function analyze() {
-  // The rulebook version the site runs: when both of the card's mdocs read the request, the demo
-  // wallet answers with that one (a real wallet holds one version).
-  const site = await $fetch<{ rulebook?: string }>('/api/wallet/capabilities').catch(() => null)
-  const picked = analyzeVersions(request.value!, current.value!, today.value, caps.value ?? { systemIds: [] }, site?.rulebook)
+  const picked = analyzeVersions(request.value!, current.value!, today.value, caps.value ?? { systemIds: [] })
   const cred = picked.credential
   answering.value = cred
   view.value = picked.view
@@ -306,6 +303,7 @@ async function onPin() {
       metrics.value = {
         ...metrics.value,
         witness_ms: out.witness_ms ?? out.metrics.witness_ms,
+        ...(out.metrics.prebuild_ms != null && { prebuild_ms: out.metrics.prebuild_ms }),
         prove_ms: out.metrics.prove_ms,
         proof_bytes: out.metrics.proof_bytes,
         presentation_bytes: out.metrics.presentation_bytes,

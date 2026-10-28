@@ -51,8 +51,12 @@ pub enum Error {
     Request(&'static str),
     /// The circuits cannot be loaded, or are not the expected ones.
     Circuit(&'static str),
-    /// The prover's inputs do not satisfy the statement (a wrong opening, an age outside the
-    /// range, an expired credential, a wrong signature...).
+    /// The holder's data does not satisfy the request, found by the checks before proving (a
+    /// wrong opening, a birth date outside the range, a credential not valid at proof_time, a
+    /// signature that does not verify). The reason is for the wallet's user, not the verifier.
+    Holder(&'static str),
+    /// The prover's inputs do not satisfy a circuit (what the checks before proving do not
+    /// cover).
     Unsatisfied,
     /// The proof does not verify.
     Proof(&'static str),
@@ -109,6 +113,21 @@ impl Request {
     }
 }
 
+/// The registry's system_id of the shipped circuits: `urn:circuits:sha256:` and the SHA-256 of
+/// the circuit archive file as shipped ([`zk::CIRCUITS`], the zstd-compressed LFA2 bytes).
+pub fn system_id() -> String {
+    use sha2::{Digest, Sha256};
+    let d = Sha256::digest(zk::CIRCUITS);
+    let mut s = String::from("urn:circuits:sha256:");
+    for b in d {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// The proof system of the registry entry (Google longfellow-zk 61a8a73, Ligero over sumcheck).
+pub const PROOF_SYSTEM: &str = "longfellow-libzk-v1";
+
 /// A presentation: the pseudonym (the statement's one output) and the proof bytes (Google's mdoc
 /// proof layout: six MAC tags, the hash circuit's proof, the signature circuit's proof).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,6 +146,7 @@ impl Prover {
     /// Proves the statement for `request` with the holder's credential and secrets and the
     /// device signature (r || s) over [`Prover::device_signed_bytes`]. `rng` must be a CSPRNG
     /// (Google's `SecureRandomEngine`): it draws the MAC keys and the commitments' randomness.
+    /// The same as [`Prover::prebuild`] then [`Prover::prove_prebuilt`].
     pub fn prove<R: RandomEngine>(
         &self,
         request: &Request,
@@ -134,37 +154,76 @@ impl Prover {
         device_signature: &[u8; 64],
         rng: &mut R,
     ) -> Result<Presentation, Error> {
+        let pre = self.prebuild(request, holder, rng)?;
+        self.prove_prebuilt(pre, device_signature, rng)
+    }
+
+    /// Phase 1, before the device signature (while the consent screen shows): parses the
+    /// credential, checks the holder's data against the request ([`Error::Holder`] with the
+    /// reason), computes the statement, draws the MAC keys, builds the hash circuit's witness and
+    /// commits it. This is most of the proving work.
+    ///
+    /// `request.proof_time` is fixed here: the verifier checks it against its clock within its
+    /// tolerance, so finish within that tolerance or prebuild again. The result holds the
+    /// holder's secrets and the commitment's randomness: it is consumed by
+    /// [`Prover::prove_prebuilt`], cannot be copied, and should be dropped if the user declines.
+    pub fn prebuild<R: RandomEngine>(&self, request: &Request, holder: &Holder, rng: &mut R) -> Result<Prebuilt, Error> {
         let st = request.statement()?;
         let parsed = mdoc::parse(holder.credential, &st.doc_type)?;
+        witness::holder_checks(&parsed, holder, &st)?;
         let mut keys = [0u128; 6];
         for k in keys.iter_mut() {
             *k = rng.u128();
         }
         let nym = witness::pseudonym(&holder.secret_seed, &st.verifier_input);
         let hash_private = witness::hash_private(&parsed, holder, &st, &keys);
+        let committed = zk::commit_hash(self, &zk::transcript_init(&st.device_digest), &hash_private, rng)?;
+        Ok(Prebuilt { st, parsed, keys, nym, committed })
+    }
+
+    /// Phase 2, after the device key has signed [`Prover::device_signed_bytes`] of the same
+    /// request: checks the signature ([`Error::Holder`]), builds the signature circuit's witness,
+    /// commits it, draws the MAC challenge and proves both circuits.
+    pub fn prove_prebuilt<R: RandomEngine>(
+        &self,
+        pre: Prebuilt,
+        device_signature: &[u8; 64],
+        rng: &mut R,
+    ) -> Result<Presentation, Error> {
+        let Prebuilt { st, parsed, keys, nym, committed } = pre;
+        witness::device_check(&parsed, &st, device_signature)?;
         let sig_private = witness::sig_private(&parsed, &st, device_signature, &keys);
         let publics = |c: u128| {
             let tags = witness::mac_tags(&parsed, &keys, c);
-            (
-                witness::hash_public(&st, &nym, c, &tags),
-                witness::sig_public(&st, c, &tags),
-                tags,
-            )
+            (witness::hash_public(&st, &nym, c, &tags), witness::sig_public(&st, c, &tags), tags)
         };
-        let proof = zk::prove(
-            self,
-            &zk::transcript_init(&st.device_digest),
-            zk::ProverInputs {
-                hash_private,
-                sig_private,
-                publics: &publics,
-            },
-            rng,
-        )?;
-        Ok(Presentation {
-            pseudonym: nym,
-            proof,
-        })
+        let proof = zk::finish(self, committed, &sig_private, &publics, rng)?;
+        Ok(Presentation { pseudonym: nym, proof })
+    }
+}
+
+/// A presentation's first phase ([`Prover::prebuild`]): the statement, the parsed credential, the
+/// MAC keys, the pseudonym, and the hash circuit's committed witness. It holds the holder's
+/// secrets: it is not `Clone`, `Debug` prints nothing of it, and [`Prover::prove_prebuilt`]
+/// consumes it.
+pub struct Prebuilt {
+    st: witness::Statement,
+    parsed: mdoc::Parsed,
+    keys: [u128; 6],
+    nym: [u8; 32],
+    committed: zk::HashCommitted,
+}
+
+impl Prebuilt {
+    /// The pseudonym the presentation will carry.
+    pub fn pseudonym(&self) -> [u8; 32] {
+        self.nym
+    }
+}
+
+impl std::fmt::Debug for Prebuilt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Prebuilt(..)")
     }
 }
 

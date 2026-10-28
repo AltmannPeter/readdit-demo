@@ -4,7 +4,8 @@
 //!
 //! 1. The SessionTranscript and the device message (B.2.6.1) are byte-identical on both sides.
 //! 2. The v0.5 range bounds agree (`dates::range_bounds` and `nym_auth_zk::AgeRange::bounds`).
-//! 3. End to end through `bsc.rs`: a Request Object and handover as the site holds them, the
+//! 3. The system_id is the archive's SHA-256.
+//! 4. End to end through `bsc.rs`: a Request Object and handover as the site holds them, the
 //!    issuer key from the Document Signer certificate, the device signature as `Prover::sign`
 //!    makes it, prove, encode as ZkpPresentation, decode, verify; and refusals for another nonce,
 //!    another client_id, another range and a tampered proof.
@@ -85,6 +86,12 @@ fn transcript_and_device_message_agree() {
 }
 
 #[test]
+fn system_id_is_the_archive_sha256() {
+  assert_eq!(bsc::system_id(), format!("urn:circuits:sha256:{}", hex::encode(bsc::archive_sha256())));
+  assert_eq!(bsc::system_id(), "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52");
+}
+
+#[test]
 fn range_bounds_agree() {
   let ranges = ["0-0", "13-17", "16-17", "18+", "13+", "17-", "12-", "25-64", "0+", "99-"];
   let days = ["2024-02-29", "2025-02-28", "2026-01-01", "2026-03-01", "2026-10-20", "2026-10-27", "2026-12-31", "2028-02-29"];
@@ -125,21 +132,23 @@ fn end_to_end_through_the_adapter() {
   let sig: Signature = device.sign(&v5::Prover::device_signed_bytes(&request));
   let sig: [u8; 64] = sig.to_bytes().into();
 
-  let archive = std::fs::read(format!("{}/../nym-auth-zk/circuits/{}", env!("CARGO_MANIFEST_DIR"), bsc::ARCHIVE)).expect("archive");
-  let prover = v5::Prover::new(bsc::circuits(&archive).expect("circuits"));
-  let verifier = v5::Verifier::new(bsc::circuits(&archive).expect("circuits"));
+  let prover = v5::Prover::new(bsc::circuits().expect("circuits"));
+  let verifier = v5::Verifier::new(bsc::circuits().expect("circuits"));
   let credential = bytes(&s(&v, &["issuer_signed_cbor"]));
   let holder = v5::Holder {
     credential: &credential,
     secret_seed: arr(&s(&v, &["holder_openings", "secret_seed"])),
     birth_date: s(&v, &["holder_openings", "birth_date"]).as_bytes().try_into().unwrap(),
   };
-  let p = prover.prove(&request, &holder, &sig, &mut SecureRandomEngine::new()).expect("prove");
+  // Two phases, as the wallet runs them: prebuild while consent shows, prove after the signature.
+  let rng = &mut SecureRandomEngine::new();
+  let pre = prover.prebuild(&request, &holder, rng).expect("prebuild");
+  let p = prover.prove_prebuilt(pre, &sig, rng).expect("prove");
   assert_eq!(hex::encode(p.pseudonym), s(&v, &["expected", "pseudonyms_sha256", "known-offender-matching-ssc"]));
 
   // The rulebook's ZkpPresentation, as the wallet sends it and the verifier reads it.
   let wire = Presentation {
-    system_id: "urn:circuits:longfellow:nym_auth:v1".into(),
+    system_id: bsc::system_id(),
     proof: p.proof.clone(),
     issuer_key_set: vec![signer.der.clone()],
     proof_time: proof_time.clone(),
@@ -172,9 +181,16 @@ fn end_to_end_through_the_adapter() {
   let mut tampered = got.clone();
   tampered.proof[200] ^= 1;
   assert!(verifier.verify(&request, &tampered).is_err());
-  // The prover refuses a range the birth date is outside of.
+  // The prover refuses a range the birth date is outside of, before proving, with its reason.
   let r18 = bsc::request(&signer.key, &proof_time, &ro4, "q", &h).unwrap();
-  assert!(prover.prove(&r18, &holder, &sig, &mut SecureRandomEngine::new()).is_err());
+  let e = prover.prebuild(&r18, &holder, &mut SecureRandomEngine::new()).unwrap_err();
+  assert_eq!(e, v5::Error::Holder("birth_date is outside the age range"));
+  assert_eq!(bsc::prover_refusal(&e).error, "unsatisfiable");
+  let mut wrong_seed = holder.secret_seed;
+  wrong_seed[0] ^= 1;
+  let h2 = v5::Holder { credential: &credential, secret_seed: wrong_seed, birth_date: holder.birth_date };
+  let e = prover.prebuild(&request, &h2, &mut SecureRandomEngine::new()).unwrap_err();
+  assert_eq!(bsc::prover_refusal(&e).error, "bad_credential", "{e:?}");
 }
 
 /// The package's golden redirect presentation verifies from the values the site holds: the
@@ -196,8 +212,7 @@ fn golden_presentation_from_the_site_values() {
   let d = dates::date_time(proof_time).expect("proof_time").date;
   statement_for(&ro, "q", &h, Rulebook::V05, Some(d)).expect("the site accepts the request");
   let signer = x509::parse(&bytes(r["issuer_cert_der"].as_str().unwrap())).expect("certificate");
-  let archive = std::fs::read(format!("{}/../nym-auth-zk/circuits/{}", env!("CARGO_MANIFEST_DIR"), bsc::ARCHIVE)).expect("archive");
-  let verifier = v5::Verifier::new(bsc::circuits(&archive).expect("circuits"));
+  let verifier = v5::Verifier::new(bsc::circuits().expect("circuits"));
   let pr = &g["presentation"];
   let presentation = v5::Presentation {
     pseudonym: arr(pr["pseudonym"].as_str().unwrap()),

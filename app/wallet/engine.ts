@@ -164,8 +164,8 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
   }
 
   const offer = req.client_metadata?.vp_formats_supported?.zkp_req ?? {}
-  // The registry as it holds under the version the request was read under (a system id can name
-  // other circuits in another version: Longfellow's v0.5 bsc circuits).
+  // The systems for the version the request was read under: the circuits that read this
+  // credential's version (each circuit id names one), and the schemes.
   const system = selectSystem({ offer, walletSystemIds: caps.systemIds, query: q, registry: registryFor(profile.rulebook.version) })
   if (!system) {
     return reject('no_circuit', `the request offers ${offer.system_id_values?.join(', ') || 'no system id'} for ${q.meta.source_format}; the wallet runs ${caps.systemIds.join(', ') || 'none'}`)
@@ -180,15 +180,13 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
 
 /**
  * The request against a card's credential in each version the holder has (the mdoc's v0.4 and
- * v0.5 credentials share a card): the one the request reads under, satisfiable or failing only on
- * the age; when both do (a request for the pseudonym only reads the same under both), the version
- * the site runs (`siteRulebook`, the demo's shortcut: a real wallet holds one). Else the first
- * version's refusal.
+ * v0.5 credentials share a card): the one with a circuit the request offers, satisfiable or
+ * failing only on the age. Each circuit reads one version's credential (its id names its archive),
+ * so the offered ids decide. Else the first version's refusal.
  */
-export function analyzeVersions(req: RequestObject, cred: CredentialView, today: string, caps: WalletCaps, siteRulebook?: string): { view: RequestView; credential: CredentialView } {
+export function analyzeVersions(req: RequestObject, cred: CredentialView, today: string, caps: WalletCaps): { view: RequestView; credential: CredentialView } {
   const tried = [cred, ...(cred.v05 ? [cred.v05] : [])].map((c) => ({ credential: c, view: analyzeRequest(req, c, today, caps) }))
-  const usable = tried.filter((t) => t.view.satisfiable || t.view.problem === 'age')
-  return usable.find((t) => t.credential.rulebook === siteRulebook) ?? usable[0] ?? tried[0]!
+  return tried.find((t) => t.view.satisfiable || t.view.problem === 'age') ?? tried[0]!
 }
 
 /** "13–17", "18+", "under 18": the age range in a request screen title. */

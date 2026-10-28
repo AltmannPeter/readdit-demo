@@ -2,8 +2,10 @@
 //! holds the same entry; the site offers the circuits only when the names and the order of the
 //! public inputs below, and the hash of the loaded `circuits.zst`, equal the registry's.
 
-/// The approved circuit's identifier: the LFC2 pair (hash circuit, signature circuit) for mdoc.
-pub const CIRCUIT_ID: &str = "urn:circuits:longfellow:nym_auth:v1";
+/// The approved circuits' identifier (rulebook v0.4): `urn:circuits:sha256:` and the SHA-256 of
+/// the archive as shipped, `circuits/mdoc/circuits.zst` (the LFC2 pair, hash circuit and signature
+/// circuit, for mdoc). The v0.5 circuits have their own ([`crate::v05::circuit_id`]).
+pub const CIRCUIT_ID: &str = "urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b";
 
 /// The proof system: Google longfellow-zk `61a8a73`, Ligero over sumcheck (libzk), Rust runtime.
 pub const PROOF_SYSTEM: &str = "longfellow-libzk-v1";
@@ -42,6 +44,12 @@ pub const ARTIFACT: &str = "circuits.zst";
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn circuit_id_is_the_archive_hash() {
+    let file = std::fs::read(format!("{}/../circuits/mdoc/{ARTIFACT}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    assert_eq!(CIRCUIT_ID, format!("urn:circuits:sha256:{}", crate::hex(&crate::sha256(&file))));
+  }
 
   #[test]
   fn public_inputs_fill_the_public_slots() {

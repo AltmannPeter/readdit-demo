@@ -46,12 +46,14 @@ export interface CircuitEntry {
   public_inputs: PublicInput[]
   /** The circuit as data, pinned by hash: the services must report the same. */
   artifact?: { name: string; sha256: string }
-  /** The rulebook version this entry describes (the demo profile's `rulebook.version`). */
-  rulebook?: string
-  /** The same system id under a later rulebook version, with its own circuits: what differs from
-   *  this entry (the v0.4 one). `registryFor(version)` and `findCircuit(id, version)` apply it. */
-  byRulebook?: Record<string, Pick<CircuitEntry, 'profile' | 'functions' | 'public_inputs' | 'artifact'> & { label?: string }>
+  /** The rulebook version whose credential and requests the circuit reads (a demo profile's
+   *  `rulebook.version`): v0.4 (birth_date, ssc) or v0.5 (bsc). */
+  rulebook: string
 }
+
+/** A circuit's id (Peter, 2026-10-28): `urn:circuits:sha256:` and the SHA-256 of its archive as
+ *  shipped, so each set of circuits has its own id. */
+export const circuitId = (archiveSha256: string) => `urn:circuits:sha256:${archiveSha256}`
 
 // Vega nym_auth (nym-auth-circuits, SPEC.md V3.2): 18 core public values in this order.
 const VEGA_PUBLIC_INPUTS: PublicInput[] = [
@@ -81,7 +83,7 @@ const LONGFELLOW_PUBLIC_INPUTS: PublicInput[] = [
 ]
 
 // Longfellow nym_auth under rulebook v0.5: the nym-auth-zk bsc circuits (Peter's package
-// nym-auth-longfellow-v1, INTEGRATION.md §7), the same system id. Hash circuit 277 + 1 = 278 public
+// nym-auth-longfellow v1.1, INTEGRATION.md §7), with their own id. Hash circuit 277 + 1 = 278 public
 // slots, signature circuit 1154 + 1 = 1155; values = elements in both, circuit order.
 const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'doctype', source: 'verifier', values: 8, derivation: 'the pattern 67 "docType" 78 1c and the docType eu.europa.ec.eudi.nym_auth.1: two 16-byte limbs, then 6 byte elements (hash circuit)' },
@@ -98,7 +100,7 @@ const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
 
 export const CIRCUIT_REGISTRY: CircuitEntry[] = [
   {
-    system_id: 'urn:circuits:vega:nym_auth:v1',
+    system_id: circuitId('b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'),
     proof_system: 'vega-v1',
     label: 'Vega nym_auth v1',
     source_format: 'mso_mdoc',
@@ -112,9 +114,27 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     checks_validity: true,
     public_inputs: VEGA_PUBLIC_INPUTS,
     artifact: { name: 'shapes.zst', sha256: 'b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df' },
+    rulebook: '0.4',
   },
   {
-    system_id: 'urn:circuits:longfellow:nym_auth:v1',
+    system_id: circuitId('f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v1 (bsc)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'compact',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_V05_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_bsc.lfa2.zst', sha256: 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52' },
+    rulebook: '0.5',
+  },
+  {
+    system_id: circuitId('6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'),
     proof_system: 'longfellow-libzk-v1',
     label: 'Longfellow nym_auth v1',
     source_format: 'mso_mdoc',
@@ -129,33 +149,11 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     public_inputs: LONGFELLOW_PUBLIC_INPUTS,
     artifact: { name: 'circuits.zst', sha256: '6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b' },
     rulebook: '0.4',
-    byRulebook: {
-      '0.5': {
-        label: 'Longfellow nym_auth v1 (bsc)',
-        profile: 'compact',
-        functions: {
-          pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
-          age_check: { params: ['range'] },
-        },
-        public_inputs: LONGFELLOW_V05_PUBLIC_INPUTS,
-        artifact: { name: 'nym_auth_mdoc_bsc.lfa2.zst', sha256: 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52' },
-      },
-    },
   },
 ]
 
-/** A circuit entry as it holds under rulebook `version` (absent: the entry as written, v0.4). */
-function forRulebook(c: CircuitEntry, version?: string): CircuitEntry {
-  const v = version ? c.byRulebook?.[version] : undefined
-  if (!v) return c
-  const { byRulebook: _, ...base } = c
-  return { ...base, ...v, label: v.label ?? c.label, rulebook: version }
-}
-
-/** The circuit `id`, under rulebook `version` when given. */
-export function findCircuit(id: string, version?: string): CircuitEntry | undefined {
-  const c = CIRCUIT_REGISTRY.find((x) => x.system_id === id)
-  return c && forRulebook(c, version)
+export function findCircuit(id: string): CircuitEntry | undefined {
+  return CIRCUIT_REGISTRY.find((x) => x.system_id === id)
 }
 
 // ---- bbs_cd: schemes (rulebook v0.4, "BBS committed-disclosure encoding"; docs/bbs_cd.md) ----
@@ -221,14 +219,14 @@ export type SystemEntry = CircuitEntry | SchemeEntry
 /** Every approved system, in the order of preference: Vega, Longfellow, BBS. */
 export const SYSTEM_REGISTRY: SystemEntry[] = [...CIRCUIT_REGISTRY, ...SCHEME_REGISTRY]
 
-export function findSystem(id: string, version?: string): SystemEntry | undefined {
-  const e = SYSTEM_REGISTRY.find((s) => s.system_id === id)
-  return e && e.source_format === 'mso_mdoc' ? forRulebook(e, version) : e
+export function findSystem(id: string): SystemEntry | undefined {
+  return SYSTEM_REGISTRY.find((s) => s.system_id === id)
 }
 
-/** Every approved system as it holds under rulebook `version` (the demo profile's). */
+/** The approved systems for rulebook `version` (a demo profile's): the circuits that read its
+ *  credential and requests, and the schemes (BBS reads both versions). */
 export function registryFor(version?: string): SystemEntry[] {
-  return SYSTEM_REGISTRY.map((e) => (e.source_format === 'mso_mdoc' ? forRulebook(e, version) : e))
+  return SYSTEM_REGISTRY.filter((e) => e.source_format !== 'mso_mdoc' || !version || e.rulebook === version)
 }
 
 /** The type value a system is for: the doctype (mso_mdoc) or the schema id (bbs_cd). */

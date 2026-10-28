@@ -4,7 +4,7 @@
 //! same circuits). Each proves and verifies with a device signature made here, the pseudonym is
 //! SHA-256(DST || secret_seed || 0^32 || verifier_input), and the age edges hold or fail exactly.
 
-use nym_auth_zk::{AgeRange, Holder, Prover, Request, Session, Verifier};
+use nym_auth_zk::{AgeRange, Error, Holder, Prover, Request, Session, Verifier};
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
 use runtime_random::SecureRandomEngine;
@@ -68,6 +68,9 @@ fn synthetic_holders() {
         let sig: [u8; 64] = sig.to_bytes().into();
         let got = prover.prove(&r, &holder, &sig, &mut SecureRandomEngine::new());
         assert_eq!(got.is_ok(), holds, "holder {h} at {t} range {range:?}: {got:?}");
+        if !holds {
+            assert_eq!(got.as_ref().err(), Some(&Error::Holder("birth_date is outside the age range")));
+        }
         if let Ok(p) = got {
             verifier.verify(&r, &p).unwrap();
             let vi = Sha256::digest(b"x509_san_dns:verifier.example");

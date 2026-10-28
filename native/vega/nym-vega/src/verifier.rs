@@ -148,6 +148,11 @@ impl Verifier {
     }
     // v0.5: an age range's bounds come from the UTC date of proof_time (checked against the clock in 3.).
     let rulebook = Rulebook::parse(input.rulebook.as_deref()).map_err(|r| refuse("request", r.detail))?;
+    // Rulebook v0.4: `results` holds at least one entry ({ + tstr => ResultValue }); v0.5 allows it
+    // empty, and step 4 refuses a missing handle (`results`).
+    if rulebook == Rulebook::V04 && p.results.is_empty() {
+      return Err(refuse("presentation", "presentation: results is empty"));
+    }
     let date = match rulebook {
       Rulebook::V04 => None,
       Rulebook::V05 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),

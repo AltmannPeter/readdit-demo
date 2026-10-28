@@ -54,20 +54,43 @@ let request = Request {
     session: Session::DcApi { origin, nonce, jwk_thumbprint },  // or Session::Redirect {..}
 };
 
-// Wallet
+// Wallet, in two phases
 let prover = Prover::load()?;
-let to_sign = Prover::device_signed_bytes(&request);         // the device key signs this (ES256)
 let holder = Holder { credential: &issuer_signed_cbor, secret_seed, birth_date: *b"2010-05-17" };
-let presentation = prover.prove(&request, &holder, &device_signature_r_s, &mut SecureRandomEngine::new())?;
+let pre = prover.prebuild(&request, &holder, &mut rng)?;      // during consent: checks, hash circuit committed
+let to_sign = Prover::device_signed_bytes(&request);         // after the PIN, the device key signs this (ES256)
+let presentation = prover.prove_prebuilt(pre, &device_signature_r_s, &mut rng)?;
+// or in one call: prover.prove(&request, &holder, &device_signature_r_s, &mut rng)?
 
 // Verifier: every public value comes from its own request, plus the presentation's pseudonym.
 let verifier = Verifier::load()?;
 verifier.verify(&request, &presentation)?;
+
+// The registry's system_id: urn:circuits:sha256:<SHA-256 of circuits/nym_auth_mdoc_bsc.lfa2.zst>
+assert_eq!(nym_auth_zk::system_id(), "urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52");
 ```
 
 `Prover::load` and `Verifier::load` decompress the shipped archive and check each circuit against
 its Longfellow id. Build them once and reuse them. A prover needs only `Prover` and a verifier
 only `Verifier`.
+
+`rng` is `runtime_random::SecureRandomEngine` (the OS CSPRNG).
+
+`prebuild` does everything that needs no device signature:
+
+- it parses the credential;
+- it checks the holder's data against the request, and refuses with `Error::Holder(reason)` when
+  the issuer signature, the opening of `bsc`, the validity at `proof_time` or the age range does
+  not hold;
+- it draws the MAC keys, builds the hash circuit's witness and commits it.
+
+That is about a fifth of the proving time (§ Soundness and performance). `prove_prebuilt` checks
+the device signature (`Error::Holder`), then commits the signature circuit, draws the MAC challenge
+and proves both circuits. These steps must follow the signature: the challenge comes after both
+commitments.
+
+`proof_time` is fixed at `prebuild`, so finish within the verifier's tolerance. `Prebuilt` holds
+the holder's secrets. It is `Send`, not `Clone`, and is consumed by `prove_prebuilt`.
 
 ## Files
 
@@ -83,6 +106,7 @@ only `Verifier`.
 | `src/zk.rs` | circuit loading; commit, challenge, prove and verify on Google's runtime |
 | `tests/vectors.rs` | end to end on the rulebook's test vectors (`tests/data`) |
 | `tests/synthetic.rs` | three more holders (`tests/data/synthetic`, TEST ONLY): a birthday edge, 29 February, no `psc` |
+| `tests/two_phase.rs` | the two-phase prover, its refusals, `system_id` |
 | `tests/golden.rs`, `tests/golden/` | fixed presentations every verifier must accept (written by `examples/golden.rs`) |
 | `examples/bench.rs` | timings |
 
@@ -199,9 +223,9 @@ Single thread, cloud Xeon @ 2.1 GHz, `target-cpu=native` (copy `cargo-config.tom
 
 | | |
 |---|---:|
-| circuit load (each side) | ~70–80 ms |
-| prove (witness, commit, both proofs) | ~250–280 ms |
-| verify | ~120–140 ms |
+| circuit load (each side) | ~55–80 ms |
+| prove (witness, commit, both proofs) | ~200–280 ms, of which `prebuild` ~40 ms |
+| verify | ~100–140 ms |
 | proof | ~323 KB (+ 32 B pseudonym) |
 
 A generic x86-64 build, without the carry-less multiply, is about 5× slower.
@@ -215,13 +239,17 @@ A generic x86-64 build, without the carry-less multiply, is about 5× slower.
 - **Refused by the verifier:**
   - a tampered proof or pseudonym;
   - another verifier_id, age range, proof_time, issuer key or session.
-- **Refused by the prover:**
+- **Refused by the prover** (`Error::Holder`, with the reason):
   - a wrong birth_date or secret_seed;
   - a wrong device signature;
-  - a proof_time outside the validity.
+  - a proof_time outside the validity;
+  - an age outside the range;
+  - another issuer key.
 - **Validity bounds:** they are inclusive.
 - **Unlinkability:** two presentations share no commitment.
 - **Other holders** (`tests/synthetic.rs`): the age edges on a birthday and on 29 February, and a
   credential without `psc`.
+- **Two phases** (`tests/two_phase.rs`): `prebuild` then `prove_prebuilt` verify, across threads;
+  each phase refuses with its reason; `system_id` is the archive's SHA-256.
 - **Golden presentations** (`tests/golden.rs`): the shipped proofs verify, and fail for any other
   verifier_id, proof_time, age range or pseudonym.

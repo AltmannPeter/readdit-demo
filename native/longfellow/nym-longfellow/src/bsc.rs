@@ -11,12 +11,22 @@ use crate::handover::Handover;
 use crate::request::RequestObject;
 use crate::x509::PublicKey;
 
-/// The archive file under `circuits/mdoc-bsc/`; the registry pins its SHA-256.
-pub const ARCHIVE: &str = "nym_auth_mdoc_bsc.lfa2.zst";
+/// The circuits are the archive compiled into `nym-auth-zk` (`nym_auth_zk::zk::CIRCUITS`, the
+/// file `nym-auth-zk/circuits/nym_auth_mdoc_bsc.lfa2.zst` byte for byte). Their system_id is
+/// `urn:circuits:sha256:` and that archive's SHA-256 ([`system_id`]); re-compressing the archive
+/// would change it.
+pub fn system_id() -> String {
+  v5::system_id()
+}
 
-/// The circuits from the archive's bytes (each circuit checked against its Longfellow id).
-pub fn circuits(archive: &[u8]) -> Result<v5::Circuits, String> {
-  v5::Circuits::from_archive(archive).map_err(|e| format!("{e:?}"))
+/// The archive's SHA-256, as the registry's `artifact.sha256` and the services' `info` report it.
+pub fn archive_sha256() -> [u8; 32] {
+  crate::sha256(v5::zk::CIRCUITS)
+}
+
+/// The circuits, each checked against its Longfellow id.
+pub fn circuits() -> Result<v5::Circuits, String> {
+  v5::Circuits::load().map_err(|e| format!("{e:?}"))
 }
 
 /// The session the device signature binds. Community invokes the wallet by QR code, so
@@ -56,6 +66,23 @@ pub fn request(
     verifier_id: request.client_id.clone(),
     session: session(handover)?,
   })
+}
+
+/// The prover's refusal for a `nym_auth_zk::Error` from `prebuild` or `prove_prebuilt`. Of the
+/// `Holder` reasons, a birth date outside the range and a credential not valid at proof_time are
+/// predicates that do not hold (`unsatisfiable`: the wallet answers `access_denied`); the others
+/// (issuer or device signature, the opening of bsc, the birth date's form) are inconsistent holder
+/// material (`bad_credential`), as is a credential the circuits cannot read.
+pub fn prover_refusal(e: &v5::Error) -> crate::error::Refusal {
+  use crate::error::Refusal;
+  match e {
+    v5::Error::Holder(m @ ("birth_date is outside the age range" | "the credential is not valid at proof_time")) => {
+      Refusal::unsatisfiable(*m)
+    }
+    v5::Error::Holder(m) | v5::Error::Credential(m) => Refusal::bad_credential(*m),
+    v5::Error::Request(m) => Refusal::bad_request(*m),
+    other => Refusal::bad_request(format!("{other:?}")),
+  }
 }
 
 /// Which circuit a `nym_auth_zk::Error::Proof` names, for the verifier's `proof_invalid.input`

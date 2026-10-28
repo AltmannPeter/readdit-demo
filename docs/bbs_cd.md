@@ -71,7 +71,7 @@ circuits and schemes together, Vega first:
 
 ```json
 { "zkp_req": { "proof_system_values": ["vega-v1", "bbs-cd-plugins-v0.1"],
-               "system_id_values": ["urn:circuits:vega:nym_auth:v1", "urn:mms:bbs-cd:nym_auth:v1"] } }
+               "system_id_values": ["urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df", "urn:mms:bbs-cd:nym_auth:v1"] } }
 ```
 
 The phone's `wallet_metadata` lists the systems for the credentials on that phone, and the site

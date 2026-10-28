@@ -109,6 +109,72 @@ fn digits_value(text: &[u8]) -> u64 {
     v
 }
 
+/// The value of a date or date-time's digit characters (YYYY-MM-DD or YYYY-MM-DDThh:mm:ss…),
+/// or None when a digit place holds another character.
+fn digits_number(text: &[u8]) -> Option<u64> {
+    let mut v = 0u64;
+    for (i, &c) in text.iter().enumerate() {
+        let sep = i >= 4 && (i - 4) % 3 == 0;
+        if !sep {
+            if !c.is_ascii_digit() {
+                return None;
+            }
+            v = v * 10 + u64::from(c - b'0');
+        }
+    }
+    Some(v)
+}
+
+fn verifying_key(x: &[u8; 32], y: &[u8; 32]) -> Option<p256::ecdsa::VerifyingKey> {
+    let point = p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
+    p256::ecdsa::VerifyingKey::from_encoded_point(&point).ok()
+}
+
+/// The holder-side facts of the statement, checked off-circuit so that a refusal names its
+/// reason before any proving: the issuer signature under the request's issuer key, the opening
+/// of bsc, validity at proof_time (both bounds inclusive), the birth date within [E, C]. The
+/// circuits check each of them again.
+pub fn holder_checks(p: &Parsed, holder: &Holder, st: &Statement) -> Result<(), crate::Error> {
+    use p256::ecdsa::signature::Verifier as _;
+    use sha2::{Digest, Sha256};
+    use crate::Error::Holder as refuse;
+    let vk = verifying_key(&st.issuer_x, &st.issuer_y).ok_or(refuse("the issuer key is not a P-256 point"))?;
+    let sig = p256::ecdsa::Signature::from_slice(&p.issuer_sig).map_err(|_| refuse("the issuer signature is malformed"))?;
+    vk.verify(&p.sig_structure, &sig)
+        .map_err(|_| refuse("the issuer signature does not verify under the issuer key"))?;
+    let mut opening = [0u8; 26];
+    opening[..16].copy_from_slice(&holder.secret_seed);
+    opening[16..].copy_from_slice(&holder.birth_date);
+    if <[u8; 32]>::from(Sha256::digest(opening)) != p.bsc {
+        return Err(refuse("secret_seed and birth_date do not open bsc"));
+    }
+    let ss = &p.sig_structure;
+    let from = digits_number(&ss[p.valid_from_at + 12..p.valid_from_at + 32]);
+    let until = digits_number(&ss[p.valid_until_at + 13..p.valid_until_at + 33]);
+    match (from, until) {
+        (Some(f), Some(u)) if f <= st.now && st.now <= u => {}
+        (Some(_), Some(_)) => return Err(refuse("the credential is not valid at proof_time")),
+        _ => return Err(refuse("the credential's validity is not a date-time")),
+    }
+    let b = &holder.birth_date;
+    let birth = (b[4] == b'-' && b[7] == b'-').then(|| digits_number(b)).flatten().ok_or(refuse("birth_date is not YYYY-MM-DD"))?;
+    if birth < st.born_from || birth > st.born_by {
+        return Err(refuse("birth_date is outside the age range"));
+    }
+    Ok(())
+}
+
+/// The device signature (r || s) over the session's device-signed bytes, under the credential's
+/// device key.
+pub fn device_check(p: &Parsed, st: &Statement, device_sig: &[u8; 64]) -> Result<(), crate::Error> {
+    use p256::ecdsa::signature::hazmat::PrehashVerifier as _;
+    use crate::Error::Holder as refuse;
+    let vk = verifying_key(&p.device_x, &p.device_y).ok_or(refuse("the device key is not a P-256 point"))?;
+    let sig = p256::ecdsa::Signature::from_slice(device_sig).map_err(|_| refuse("the device signature is malformed"))?;
+    vk.verify_prehash(&st.device_digest, &sig)
+        .map_err(|_| refuse("the device signature does not verify under the credential's device key"))
+}
+
 /// The MAC datum the two circuits share: e (the SHA-256 digest of the Sig_structure, as a
 /// 32-byte integer), then the device key's x and y, each 32 bytes little-endian; six words of 16
 /// bytes.

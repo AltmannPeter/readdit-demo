@@ -40,6 +40,8 @@ export interface Measurement {
     total_ms: number | null
     sign_ms: number | null
     witness_ms: number | null
+    /** Longfellow v0.5: the prebuild phase (part of witness_ms); absent before 2026-10-28. */
+    prebuild_ms?: number | null
     prove_ms: number | null
     proof_bytes: number | null
     presentation_bytes: number | null
@@ -140,7 +142,12 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
   const v = verify ?? {}
   const proveSteps =
     format === 'mso_mdoc'
-      ? steps([['Device signature', sign], ['Witness', pm.witness_ms], ['Proof', pm.prove_ms]], total)
+      ? // Longfellow v0.5: the crate's first phase (prebuild: checks, statement, the hash circuit's
+        // witness and commitment), which a wallet can run during the consent screen, before the
+        // device signs; the rest of the witness step (the device signature's check) is Other.
+        num(pm.prebuild_ms) != null
+        ? steps([['Prebuild (consent)', pm.prebuild_ms], ['Device signature', sign], ['Proof', pm.prove_ms]], total)
+        : steps([['Device signature', sign], ['Witness', pm.witness_ms], ['Proof', pm.prove_ms]], total)
       : steps([['Commitments and ecdsa-pop setup', pm.offline_ms], ['BBS proof', pm.bbs_ms], ['ecdsa-pop', pm.ecdsa_pop_ms], ['Pseudonym', pm.pseudonym_ms], ['Date range', pm.date_range_ms]], total)
   const verifySteps =
     format === 'mso_mdoc'
@@ -157,6 +164,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
       total_ms: total,
       sign_ms: sign,
       witness_ms: num(pm.witness_ms),
+      prebuild_ms: num(pm.prebuild_ms),
       prove_ms: num(pm.prove_ms),
       proof_bytes: num(pm.proof_bytes),
       presentation_bytes: num(pm.presentation_bytes),

@@ -4,8 +4,9 @@
 
 use vega_age::table::{FULL_MDOC, Layout};
 
-/// The approved circuit's identifier.
-pub const CIRCUIT_ID: &str = "urn:circuits:vega:nym_auth:v1";
+/// The approved circuit's identifier: `urn:circuits:sha256:` and the SHA-256 of the archive as
+/// shipped, `circuits/mdoc/shapes.zst`.
+pub const CIRCUIT_ID: &str = "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df";
 
 /// The proof system: Microsoft vega-prover `c0ee259`, `VegaMcZkSNARK` over `T256HyraxEngine`.
 pub const PROOF_SYSTEM: &str = "vega-v1";
@@ -55,4 +56,13 @@ pub fn input_at(index: usize) -> Option<&'static str> {
     start += count;
   }
   None
+}
+
+#[cfg(test)]
+mod tests {
+  #[test]
+  fn circuit_id_is_the_archive_hash() {
+    let file = std::fs::read(format!("{}/../circuits/mdoc/shapes.zst", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    assert_eq!(super::CIRCUIT_ID, format!("urn:circuits:sha256:{}", crate::hex(&vega_age::table::sha256(&file))));
+  }
 }

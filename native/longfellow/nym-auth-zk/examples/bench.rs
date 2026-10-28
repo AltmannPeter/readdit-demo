@@ -56,12 +56,17 @@ fn main() {
     let load_v = t.elapsed();
     println!("load: prover {load_p:.1?}, verifier {load_v:.1?}");
     for _ in 0..reps {
+        let rng = &mut SecureRandomEngine::new();
         let t = Instant::now();
-        let pres = prover.prove(&request, &holder, &sig, &mut SecureRandomEngine::new()).unwrap();
-        let tp = t.elapsed();
+        let pre = prover.prebuild(&request, &holder, rng).unwrap();
+        let t1 = t.elapsed();
+        let t = Instant::now();
+        let pres = prover.prove_prebuilt(pre, &sig, rng).unwrap();
+        let t2 = t.elapsed();
+        let tp = t1 + t2;
         let t = Instant::now();
         verifier.verify(&request, &pres).unwrap();
         let tv = t.elapsed();
-        println!("prove {tp:.1?}  verify {tv:.1?}  proof {} bytes (+32 pseudonym)", pres.proof.len());
+        println!("prove {tp:.1?} (prebuild {t1:.1?} + after signature {t2:.1?})  verify {tv:.1?}  proof {} bytes (+32 pseudonym)", pres.proof.len());
     }
 }

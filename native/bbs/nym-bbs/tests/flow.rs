@@ -148,7 +148,7 @@ fn prove_verify_and_refusals() {
   two.issuer_key_set.push(two.issuer_key_set[0].clone());
   assert_eq!(verify(&verifier, &req, &encode(&two))["code"], "issuer_key_set");
   let mut system = zkp.clone();
-  system.system_id = "urn:circuits:vega:nym_auth:v1".into();
+  system.system_id = "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df".into();
   assert_eq!(verify(&verifier, &req, &encode(&system))["code"], "scheme");
 
   // A request that does not offer the scheme.

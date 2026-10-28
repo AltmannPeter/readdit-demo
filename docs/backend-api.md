@@ -82,7 +82,7 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Community can accept, comma-separated, in preference order |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Longfellow v0.5, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
 | `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Community can accept |
@@ -92,7 +92,7 @@ Configuration (Nuxt runtime config, environment variables):
 
 | Item | Value |
 | --- | --- |
-| Circuit id | `urn:circuits:vega:nym_auth:v1` |
+| Circuit id | `urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df`: `urn:circuits:sha256:` and the SHA-256 of `shapes.zst` as shipped (Peter, 2026-10-28: every circuit's id is its archive's hash; was `urn:circuits:vega:nym_auth:v1`) |
 | Proof system | `vega-v1`: Microsoft vega-prover `c0ee259`, `VegaMcZkSNARK` over `T256HyraxEngine` |
 | Circuits | nym-auth-circuits `vega-age` (vendored unchanged, `native/vega/VENDOR-SHA256SUMS`): 32 step instances and one core, layout `FULL_MDOC` |
 | Statement | the nym_auth mdoc: issuer signature (ES256), docType, birth date in [E, C], validity at T, device signature on e2, `SHA-256(secret_seed) = ssc`, the `pseudonym` function with `prf` `sha-256` and `known-offender-matching-ssc` |
@@ -177,7 +177,7 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
   "version": "0.1.0",
   "stub": false,
   "circuits": [{
-    "system_id": "urn:circuits:vega:nym_auth:v1",
+    "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
     "proof_system": "vega-v1",
     "shapes_sha256": "b457ba53…",
     "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "birth_date.identifier", "pseudonym.verifier_input", "results.nym"]
@@ -215,7 +215,7 @@ it does not know (such as a `pin`) is ignored.
 
 ```json
 {
-  "system_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
   "credential_query_id": "nym_attestation",
   "request": { "…": "decoded Request Object" },
   "handover": { "…": "as above" },
@@ -255,7 +255,7 @@ Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Wit
 ```json
 {
   "ok": true,
-  "system_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
   "presentation": "<base64url CBOR>",
   "results": { "nym": "<hex32>", "age": true },
   "metrics": {
@@ -305,7 +305,7 @@ Prover refusals:
 ```
 
 ```json
-{ "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true }, "bounds": { "ge": "2008-10-14", "le": "2013-10-13" },
+{ "ok": true, "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df", "results": { "nym": "<hex32>", "age": true }, "bounds": { "ge": "2008-10-14", "le": "2013-10-13" },
   "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "keys_mb": 40.5, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
 ```
 
@@ -338,7 +338,7 @@ these differences.
 
 | Item | Value |
 | --- | --- |
-| Circuit id | `urn:circuits:longfellow:nym_auth:v1` |
+| Circuit id | `urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b`, the SHA-256 of `circuits.zst` (rulebook v0.4; was `urn:circuits:longfellow:nym_auth:v1`). The v0.5 circuits have their own (below) |
 | Proof system | `longfellow-libzk-v1`: google/longfellow-zk `61a8a73`, Rust runtime; Ligero (rate 1/7, 132 columns) over sumcheck. The 11 runtime crates are vendored unchanged in `native/longfellow/vendor/longfellow-zk` (`native/longfellow/VENDOR-SHA256SUMS`) |
 | Circuits | rulebook v0.4: the nym-auth-circuits archive's `longfellow/mdoc`, unchanged (v0.5: below): an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
@@ -389,14 +389,16 @@ There is no `public_input` code.
 
 ### Rulebook v0.5: the bsc circuits
 
-Under `"rulebook": "0.5"` the same circuit id runs other circuits: `nym-auth-zk` (Peter's package
-`nym-auth-longfellow-v1`, revision 2 of the bsc baseline), delivered as is in
-`native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the same vendored runtime.
-Both addon objects load them next to the v0.4 circuits (the archive is compiled into the crate,
-from `nym-auth-zk/circuits/nym_auth_mdoc_bsc.lfa2.zst`), and `info.circuits` lists the circuit once
-per version: `{ system_id, proof_system, rulebook: "0.4" | "0.5", artifact, artifact_sha256,
-public_inputs }`. The site takes the entry of the demo profile's version (`shared/registry/circuits.ts`,
-`byRulebook`; `server/utils/vp.ts`).
+Circuit `urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52` (the SHA-256 of `nym_auth_mdoc_bsc.lfa2.zst`, `nym_auth_zk::system_id()`) is
+`nym-auth-zk` 0.2.0 (Peter's package `nym-auth-longfellow` v1.1, revision 2 of the bsc baseline),
+delivered as is in `native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the same
+vendored runtime. It reads rulebook v0.5 requests and credentials. Both addon objects load it next
+to the v0.4 circuits (the archive compiled into the crate), and `info.circuits` lists both, each
+under its own id with `rulebook: "0.4" | "0.5"`, `artifact`, `artifact_sha256` and
+`public_inputs`. The circuit id in the witness input and in the presentation picks the circuits; an
+id with a request of the other version is refused (`unsupported_circuit`, verifier `circuit`). The
+site offers the circuits of the demo profile's version (`shared/registry/circuits.ts` `rulebook`,
+`server/utils/vp.ts`).
 
 | Item | Value |
 | --- | --- |
@@ -412,18 +414,29 @@ Public inputs in circuit order: `doctype` 8, `proof_time` 2, `pseudonym.verifier
 from `nym_auth_zk::Request`, which `nym-longfellow/src/bsc.rs` (the package's adapter) builds from
 the request, the handover and the certificate's key; nothing else is passed to it.
 
-**Prover.** `witness` takes `birth_date` (`YYYY-MM-DD`) besides `secret_seed`, and makes the
-holder-side checks in the package's order (INTEGRATION.md §6): the credential parses as the compact
-profile (`bad_credential`, also for a v0.4 credential), the issuer signature verifies, the seed and
-birth date open `bsc` (`bad_credential`), the device signature verifies, validity is inclusive at
-now (`unsatisfiable`), the birth date lies in [E, C] (`unsatisfiable`). `prove` lets the crate build
-the witness and both proofs. The witness summary has `rulebook: "0.5"` and the v0.5 input names.
+**Prover.** Two phases (`nym-auth-zk` 0.2.0). `witness` takes `birth_date` (`YYYY-MM-DD`)
+besides `secret_seed`; it reads the credential (`bad_credential`, also for a v0.4 credential),
+checks the device signature (`bad_credential`), then runs the crate's `prebuild`: the holder-side
+checks with their reasons (INTEGRATION.md §6: the issuer signature, the opening of `bsc`, the birth
+date's form, `bad_credential`; validity at proof_time, inclusive, and the birth date in [E, C],
+`unsatisfiable`; `bsc::prover_refusal`), the statement, the MAC keys, the hash circuit's witness
+and its commitment. `prove` runs `prove_prebuilt`: the signature circuit's witness, its
+commitment, the MAC challenge and both proofs. A wallet can run `prebuild` while the consent screen
+is shown, before the device signs; `metrics.prebuild_ms` reports it apart (part of `witness_ms`),
+and `/tech`'s Benchmark shows it as "Prebuild (consent)". The witness summary has
+`rulebook: "0.5"` and the v0.5 input names.
 
 **Verifier.** Steps 1 to 4 as above (the `results` keys are the pseudonym's handle only: v0.5's
-`age_check` has no output); step 5 is the crate's verifier. `proof_invalid.input` names the first
+`age_check` has no output; v0.5 allows an empty `results` map, so a presentation without the
+pseudonym is refused as `results`, where v0.4 refuses an empty map as `presentation`); step 5 is the
+crate's verifier. `proof_invalid.input` names the first
 circuit that fails: another session already fails `hash`, since e2 seeds the transcript; another
 issuer key fails only `signature`. `bounds` are E and C from the range and the date of
 `proof_time` (`dates::range_bounds`, which agrees with the crate).
+
+**Fetch.** `nym-auth-zk` names google/longfellow-zk `61a8a73` by git; the workspace's `[patch]` builds it
+from the vendored copy, but Cargo still fetches the git repository once to resolve the patch
+(`cargo metadata --locked --offline` fails without it in the git cache). Nothing from it is built.
 
 **Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
 GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on

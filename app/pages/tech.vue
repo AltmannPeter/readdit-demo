@@ -407,8 +407,8 @@ const statusTone = (s: string) =>
               </ul>
               <h3 class="mt-3 font-semibold">Proof systems</h3>
               <ul class="mt-0.5 space-y-0.5">
-                <li v-for="x in profile.systems" :key="x.system_id">
-                  <span class="font-mono">{{ x.system_id }}</span>
+                <li v-for="x in profile.systems" :key="x.proof_system">
+                  <span class="font-mono">{{ x.system_id ?? x.proof_system }}</span>
                   <span class="ml-1.5" :class="x.status === 'available' ? 'text-muted' : 'text-adult'">{{ x.status }}</span><span v-if="x.note" class="text-muted">: {{ x.note }}</span>
                 </li>
               </ul>

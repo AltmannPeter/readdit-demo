@@ -23,7 +23,7 @@ const SHAPES = `${root}native/vega/circuits/mdoc/shapes.zst`
 const ANCHORS = readFileSync(`${root}native/vega/demo/document-signer.pem`, 'utf8')
 const HOST = 'community.example'
 const CLIENT_ID = `x509_san_dns:${HOST}`
-const CIRCUIT = 'urn:circuits:vega:nym_auth:v1'
+const CIRCUIT = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
 const DOCTYPE = 'eu.europa.ec.eudi.nym_auth.1'
 
 let failures = 0

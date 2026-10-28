@@ -312,7 +312,7 @@ gives Community the same pseudonym.
    range) and sizes.
 10. **Longfellow.** **Moderation:** **Reset demo**. **Technical:** tick Longfellow. **Site:** sign up
    on the teen's phone, try c/afterdark (requirement not met), then c/teenspace. **Technical:** the
-   circuit used is `urn:circuits:longfellow:nym_auth:v1`; the proof is about 344 kB. Without the
+   circuit used is `urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` (under v0.5, `urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52`); the proof is about 344 kB. Without the
    reset, logging in with Longfellow reaches the account made with Vega: the pseudonym is the same.
 11. **Developer.** **Moderation:** **Reset demo**. **Technical:** tick Vega. **Developer:** choose
    **18+**, **Request**, **Simulate scan**, the teen's phone, **Scan**: it says the requirement is not met; **Close**
@@ -355,7 +355,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits the site can accept, in preference order |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Longfellow v0.5, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |

@@ -6,7 +6,7 @@
 //!   "proof"          => bstr,
 //!   "issuer_key_set" => [+ bstr],      ; DER Document Signer certificates
 //!   ? "proof_time"   => tdate,         ; present when the circuit checks validity
-//!   "results"        => { + tstr => bstr .size 32 / true }
+//!   "results"        => { * tstr => bstr .size 32 / true }
 //! }
 //! ```
 //!
@@ -119,9 +119,8 @@ impl Presentation {
             };
             out.push((k, v));
           }
-          if out.is_empty() {
-            return Err("results is empty".into());
-          }
+          // Empty is allowed from rulebook v0.5 on (`{ * tstr => ResultValue }`, "empty if _req
+          // holds only assertions"); v0.4's `+` is the verifier's check, which knows the version.
           results = Some(out);
         }
         other => return Err(format!("unknown member {other}")),

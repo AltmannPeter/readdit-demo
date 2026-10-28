@@ -177,7 +177,8 @@ function proofSection(w: WalletFlow, site: string): GuideSection | null {
     if (b.date_range_ms != null) rows.push({ label: 'Age range (date-range)', value: `${ms(b.date_range_ms)}${b.parts?.date_range ? `, ${kB(b.parts.date_range)}` : ''}` })
   } else {
     if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) })
-    if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
+    if (m?.prebuild_ms != null) rows.push({ label: 'Prebuild', value: `${ms(m.prebuild_ms)}: checks, the hash circuit's witness and its commitment, which a wallet can run during the consent screen` })
+    if (m?.witness_ms != null && m?.prebuild_ms == null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
   }
   if (m?.prove_ms != null) rows.push({ label: b ? 'Proving, all parts' : 'Proving', value: ms(m.prove_ms) })
   if (m?.proof_bytes != null && !b) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) })

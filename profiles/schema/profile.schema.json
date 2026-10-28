@@ -82,10 +82,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["proof_system", "system_id", "status"],
+        "required": ["proof_system", "status"],
+        "if": { "properties": { "status": { "const": "available" } } },
+        "then": { "required": ["system_id"] },
         "properties": {
           "proof_system": { "enum": ["vega-v1", "longfellow-libzk-v1", "bbs-cd-plugins-v0.1"] },
-          "system_id": { "type": "string" },
+          "system_id": { "type": "string", "description": "The circuit's id, urn:circuits:sha256:<the archive's SHA-256>, or the scheme's. A pending system may have none yet." },
           "status": { "enum": ["available", "pending"], "description": "pending: the version cannot use it yet; /tech shows it switched off, with the note." },
           "note": { "type": "string" },
           "proof_time": { "enum": ["always", "with-age_check", "never"], "description": "When the presentation carries proof_time." }

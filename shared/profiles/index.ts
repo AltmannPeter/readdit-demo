@@ -42,7 +42,8 @@ export interface PseudonymConfigSpec {
 
 export interface ProfileSystem {
   proof_system: string
-  system_id: string
+  /** Absent for a pending system whose circuits do not exist yet. */
+  system_id?: string
   status: 'available' | 'pending'
   note?: string
   proof_time?: 'always' | 'with-age_check' | 'never'

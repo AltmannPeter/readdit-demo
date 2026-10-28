@@ -111,7 +111,7 @@ fn the_rulebook_age_cases() {
             assert_eq!(p.pseudonym, expected);
             verifier.verify(&r, &p).unwrap_or_else(|e| panic!("{range}: {e}"));
         } else {
-            assert_eq!(res.err(), Some(Error::Unsatisfied), "{range}");
+            assert_eq!(res.err(), Some(Error::Holder("birth_date is outside the age range")), "{range}");
         }
     }
 }
@@ -177,18 +177,21 @@ fn the_prover_refuses_what_the_statement_does_not_hold() {
     // Another birth date, or another seed: the opening does not open bsc.
     let mut h = v.holder(&cred);
     h.birth_date = *b"2010-05-18";
-    assert_eq!(prover.prove(&r, &h, &sig, rng).err(), Some(Error::Unsatisfied));
+    assert_eq!(prover.prove(&r, &h, &sig, rng).err(), Some(Error::Holder("secret_seed and birth_date do not open bsc")));
     let mut h = v.holder(&cred);
     h.secret_seed[0] ^= 1;
-    assert_eq!(prover.prove(&r, &h, &sig, rng).err(), Some(Error::Unsatisfied));
+    assert_eq!(prover.prove(&r, &h, &sig, rng).err(), Some(Error::Holder("secret_seed and birth_date do not open bsc")));
     // A wrong device signature, the other session's.
     let h = v.holder(&cred);
-    assert_eq!(prover.prove(&r, &h, &v.device_sig("redirect"), rng).err(), Some(Error::Unsatisfied));
+    assert_eq!(
+        prover.prove(&r, &h, &v.device_sig("redirect"), rng).err(),
+        Some(Error::Holder("the device signature does not verify under the credential's device key"))
+    );
     // Outside the validity: before validFrom, after validUntil.
     for t in ["2026-10-26T23:59:59Z", "2027-10-27T00:00:01Z"] {
         let mut o = r.clone();
         o.proof_time = t.into();
-        assert_eq!(prover.prove(&o, &h, &sig, rng).err(), Some(Error::Unsatisfied), "{t}");
+        assert_eq!(prover.prove(&o, &h, &sig, rng).err(), Some(Error::Holder("the credential is not valid at proof_time")), "{t}");
     }
     // At the bounds, inclusive: validFrom and validUntil themselves.
     let verifier = Verifier::load().unwrap();
