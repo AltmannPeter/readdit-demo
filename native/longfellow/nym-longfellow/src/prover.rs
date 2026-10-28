@@ -76,7 +76,10 @@ pub struct WitnessInput {
   pub credential: Credential,
   /// 16 bytes, hex.
   pub secret_seed: String,
-  /// r ‖ s, hex, from [`Prover::sign`].
+  /// r ‖ s, hex, from [`Prover::sign`]. v0.5 may leave it out (empty): the witness step then
+  /// runs the first phase only, as a wallet does while the consent screen shows, and the signature
+  /// comes later through [`WitnessData::attach_signature`].
+  #[serde(default)]
   pub device_signature: String,
   /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
   #[serde(default)]
@@ -92,10 +95,11 @@ pub struct WitnessInput {
 
 /// What the prove step proves from: v0.4's two input vectors, or v0.5's first phase
 /// (`nym_auth_zk::Prebuilt`: the checks, the statement, the MAC keys, the hash circuit's witness and
-/// its commitment) and the device signature for the second.
+/// its commitment) and the device signature for the second, with what checks it when it comes
+/// after the witness step (the credential's device key and the message it signs).
 enum Body {
   V04 { witness: witness::Witness, transcript_seed: Vec<u8> },
-  V05 { prebuilt: v5::Prebuilt, device_signature: [u8; 64] },
+  V05 { prebuilt: v5::Prebuilt, device_signature: Option<[u8; 64]>, device_key: PublicKey, device_message: Vec<u8> },
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -124,6 +128,51 @@ pub struct Prover {
   v5: v05::Loaded<v5::Prover>,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
   pub keys_mb: Option<f64>,
+}
+
+/// The device signature over the session's DeviceAuthentication, under the credential's device key.
+fn check_device_signature(device_key: &PublicKey, message: &[u8], device: &[u8; 64]) -> Result<(), Refusal> {
+  verifying_key(device_key)
+    .and_then(|vk| {
+      let sig = ecdsa(device)?;
+      vk.verify(message, &sig).map_err(|e| e.to_string())
+    })
+    .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))
+}
+
+impl WitnessData {
+  /// v0.5, when the witness step ran without the device signature (during consent): the
+  /// signature (r ‖ s, hex) over [`WitnessData::device_message`], checked as the witness step
+  /// checks it. The prove step then proves as if the witness step had had it.
+  pub fn attach_signature(&mut self, device_signature: &str) -> Result<(), Refusal> {
+    let Body::V05 { device_signature: slot, device_key, device_message, .. } = &mut self.body else {
+      return Err(bad("only the v0.5 circuits take the device signature after the witness step"));
+    };
+    let device: [u8; 64] = unhex("device_signature", device_signature).map_err(bad)?;
+    check_device_signature(device_key, device_message, &device)?;
+    *slot = Some(device);
+    Ok(())
+  }
+
+  /// v0.5: the bytes the device key signs for this presentation (DeviceAuthentication's
+  /// Sig_structure); None for v0.4, whose witness step needs the signature.
+  pub fn device_message(&self) -> Option<&[u8]> {
+    match &self.body {
+      Body::V05 { device_message, .. } => Some(device_message),
+      Body::V04 { .. } => None,
+    }
+  }
+
+  /// v0.5: whether the device signature is in (given to the witness step or attached).
+  pub fn signed(&self) -> bool {
+    matches!(&self.body, Body::V05 { device_signature: Some(_), .. } | Body::V04 { .. })
+  }
+
+  /// The results the presentation will carry (the pseudonym under its handle, hex), known after
+  /// the witness step.
+  pub fn results(&self) -> &Map<String, Json> {
+    &self.results
+  }
 }
 
 fn bad(e: impl std::fmt::Display) -> Refusal {
@@ -370,7 +419,8 @@ impl Prover {
     let mut threads = 1;
     let proved = match w.body {
       Body::V04 { witness, transcript_seed } => self.pair.prove(witness, &transcript_seed)?,
-      Body::V05 { prebuilt, device_signature } => {
+      Body::V05 { prebuilt, device_signature, .. } => {
+        let device_signature = device_signature.ok_or("the device signature is missing (WitnessData::attach_signature)")?;
         let pool = crate::threads::pool(w.parallel);
         let (p, n) = pool.install(|| {
           let p = self.v5.side.prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new());
@@ -433,14 +483,17 @@ impl Prover {
     let seed: [u8; 16] = unhex("secret_seed", &input.secret_seed).map_err(bad)?;
     let birth_text = input.birth_date.as_deref().ok_or_else(|| bad("v0.5: birth_date is required (it opens bsc)"))?;
     let birth_date: [u8; 10] = birth_text.as_bytes().try_into().map_err(|_| bad("birth_date is not 10 bytes"))?;
-    let device: [u8; 64] = unhex("device_signature", &input.device_signature).map_err(bad)?;
     let device_key = PublicKey { x: c.parsed.device_x, y: c.parsed.device_y };
-    verifying_key(&device_key)
-      .and_then(|vk| {
-        let sig = ecdsa(&device)?;
-        vk.verify(&handover::device_message(&s.session_transcript, DOC_TYPE), &sig).map_err(|e| e.to_string())
-      })
-      .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))?;
+    let device_message = handover::device_message(&s.session_transcript, DOC_TYPE);
+    // The demo phone signs first and the signature is checked here; a wallet that runs this step
+    // during consent leaves it out and attaches it after (WitnessData::attach_signature).
+    let device = if input.device_signature.is_empty() {
+      None
+    } else {
+      let device: [u8; 64] = unhex("device_signature", &input.device_signature).map_err(bad)?;
+      check_device_signature(&device_key, &device_message, &device)?;
+      Some(device)
+    };
     let request = bsc::request(&signer.key, &now.text(), &input.request, &input.credential_query_id, &input.handover).map_err(Refusal::bad_request)?;
     let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
     let holder = v5::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
@@ -484,7 +537,7 @@ impl Prover {
       "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads },
     });
     Ok(WitnessData {
-      body: Body::V05 { prebuilt, device_signature: device },
+      body: Body::V05 { prebuilt, device_signature: device, device_key, device_message },
       presentation: Presentation {
         system_id: v05::circuit_id(),
         proof: Vec::new(),
