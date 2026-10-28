@@ -237,14 +237,14 @@ async function choose(index: number) {
   await analyze()
 }
 
-/** Encrypts the response (direct_post.jwt) and posts it to response_uri; a refusal there ends on
- *  the matching error screen (410: Request Expired). */
+/** Encrypts the response (direct_post.cwt or direct_post.jwt, as the request asks) and posts it to
+ *  response_uri; a refusal there ends on the matching error screen (410: Request Expired). */
 async function send(body: AuthorizationResponse): Promise<boolean> {
   try {
     const req = request.value!
     const encrypted = await encryptResponse(req, body)
     if (encrypted) {
-      await report(req.state, 'encrypt', 'Response encrypted', { header: encrypted.header, bytes: encrypted.jwe.length, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
+      await report(req.state, 'encrypt', 'Response encrypted', { mode: encrypted.mode, header: encrypted.header, bytes: encrypted.bytes, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
     }
     await props.transport.postResponse(req, body, encrypted)
     return true

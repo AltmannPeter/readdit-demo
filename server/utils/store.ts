@@ -1,5 +1,5 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
-import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import type { DcqlQuery, EncryptedResponseMode, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
 import { systemStatus } from '#shared/profiles'
 import type { ResponseKey } from './response-key'
 import type { SizePart, StepProfile } from './services'
@@ -94,7 +94,9 @@ export interface VpSessionRecord {
    *  it as the response route measures it (round_trip_ms); accepted or refused. */
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
   /** The decrypted response, for the developer view: its JWE header and size, and the presentation. */
-  response?: { jwe: { header: Record<string, unknown>; bytes: number }; presentation?: string }
+  /** The encrypted response as received: its Response Mode, the envelope's header (JWE header, or
+   *  the COSE algorithms and kid) and size; the presentation (base64url of its CBOR). */
+  response?: { envelope: { mode: string; header: Record<string, unknown>; bytes: number }; presentation?: string }
   /** The query the wallet answered, once a response arrived. */
   answered?: string
   /** `format`: the source format of the answered query; `proofId`: the system (circuit or scheme)
@@ -144,6 +146,8 @@ interface Store {
   acceptedProofSystems: string[]
   /** Vega, BBS and Longfellow v0.5 on every core (/tech's switch; a demo reset restores runtime config multithreading). */
   multithreading: boolean
+  /** The encrypted Response Mode requests ask for (/tech's switch; a demo reset restores runtime config responseMode). */
+  responseMode: EncryptedResponseMode
   /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
   profiling: boolean
   /** /tech's "Trust new issuers" (server/utils/issuers.ts; a demo reset restores runtime config trustNewIssuers). */
@@ -158,6 +162,11 @@ export function configuredProofSystems(): string[] {
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
+}
+
+/** The Response Mode at start (runtime config responseMode): direct_post.cwt unless set to direct_post.jwt. */
+export function configuredResponseMode(): EncryptedResponseMode {
+  return String(useRuntimeConfig().responseMode) === 'direct_post.jwt' ? 'direct_post.jwt' : 'direct_post.cwt'
 }
 
 /** Whether Vega, BBS and Longfellow v0.5 run on every core at start (runtime config multithreading). */
@@ -183,6 +192,7 @@ function fresh(): Store {
     // Only what the demo profile can use (a pending system stays off).
     acceptedProofSystems: configuredProofSystems().filter((x) => systemStatus(activeProfile(), x)?.status === 'available'),
     multithreading: configuredMultithreading(),
+    responseMode: configuredResponseMode(),
     profiling: false,
     trustNewIssuers: configuredTrustNewIssuers(),
   }

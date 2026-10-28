@@ -99,8 +99,11 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
   }
   const reject = (problem: 'unsupported' | 'no_circuit', reason: string): RequestView => ({ ...view, satisfiable: false, problem, reason })
 
-  // The rulebook's presentations are always encrypted: direct_post.jwt to a key the wallet can use.
-  if (req.response_mode !== 'direct_post.jwt') return reject('unsupported', `response_mode ${String(req.response_mode)}: a nym_auth presentation is sent encrypted (direct_post.jwt)`)
+  // The rulebook's presentations are always encrypted, to a key the wallet can use: direct_post.cwt
+  // (zkp_req.md §6.2) or direct_post.jwt.
+  if (req.response_mode !== 'direct_post.cwt' && req.response_mode !== 'direct_post.jwt') {
+    return reject('unsupported', `response_mode ${String(req.response_mode)}: a nym_auth presentation is sent encrypted (direct_post.cwt or direct_post.jwt)`)
+  }
   if (!encryptionKeyOf(req)) return reject('unsupported', 'client_metadata.jwks has no ECDH-ES P-256 key to encrypt the response to')
   if (!responseEncOf(req)) return reject('unsupported', `encrypted_response_enc_values_supported lists neither A128GCM nor A256GCM`)
 

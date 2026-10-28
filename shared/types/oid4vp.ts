@@ -89,6 +89,14 @@ export interface WalletMetadata {
   authorization_encryption_enc_values_supported?: string[]
 }
 
+/** The Response Modes the demo uses: direct_post.cwt (zkp_req.md §6.2: a CBOR response in a
+ *  COSE_Encrypt, the body itself) and direct_post.jwt (OpenID4VP 1.0: a JSON response in a JWE,
+ *  posted as `response`); plain direct_post only for an error the wallet cannot encrypt. */
+export type ResponseMode = 'direct_post' | 'direct_post.jwt' | 'direct_post.cwt'
+/** The encrypted Response Modes the site can ask for (/tech's switch). */
+export const ENCRYPTED_RESPONSE_MODES = ['direct_post.cwt', 'direct_post.jwt'] as const
+export type EncryptedResponseMode = (typeof ENCRYPTED_RESPONSE_MODES)[number]
+
 /** Decoded payload of the Request Object fetched from `request_uri`. */
 export interface RequestObject {
   iss?: string
@@ -96,7 +104,7 @@ export interface RequestObject {
   iat?: number
   wallet_nonce?: string
   response_type: 'vp_token'
-  response_mode: 'direct_post' | 'direct_post.jwt'
+  response_mode: ResponseMode
   response_uri: string
   client_id: string
   nonce: string
@@ -105,7 +113,7 @@ export interface RequestObject {
   client_metadata: {
     client_name?: string
     vp_formats_supported: VpFormats
-    /** direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
+    /** direct_post.cwt and direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
     jwks?: { keys: EncryptionJwk[] }
     /** Absent: A128GCM only (OpenID4VP 1.0). */
     encrypted_response_enc_values_supported?: string[]

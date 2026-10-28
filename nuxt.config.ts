@@ -68,6 +68,10 @@ export default defineNuxtConfig({
     // Whether Vega and BBS run on every core (true) or on one thread (false) at start and after a
     // demo reset; /tech switches it. Longfellow always runs on one thread.
     multithreading: false,
+    // The encrypted Response Mode requests ask for at start and after a demo reset: direct_post.cwt
+    // (a CBOR response in a COSE_Encrypt, zkp_req.md §6.2) or direct_post.jwt (JSON in a JWE);
+    // /tech switches it.
+    responseMode: 'direct_post.cwt',
     // Where each verified presentation's measurements are appended (JSON lines); /tech shows them
     // and can clear the file. Relative to the working directory.
     measurementsFile: '.data/measurements.jsonl',

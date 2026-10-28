@@ -33,7 +33,7 @@
 // --startup     also starts the built server without the addons and checks that it refuses to run,
 //               and that it starts with any one of them
 // --shots       saves the screenshots of this run (19-33) there
-// --only        runs only the named self-contained groups, for example --only M
+// --only        runs only the named self-contained groups, for example --only M (X: the Response Mode)
 // (needs: npm i --no-save playwright && npx playwright install chromium)
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -42,6 +42,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, request as httpRequest } from 'playwright'
 import { CompactEncrypt, importJWK } from 'jose'
+import { createJiti } from 'jiti'
 
 const argv = process.argv.slice(2)
 const opt = (name) => {
@@ -58,6 +59,8 @@ const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
 const anyPin = () => String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
 const root = fileURLToPath(new URL('../', import.meta.url))
+// direct_post.cwt as the wallet makes it (zkp_req.md §6.2): the site's own encoder.
+const { encryptCwt, encodeAuthorizationResponse, CWT_CONTENT_TYPE, COSE_A256GCM } = await createJiti(import.meta.url).import(`${root}shared/utils/cwt.ts`)
 const [teen, adult] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet.json'), 'utf8')).holders
 // The teen's BBS credential (bbs_cd, docs/bbs_cd.md), with the teen's device key and seed.
 const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs.json'), 'utf8')).holders
@@ -174,10 +177,8 @@ const accept = async (proofSystem, yes) => {
   await ctx.dispose()
   return r
 }
-/** direct_post.jwt, as the wallet does it: the form's parameters as the payload of a JWE to the
- *  request's key (vp_token as a JSON object, when it parses). `to`: the request whose key to use. */
-async function encryptForm(request, form, to = request) {
-  const jwk = to.client_metadata.jwks.keys[0]
+/** The form's parameters as the Authorization Response object (vp_token as a JSON object, when it parses). */
+function responseObject(form) {
   const payload = { state: form.state }
   if (form.error !== undefined) payload.error = form.error
   if (form.vp_token !== undefined) {
@@ -187,11 +188,25 @@ async function encryptForm(request, form, to = request) {
       payload.vp_token = form.vp_token
     }
   }
-  const key = await importJWK(jwk, jwk.alg)
-  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(payload))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
-  return { response: jwe }
+  return payload
 }
-const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, form) })
+/** direct_post.jwt, as the wallet does it: the response object as the payload of a JWE to the
+ *  request's key. `to`: the request whose key to use. Returns the call's options. */
+async function encryptJwt(request, form, to = request) {
+  const jwk = to.client_metadata.jwks.keys[0]
+  const key = await importJWK(jwk, jwk.alg)
+  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(responseObject(form)))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
+  return { form: { response: jwe } }
+}
+/** direct_post.cwt, as the wallet does it: the response object as CBOR in a COSE_Encrypt to the
+ *  request's key, posted as application/cwt. Returns the call's options. */
+async function encryptCwtBody(request, form, to = request, enc) {
+  const { bytes } = await encryptCwt(encodeAuthorizationResponse(responseObject(form)), to.client_metadata.jwks.keys[0], enc)
+  return { headers: { 'content-type': CWT_CONTENT_TYPE }, data: Buffer.from(bytes) }
+}
+/** The response in the Response Mode `mode` (the request's, unless said otherwise). */
+const encrypted = (request, form, { to = request, mode = request.response_mode } = {}) => (mode === 'direct_post.cwt' ? encryptCwtBody(request, form, to) : encryptJwt(request, form, to))
+const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, await encrypted(request, form))
 /** Unencrypted direct_post form fields. */
 const respondPlain = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
 const vpForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [request.dcql_query.credentials[0].id]: [presentation] }) })
@@ -316,8 +331,8 @@ async function openPage({ demoPhone = true } = {}) {
     else consoleErrors.push(`[${flow}] ${m.text()} at ${path || m.location().url}`)
   })
   page.on('pageerror', (e) => consoleErrors.push(`[${flow}] page error: ${e.message}`))
-  // The response is a JWE; the phone's "Response encrypted" report, sent just before it, says
-  // whether it holds a vp_token or an error.
+  // The response is encrypted (a COSE_Encrypt or a JWE); the phone's "Response encrypted" report,
+  // sent just before it, says whether it holds a vp_token or an error.
   page.on('request', (r) => {
     if (!r.url().includes('/api/wallet/trace')) return
     try {
@@ -333,9 +348,11 @@ async function openPage({ demoPhone = true } = {}) {
     const entry = { flow, method: r.request().method(), path: u.pathname.replace(/[0-9a-f]{32}/g, ':id'), status: r.status() }
     if (entry.path === '/api/wallet/sign' && entry.status === 401) signRefused++
     if (u.pathname.startsWith('/api/vp/response/')) {
-      const form = new URLSearchParams(r.request().postData() ?? '')
-      entry.sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
-      entry.encrypted = !!form.get('response')
+      const cwt = (r.request().headers()['content-type'] ?? '').startsWith('application/cwt')
+      const form = cwt ? new URLSearchParams() : new URLSearchParams(r.request().postData() ?? '')
+      entry.mode = cwt ? 'direct_post.cwt' : form.get('response') ? 'direct_post.jwt' : 'direct_post'
+      entry.sent = entry.mode !== 'direct_post' ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.encrypted = entry.mode !== 'direct_post'
     }
     net.push(entry)
     if (entry.method === 'POST' && entry.path === '/api/vp/session' && entry.status === 200) {
@@ -1276,14 +1293,21 @@ async function groupF() {
   expectAnswer('response_uri: no body', await call(ctx, 'POST', request.response_uri), 400, 'state_mismatch')
   expectAnswer('response_uri: JSON instead of a form', await call(ctx, 'POST', request.response_uri, { data: { state: request.state } }), 400, 'state_mismatch')
   expectAnswer('complete before an answer', await complete(ctx, s.id), 409, 'not_verified')
-  begin('S21', 'an unencrypted or undecryptable response (direct_post.jwt)')
-  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.jwt', 1, 'ECDH-ES'])
+  begin('S21', 'an unencrypted or undecryptable response (direct_post.cwt)')
+  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.cwt', 1, 'ECDH-ES'])
   {
     const p0 = await present(ctx, request, teen)
     expectAnswer('response_uri: an unencrypted vp_token', await respondPlain(ctx, request, vpForm(request, p0.presentation)), 400, 'unencrypted')
     expectAnswer('response_uri: response is not a JWE', await respondPlain(ctx, request, { response: 'not.a.jwe' }), 400, 'invalid_response')
     const o = await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'signup' }))
-    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, vpForm(request, p0.presentation), o) }), 400, 'invalid_response')
+    expectAnswer("response_uri: a COSE_Encrypt to another session's key", await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { to: o })), 400, 'invalid_response')
+    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { to: o, mode: 'direct_post.jwt' })), 400, 'invalid_response')
+    expectAnswer('response_uri: application/cwt that is not a COSE_Encrypt', await call(ctx, 'POST', request.response_uri, { headers: { 'content-type': 'application/cwt' }, data: Buffer.from([0xa1, 0x61, 0x61, 0x01]) }), 400, 'invalid_response')
+    expectAnswer('response_uri: application/cwt, empty', await call(ctx, 'POST', request.response_uri, { headers: { 'content-type': 'application/cwt' }, data: Buffer.alloc(0) }), 400, 'invalid_response')
+    const flipped = await encrypted(request, vpForm(request, p0.presentation))
+    flipped.data[flipped.data.length >> 1] ^= 1
+    expectAnswer('response_uri: a COSE_Encrypt with a flipped ciphertext byte', await call(ctx, 'POST', request.response_uri, flipped), 400, 'invalid_response')
+    expectAnswer('response_uri: a JWE to a request that asked for direct_post.cwt', await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { mode: 'direct_post.jwt' })), 400, 'response_mode')
     eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
     check('the server log names the unencrypted response', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused an unencrypted response`))
     const d = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -3210,13 +3234,13 @@ async function groupV() {
   eq("the teen's phone beside the code", (await devPhone().locator('[data-phone-label]').textContent()).trim(), TEEN)
   await devPhone().getByText('Requirement Not Met').waitFor({ timeout: 20_000 })
   l = await latest()
-  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.jwt', l.session.responseKey.kid])
+  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.cwt', l.session.responseKey.kid])
   await devPhone().getByRole('button', { name: 'Close' }).click()
   await until('the session ends declined', (x) => x.session?.outcome?.reason === 'denied')
   // The page logs the response_uri call when its answer arrives, which can be after the server ended the session.
-  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied')
+  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.mode === 'direct_post.cwt' && e.sent === 'error=access_denied')
   for (let k = 0; k < 30 && !encryptedDenial(); k++) await page.waitForTimeout(100)
-  check('the answer was encrypted (response=JWE)', encryptedDenial())
+  check('the answer was encrypted (application/cwt)', encryptedDenial())
   await dev().locator('.rows li', { hasText: 'Not completed: access_denied' }).waitFor()
   const r2 = await rows()
   for (const t of ['Create presentation request', 'Build DCQL query (zkp_req)', 'Make response encryption key', 'Fetch request + wallet_metadata', 'Authenticate verifier', 'Attestation does not meet the age range', 'Encrypt response', 'Send error response', 'Decrypt response']) {
@@ -3279,6 +3303,105 @@ async function groupV() {
   check('empty after R', await dev().getByText('Choose an age proof and press Request').isVisible())
 }
 
+/** The Response Mode (zkp_req.md §6.2): direct_post.cwt by default, direct_post.jwt by /tech's switch. */
+async function groupX() {
+  await resetDemo()
+  const ctx = await client()
+  const decryptTrace = async (id) => (await sessionView(id)).trace.find((t) => t.step === 'decrypt')?.data
+  const fresh = async (metadata) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    return { s, r: await fetchRequest(ctx, s, metadata) }
+  }
+
+  begin('X1', 'direct_post.cwt by default: CBOR in a COSE_Encrypt, the presentation as its CBOR bytes')
+  eq('server: direct_post.cwt after a reset', (await overview()).responseMode, 'direct_post.cwt')
+  let { s, r } = await fresh()
+  eq('the request asks for direct_post.cwt', r.response_mode, 'direct_post.cwt')
+  const p = await present(ctx, r, teen)
+  const presBytes = Buffer.from(p.presentation, 'base64url').length
+  const cwt = await encrypted(r, vpForm(r, p.presentation))
+  const jwe = (await encryptJwt(r, vpForm(r, p.presentation))).form.response.length
+  check('the COSE_Encrypt is the presentation plus under 300 bytes', cwt.data.length - presBytes < 300, `presentation ${presBytes} B, COSE_Encrypt ${cwt.data.length} B, JWE ${jwe} B`)
+  expectAnswer('response_uri: the COSE_Encrypt', await call(ctx, 'POST', r.response_uri, cwt), 200)
+  eq('verified', (await sessionView(s.id)).status, 'verified')
+  let d = await decryptTrace(s.id)
+  eq('the trace: mode, algorithms, bytes', [d?.mode, d?.header?.alg, d?.header?.enc, d?.bytes], ['direct_post.cwt', 'ECDH-ES+HKDF-256', 'A128GCM', cwt.data.length])
+  ;({ s, r } = await fresh())
+  const p2 = await present(ctx, r, teen)
+  expectAnswer('response_uri: a COSE_Encrypt with A256GCM', await call(ctx, 'POST', r.response_uri, await encryptCwtBody(r, vpForm(r, p2.presentation), r, COSE_A256GCM)), 200)
+  d = await decryptTrace(s.id)
+  eq('verified, A256GCM in the trace', [(await sessionView(s.id)).status, d?.header?.enc], ['verified', 'A256GCM'])
+  ;({ s, r } = await fresh())
+  expectAnswer('response_uri: an error response in a COSE_Encrypt', await respond(ctx, r, { state: r.state, error: 'access_denied' }), 200)
+  eq('it ends the session as declined', (await sessionView(s.id)).outcome?.reason, 'denied')
+
+  begin('X2', 'Longfellow v0.4: the sizes on the wire')
+  await accept(LONGFELLOW_SYSTEM, true)
+  ;({ s, r } = await fresh(JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })))
+  const lf = await present(ctx, r, teen, LONGFELLOW)
+  const lfBytes = Buffer.from(lf.presentation, 'base64url').length
+  const lfCwt = await encrypted(r, vpForm(r, lf.presentation))
+  const lfJwe = (await encryptJwt(r, vpForm(r, lf.presentation))).form.response.length
+  check('the COSE_Encrypt is under 60 % of the JWE', lfCwt.data.length < 0.6 * lfJwe, `presentation ${lfBytes} B, COSE_Encrypt ${lfCwt.data.length} B, JWE ${lfJwe} B (form-encoded ${lfJwe + 'response='.length} B)`)
+  expectAnswer('response_uri: the COSE_Encrypt', await call(ctx, 'POST', r.response_uri, lfCwt), 200)
+  d = await decryptTrace(s.id)
+  eq('verified', (await sessionView(s.id)).status, 'verified')
+  check('decrypted in the trace', d?.mode === 'direct_post.cwt' && typeof d?.decrypt_ms === 'number', `${d?.decrypt_ms} ms`)
+  await accept(LONGFELLOW_SYSTEM, false)
+
+  begin('X3', "/tech's switch: direct_post.jwt; each request keeps the mode it asked for")
+  expectAnswer('server: an unknown mode', await call(ctx, 'POST', '/api/tech/response-mode', { data: { mode: 'direct_post' } }), 400, 'bad_request')
+  expectAnswer('server: no mode', await call(ctx, 'POST', '/api/tech/response-mode', { data: {} }), 400, 'bad_request')
+  const before = await fresh()
+  expectAnswer('server: direct_post.jwt', await call(ctx, 'POST', '/api/tech/response-mode', { data: { mode: 'direct_post.jwt' } }), 200)
+  eq('server: switched', (await overview()).responseMode, 'direct_post.jwt')
+  ;({ s, r } = await fresh())
+  eq('a new request asks for direct_post.jwt', r.response_mode, 'direct_post.jwt')
+  const p3 = await present(ctx, r, teen)
+  expectAnswer('response_uri: a COSE_Encrypt to a request that asked for direct_post.jwt', await call(ctx, 'POST', r.response_uri, await encrypted(r, vpForm(r, p3.presentation), { mode: 'direct_post.cwt' })), 400, 'response_mode')
+  eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
+  check('the trace names the refusal', (await sessionView(s.id)).trace.some((t) => t.step === 'refused' && t.data?.code === 'response_mode' && t.data?.asked === 'direct_post.jwt'))
+  check('the server log names it', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused a direct_post.cwt response to a direct_post.jwt request`))
+  expectAnswer('response_uri: the JWE', await respond(ctx, r, vpForm(r, p3.presentation)), 200)
+  d = await decryptTrace(s.id)
+  eq('verified, direct_post.jwt in the trace', [(await sessionView(s.id)).status, d?.mode, d?.header?.alg], ['verified', 'direct_post.jwt', 'ECDH-ES'])
+  eq('a request fetched before the switch still asks for direct_post.cwt', before.r.response_mode, 'direct_post.cwt')
+  const p4 = await present(ctx, before.r, teen)
+  expectAnswer('response_uri: its COSE_Encrypt', await respond(ctx, before.r, vpForm(before.r, p4.presentation)), 200)
+  eq('verified', (await sessionView(before.s.id)).status, 'verified')
+  await call(ctx, 'POST', '/api/demo/reset')
+  eq('a demo reset restores direct_post.cwt', (await overview()).responseMode, 'direct_post.cwt')
+  await ctx.dispose()
+
+  begin('X4', '/tech in the browser: the switch; the phone answers in the mode the request asks for')
+  await resetDemo()
+  await openPage()
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  const select = tech.locator('[data-response-mode]')
+  await select.waitFor()
+  eq('/tech: CWT selected', await select.inputValue(), 'direct_post.cwt')
+  await select.selectOption('direct_post.jwt')
+  for (let k = 0; k < 30 && (await overview()).responseMode !== 'direct_post.jwt'; k++) await page.waitForTimeout(100)
+  eq('server: direct_post.jwt', (await overview()).responseMode, 'direct_post.jwt')
+  let m = mark()
+  await signIn('Sign up', 'Account created: u/')
+  check('the phone posted a JWE', since(m).some((e) => e.path === '/api/vp/response/:id' && e.status === 200 && e.mode === 'direct_post.jwt'))
+  await select.selectOption('direct_post.cwt')
+  for (let k = 0; k < 30 && (await overview()).responseMode !== 'direct_post.cwt'; k++) await page.waitForTimeout(100)
+  eq('server: direct_post.cwt', (await overview()).responseMode, 'direct_post.cwt')
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  m = mark()
+  await signIn('Log in', 'Logged in as u/')
+  check('the phone posted application/cwt', since(m).some((e) => e.path === '/api/vp/response/:id' && e.status === 200 && e.mode === 'direct_post.cwt'))
+  await tech.reload()
+  await select.waitFor()
+  eq('/tech: CWT selected', await select.inputValue(), 'direct_post.cwt')
+  await tech.close()
+}
+
 // ---------------------------------------------------------------------------------------------
 
 let crashed = null
@@ -3286,9 +3409,9 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, Q: groupQ, P: groupP, R: groupR, V: groupV, G: groupG }
+    const groups = { X: groupX, E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, Q: groupQ, P: groupP, R: groupR, V: groupV, G: groupG }
     // In the full run's order: G reads the sessions the groups before it leave.
-    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'Q', 'P', 'R', 'V', 'K', 'G']
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'Q', 'P', 'R', 'V', 'X', 'K', 'G']
     for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -3308,6 +3431,7 @@ try {
   await groupP()
   await groupR()
   await groupV()
+  await groupX()
   await groupK()
   await groupG()
 } catch (e) {

@@ -155,9 +155,9 @@ message = cbor(["Signature1", bstr(h'A10126'), bstr(h''), bstr(DeviceAuthenticat
 e2 = SHA-256(message)
 ```
 
-The response is encrypted (`direct_post.jwt`), so `jwk_thumbprint` is the RFC 7638 SHA-256
-thumbprint (32 bytes) of the session's encryption key in `client_metadata.jwks`; with `direct_post`
-it would be null. The encoding matches the specification's example byte for byte (`nym-vega` test
+The response is encrypted (`direct_post.cwt` by default, `direct_post.jwt` by `/tech`'s switch), so
+`jwk_thumbprint` is the RFC 7638 SHA-256 thumbprint (32 bytes) of the session's encryption key in
+`client_metadata.jwks`, in both modes; with `direct_post` it would be null. The encoding matches the specification's example byte for byte (`nym-vega` test
 `openid4vp_appendix_b261_example`).
 The device key signs `message` with ES256; the circuit verifies that signature on e2.
 
@@ -551,8 +551,9 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
 | | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no system to offer (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
-| | 400 `invalid_response` | `response` is not a JWE (ECDH-ES, A128GCM) to the session's key, or its payload is not a JSON object; logged as `[vp] <id>: refused a response that does not decrypt` |
-| | 400 `state_mismatch` | `state` (inside the JWE) is not the session's; checked first after decryption |
+| | 400 `invalid_response` | `direct_post.cwt` (`Content-Type: application/cwt`): the body is not a COSE_Encrypt (tag 96; A128GCM, A192GCM or A256GCM; one ECDH-ES + HKDF-256 recipient, zkp_req.md §6.2) to the session's key, or its plaintext is not a CBOR map. `direct_post.jwt` (form field `response`): not a JWE (ECDH-ES, A128GCM or A256GCM) to the session's key, or its payload is not a JSON object. Logged as `[vp] <id>: refused a response that does not decrypt` |
+| | 400 `state_mismatch` | `state` (inside the COSE_Encrypt or the JWE) is not the session's; checked first after decryption |
+| | 400 `response_mode` | Encrypted in the other mode than the request's `response_mode` (a request keeps the mode it was fetched with); logged as `[vp] <id>: refused a <mode> response to a <mode> request`. The session still waits |
 | | 400 `unencrypted` | A vp_token sent as form fields (`direct_post`); logged as `[vp] <id>: refused an unencrypted response`. An unencrypted error response (`error`, `state`) is accepted |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
@@ -569,6 +570,7 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/tech/accept` | 400 `bad_request`, 409 `pending_system` | An unknown proof system; one the demo profile cannot use yet (a profile system with `status: pending`; none since 2026-10-28). Switching off the last accepted one is allowed |
 | `POST /api/tech/demo-profile` | 400 `bad_request` | `{ profile }`: `nym-auth-v0.4` or `nym-auth-v0.5`. Switches the profile and resets the demo; a later demo reset keeps it |
 | `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
+| `POST /api/tech/response-mode` | 400 `bad_request` | `{ mode }`: `direct_post.cwt` or `direct_post.jwt`. Requests fetched from then on ask for it; a demo reset restores `NUXT_RESPONSE_MODE` |
 | `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
 | `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
 | `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |

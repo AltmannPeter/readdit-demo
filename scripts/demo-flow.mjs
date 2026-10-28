@@ -43,8 +43,10 @@ const watch = (p) => {
 watch(page)
 
 // What the phone sends: the prover routes' statuses and what it posts to response_uri. The response
-// is a JWE; the phone's "Response encrypted" report, sent just before it, says what it holds.
+// is a COSE_Encrypt (application/cwt) by default; the phone's "Response encrypted" report, sent
+// just before it, says what it holds.
 const net = []
+const modes = []
 let lastEncrypted = 'vp_token'
 page.on('request', (r) => {
   if (!r.url().includes('/api/wallet/trace')) return
@@ -60,8 +62,10 @@ page.on('response', (r) => {
   const req = r.request()
   if (u.pathname.startsWith('/api/wallet/sign') || u.pathname.startsWith('/api/wallet/prove')) net.push(`${u.pathname} ${r.status()}`)
   if (u.pathname.startsWith('/api/vp/response/')) {
-    const form = new URLSearchParams(req.postData() ?? '')
-    const sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'unencrypted vp_token'
+    const cwt = (req.headers()['content-type'] ?? '').startsWith('application/cwt')
+    const form = cwt ? new URLSearchParams() : new URLSearchParams(req.postData() ?? '')
+    modes.push(cwt ? 'direct_post.cwt' : form.get('response') ? 'direct_post.jwt' : 'direct_post')
+    const sent = cwt || form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'unencrypted vp_token'
     net.push(`response_uri ${sent} ${r.status()}`)
   }
 })
@@ -461,7 +465,7 @@ const expect = [
   ["c/afterdark on the teen's phone: the wallet answers access_denied, with Vega and with Longfellow", count('response_uri error=access_denied 200') === 2],
   ["nine presentations proved: sign-up, c/afterdark on the adult's phone, c/teenspace, c/france, the second sign-up, with BBS sign-up and c/teenspace, and with Longfellow sign-up and c/teenspace", count('/api/wallet/prove 200') === 9],
   ['nine vp_token responses', count('response_uri vp_token 200') === 9],
-  ['every response encrypted (direct_post.jwt)', !net.some((l) => l.includes('unencrypted'))],
+  ['every response encrypted (direct_post.cwt)', modes.length === 11 && modes.every((x) => x === 'direct_post.cwt')],
 ]
 for (const [what, ok] of expect) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}`)

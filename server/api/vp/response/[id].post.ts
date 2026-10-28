@@ -1,4 +1,5 @@
 import { compactDecrypt, decodeProtectedHeader } from 'jose'
+import { CWT_CONTENT_TYPE, decodeAuthorizationResponse, decryptCwt } from '#shared/utils/cwt'
 import { RETURN_PSEUDONYM } from '#shared/utils/dcql'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
 import type { FailReason } from '../../../utils/store'
@@ -6,16 +7,23 @@ import type { IssuerFormat } from '../../../utils/issuers'
 import type { BirthDateRange } from '#shared/types'
 
 /**
- * response_uri (direct_post.jwt). Form field `response`: a JWE (ECDH-ES, A128GCM) to the session's
- * key, whose payload holds the response parameters: vp_token (a JSON object) and state, or error
- * and state. An unencrypted error response (error + state as form fields) is accepted too, as
- * OpenID4VP allows a wallet that cannot encrypt; an unencrypted vp_token is refused.
+ * response_uri, in the Response Mode the request asked for:
+ * - direct_post.cwt (zkp_req.md §6.2): the body is a COSE_Encrypt (tag 96; ECDH-ES + HKDF-256,
+ *   A128GCM) to the session's key, Content-Type application/cwt, whose plaintext is the CBOR
+ *   Authorization Response (§6.1): vp_token with each ZkpPresentation as the CBOR map itself, and
+ *   state; or error and state (shared/utils/cwt.ts);
+ * - direct_post.jwt (OpenID4VP 1.0): form field `response`, a JWE (ECDH-ES, A128GCM) to the
+ *   session's key, whose payload holds vp_token (a JSON object, presentations base64url) and
+ *   state, or error and state.
+ * An unencrypted error response (error + state as form fields) is accepted in both, as OpenID4VP
+ * allows a wallet that cannot encrypt; an unencrypted vp_token is refused.
  * Verification runs here, with the request and session values from the site's own store.
  *
- * Refused before anything is processed: 404 unknown_session, 400 invalid_response (not a JWE to
- * this session's key, or a payload that is not a JSON object), 400 state_mismatch (checked first
- * after decryption, so a caller without the request's state learns nothing about the session),
- * 400 unencrypted, 410 expired or cancelled, 400 not_requested (the request was never fetched)
+ * Refused before anything is processed: 404 unknown_session, 400 invalid_response (not a
+ * COSE_Encrypt or JWE to this session's key, or a payload that is not a map or JSON object), 400
+ * state_mismatch (checked first after decryption, so a caller without the request's state learns
+ * nothing about the session), 400 response_mode (encrypted in the other mode than the request asked
+ * for), 400 unencrypted, 410 expired or cancelled, 400 not_requested (the request was never fetched)
  * and 400 already_answered (a second response: a replay). None of these changes the session. A
  * response that was processed answers 200, whether the presentation was accepted or refused; the
  * refusal's rule goes to the server log and the session trace (/tech), not to the caller.
@@ -23,12 +31,30 @@ import type { BirthDateRange } from '#shared/types'
  */
 export default defineEventHandler(async (event) => {
   const s = getVpSession(getRouterParam(event, 'id')!)
-  const raw = (await readRawBody(event, 'utf8')) ?? ''
-  const posted = Object.fromEntries(new URLSearchParams(raw))
+  const cwt = String(getRequestHeader(event, 'content-type') ?? '').toLowerCase().split(';')[0]!.trim() === CWT_CONTENT_TYPE
+  const body = (await readRawBody(event, false)) ?? Buffer.alloc(0)
+  const bodyBytes = body.length
+  const posted = cwt ? {} : Object.fromEntries(new URLSearchParams(body.toString('utf8')))
 
   let form: Record<string, unknown>
-  let jwe: { header: Record<string, unknown>; bytes: number; decrypt_ms: number } | undefined
-  if (typeof posted.response === 'string') {
+  /** The encrypted response: its Response Mode, header, size and decryption time. */
+  let envelope: { mode: 'direct_post.cwt' | 'direct_post.jwt'; header: Record<string, unknown>; bytes: number; decrypt_ms: number } | undefined
+  if (cwt) {
+    const t0 = performance.now()
+    try {
+      const { plaintext, header } = await decryptCwt(new Uint8Array(body), s.responseKey.privateKey, s.responseKey.jwk.kid)
+      const decoded = decodeAuthorizationResponse(plaintext)
+      form = {
+        ...(decoded.state !== undefined && { state: decoded.state }),
+        ...(decoded.error !== undefined && { error: decoded.error }),
+        ...(decoded.vp_token !== undefined && { vp_token: decoded.vp_token }),
+      }
+      envelope = { mode: 'direct_post.cwt', header: { ...header }, bytes: bodyBytes, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+    } catch (e) {
+      console.warn(`[vp] ${s.id}: refused a response that does not decrypt: ${(e as Error).message}`)
+      throw refusal(400, 'invalid_response', 'The body is not a COSE_Encrypt to this session\'s key holding a CBOR Authorization Response.')
+    }
+  } else if (typeof posted.response === 'string') {
     const t0 = performance.now()
     try {
       const header = decodeProtectedHeader(posted.response)
@@ -38,7 +64,7 @@ export default defineEventHandler(async (event) => {
       const payload = JSON.parse(new TextDecoder().decode(plaintext)) as unknown
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('the payload is not a JSON object')
       form = payload as Record<string, unknown>
-      jwe = { header: header as Record<string, unknown>, bytes: posted.response.length, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+      envelope = { mode: 'direct_post.jwt', header: header as Record<string, unknown>, bytes: posted.response.length, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
     } catch (e) {
       console.warn(`[vp] ${s.id}: refused a response that does not decrypt: ${(e as Error).message}`)
       throw refusal(400, 'invalid_response', 'response is not a JWE to this session\'s key.')
@@ -48,23 +74,30 @@ export default defineEventHandler(async (event) => {
   }
 
   if (form.state !== s.state) throw refusal(400, 'state_mismatch', 'state does not match this session.')
-  if (!jwe && form.error === undefined) {
+  // The mode the request asked for (a request fetched before the cwt switch asked for direct_post.jwt).
+  const asked = s.request?.response_mode
+  if (envelope && asked && envelope.mode !== asked) {
+    console.warn(`[vp] ${s.id}: refused a ${envelope.mode} response to a ${asked} request`)
+    addTrace(s, 'refused', 'Response in another Response Mode refused', { code: 'response_mode', mode: envelope.mode, asked, bytes: bodyBytes })
+    throw refusal(400, 'response_mode', `The request asked for ${asked}.`)
+  }
+  if (!envelope && form.error === undefined) {
     console.warn(`[vp] ${s.id}: refused an unencrypted response`)
-    addTrace(s, 'refused', 'Unencrypted response refused', { code: 'unencrypted', bytes: raw.length })
-    throw refusal(400, 'unencrypted', 'The response must be encrypted (direct_post.jwt).')
+    addTrace(s, 'refused', 'Unencrypted response refused', { code: 'unencrypted', bytes: bodyBytes })
+    throw refusal(400, 'unencrypted', `The response must be encrypted (${asked ?? 'direct_post.cwt'}).`)
   }
   const ended = endedReason(s)
   if (ended) throw goneRefusal(ended)
   if (s.status === 'waiting' || !s.request) throw refusal(400, 'not_requested', 'This session is not waiting for a response.')
   if (s.status !== 'scanned') {
     console.warn(`[vp] ${s.id}: refused a second response (already_answered)`)
-    addTrace(s, 'refused', 'Second response refused', { code: 'already_answered', bytes: raw.length })
+    addTrace(s, 'refused', 'Second response refused', { code: 'already_answered', bytes: bodyBytes })
     throw refusal(400, 'already_answered', 'This session has already received a response.')
   }
   s.status = 'responded'
-  if (jwe) {
-    s.response = { jwe: { header: jwe.header, bytes: jwe.bytes } }
-    addTrace(s, 'decrypt', 'Response decrypted', { header: jwe.header, bytes: jwe.bytes, decrypt_ms: jwe.decrypt_ms })
+  if (envelope) {
+    s.response = { envelope: { mode: envelope.mode, header: envelope.header, bytes: envelope.bytes } }
+    addTrace(s, 'decrypt', 'Response decrypted', { mode: envelope.mode, header: envelope.header, bytes: envelope.bytes, decrypt_ms: envelope.decrypt_ms })
   }
 
   const fail = (reason: FailReason, detail?: string) => {
@@ -82,7 +115,7 @@ export default defineEventHandler(async (event) => {
 
   if (form.error !== undefined) {
     const error = String(form.error)
-    addTrace(s, 'response', 'Error response received', { error, encrypted: !!jwe, bytes: raw.length })
+    addTrace(s, 'response', 'Error response received', { error, encrypted: !!envelope, ...(envelope && { mode: envelope.mode }), bytes: bodyBytes })
     return fail(error === 'access_denied' ? 'denied' : 'invalid_request', error)
   }
 
@@ -94,7 +127,8 @@ export default defineEventHandler(async (event) => {
   const list = query ? token[query.id] : undefined
   if (query && Array.isArray(list) && typeof list[0] === 'string') s.response!.presentation = list[0]
   addTrace(s, 'response', 'Presentation received', {
-    bytes: raw.length,
+    bytes: bodyBytes,
+    ...(envelope && { mode: envelope.mode }),
     encrypted: true,
     ...(query && { query: query.id, format: query.meta.source_format }),
     presentations: Array.isArray(list) ? list.map((p) => (typeof p === 'string' ? p.length : 0)) : 0,

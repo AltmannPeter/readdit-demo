@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The QR code of this view's request, as an in-page popup. It holds the real request: a phone with
-// a wallet that runs zkp_req and direct_post.jwt can scan it, when it can reach this site.
+// a wallet that runs zkp_req and the Response Mode it asks for (direct_post.cwt or direct_post.jwt,
+// /tech's switch) can scan it, when it can reach this site.
 // Simulate scan opens the list of demo phones beside it: pick one, then Scan, and that phone scans
 // the code; the popup then stays until Close on the phone's success screen, or Close here.
 // Before the scan, a click outside, Esc or Cancel request cancels the request. Once the code has

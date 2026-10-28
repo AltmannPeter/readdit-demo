@@ -1,8 +1,8 @@
-// Encrypted responses (OpenID4VP 1.0, "Encrypted Responses" and "Response Mode direct_post.jwt"):
-// the verifier puts an ephemeral ECDH-ES public key in client_metadata.jwks; the wallet encrypts
-// the response parameters to it as a JWE and posts it as `response`. The key's JWK thumbprint
-// (RFC 7638, SHA-256) goes into the handover, so the proof is bound to the key the response is
-// encrypted to.
+// Encrypted responses (OpenID4VP 1.0, "Encrypted Responses"): the verifier puts an ephemeral
+// ECDH-ES public key in client_metadata.jwks, and the wallet encrypts its response to it: a JWE
+// posted as `response` (direct_post.jwt), or a COSE_Encrypt as the body (direct_post.cwt,
+// zkp_req.md §6.2, shared/utils/cwt.ts). In both, the key's JWK thumbprint (RFC 7638, SHA-256)
+// goes into the handover, so the proof is bound to the key the response is encrypted to.
 import { calculateJwkThumbprint, type JWK } from 'jose'
 import type { EncryptionJwk, RequestObject } from '../types/oid4vp'
 
@@ -31,8 +31,12 @@ export function thumbprintOf(jwk: EncryptionJwk): Promise<string> {
   return calculateJwkThumbprint({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } as JWK, 'sha256')
 }
 
-/** The OpenID4VPHandover values of a request: jwk_thumbprint for direct_post.jwt, else null. */
+/** Whether a Response Mode encrypts the response (and so puts jwk_thumbprint in the handover). */
+export const encrypts = (mode: string | undefined) => mode === 'direct_post.jwt' || mode === 'direct_post.cwt'
+
+/** The OpenID4VPHandover values of a request: jwk_thumbprint for an encrypted response (direct_post.jwt,
+ *  direct_post.cwt: "the thumbprint of the key the Wallet encrypted to"), else null. */
 export async function handoverOf(request: Pick<RequestObject, 'client_id' | 'nonce' | 'response_uri' | 'response_mode' | 'client_metadata'>) {
-  const key = request.response_mode === 'direct_post.jwt' ? encryptionKeyOf(request) : undefined
+  const key = encrypts(request.response_mode) ? encryptionKeyOf(request) : undefined
   return { client_id: request.client_id, nonce: request.nonce, response_uri: request.response_uri, jwk_thumbprint: key ? await thumbprintOf(key) : null }
 }

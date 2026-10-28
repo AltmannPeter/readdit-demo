@@ -199,7 +199,7 @@ function verificationSection(v: VerificationMetrics | null | undefined, site: st
   return { heading: 'Verification', rows }
 }
 
-const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.jwt) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
+const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.cwt or direct_post.jwt, as the request asked) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
 
 function checksSection(view: RequestView | null | undefined, site: string): GuideSection | null {
   if (view?.scheme) return schemeChecksSection(view.scheme, site)
@@ -385,7 +385,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 3,
             title: 'Cancelled at the PIN',
             summary: 'The person cancelled at the PIN screen. The device key did not sign, no proof was made, and the wallet answers access_denied, as for a declined request.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted', mono: true }] }],
           }
         : {
             id: 'declined',
@@ -393,7 +393,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 2,
             title: 'Declined',
             summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted', mono: true }] }],
           }
     case 'error':
       return walletErrorStep(i, context)

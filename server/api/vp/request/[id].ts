@@ -78,6 +78,7 @@ export default defineEventHandler(async (event) => {
     formats,
     walletNonce,
     encryptionJwk: s.responseKey.jwk,
+    responseMode: store().responseMode,
   })
   const jws = await signRequestObject(request)
 

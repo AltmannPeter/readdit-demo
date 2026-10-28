@@ -12,6 +12,7 @@ export default defineEventHandler(async () => {
     profiles: PROFILES.map(profileManifest),
     acceptedProofSystems: store().acceptedProofSystems,
     multithreading: store().multithreading,
+    responseMode: store().responseMode,
     profiling: store().profiling,
     trustNewIssuers: store().trustNewIssuers,
     learnedIssuers: (await learnedIssuers()).map(({ key: _key, ...i }) => i),

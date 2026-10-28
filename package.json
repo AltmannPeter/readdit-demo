@@ -10,7 +10,8 @@
     "build:native": "node scripts/build-native.mjs",
     "vega:check": "node scripts/vega-check.mjs",
     "start": "node .output/server/index.mjs",
-    "vectors:check": "node scripts/vectors-check.mjs"
+    "vectors:check": "node scripts/vectors-check.mjs",
+    "cwt:check": "node scripts/cwt-check.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

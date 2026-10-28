@@ -2,7 +2,7 @@ import { findSystem } from '../registry/circuits'
 import type { Profile } from '../profiles'
 import { typeValue } from '../profiles'
 import { buildReq } from '../protocol/request'
-import type { DcqlQuery, EncryptionJwk, RequestObject, SourceFormat, VpFormats, ZkpReqCredentialQuery } from '../types/oid4vp'
+import type { DcqlQuery, EncryptedResponseMode, EncryptionJwk, RequestObject, SourceFormat, VpFormats, ZkpReqCredentialQuery } from '../types/oid4vp'
 
 /** The query over the mdoc (mso_mdoc). */
 export const CREDENTIAL_QUERY_ID = 'nym_attestation'
@@ -69,15 +69,17 @@ export function buildRequestObject(o: {
   dcql: DcqlQuery
   formats: VpFormats
   walletNonce?: string
-  /** The session's response encryption key: direct_post.jwt with this key in client_metadata.jwks. */
+  /** The session's response encryption key, in client_metadata.jwks. */
   encryptionJwk: EncryptionJwk
+  /** direct_post.cwt (the default) or direct_post.jwt: /tech's switch. */
+  responseMode?: EncryptedResponseMode
 }): RequestObject {
   return {
     aud: 'https://self-issued.me/v2',
     iat: Math.floor(Date.now() / 1000),
     ...(o.walletNonce && { wallet_nonce: o.walletNonce }),
     response_type: 'vp_token',
-    response_mode: 'direct_post.jwt',
+    response_mode: o.responseMode ?? 'direct_post.cwt',
     response_uri: responseUriFor(o.origin, o.sessionId),
     client_id: clientIdFor(o.host),
     nonce: o.nonce,

@@ -51,7 +51,7 @@ export async function devSessionView(s: VpSessionRecord) {
     requestJwsBytes: s.requestJwsBytes ?? null,
     response: s.response
       ? {
-          jwe: s.response.jwe,
+          envelope: s.response.envelope,
           ...(s.response.presentation && {
             presentation: { base64url: ellipsize(s.response.presentation), chars: s.response.presentation.length, decoded: decodePresentation(s.response.presentation) },
           }),

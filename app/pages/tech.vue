@@ -96,6 +96,7 @@ interface Overview {
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   multithreading: boolean
+  responseMode: 'direct_post.cwt' | 'direct_post.jwt'
   profiling: boolean
   trustNewIssuers: boolean
   learnedIssuers: Array<{ format: 'mso_mdoc' | 'bbs_cd'; fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
@@ -295,6 +296,16 @@ async function setThreads(parallel: boolean) {
     await $fetch('/api/tech/threads', { method: 'POST', body: { parallel } })
   } catch {
     threadError.value = 'Not changed.'
+  }
+  await load()
+}
+const modeError = ref('')
+async function setResponseMode(mode: string) {
+  modeError.value = ''
+  try {
+    await $fetch('/api/tech/response-mode', { method: 'POST', body: { mode } })
+  } catch {
+    modeError.value = 'Not changed.'
   }
   await load()
 }
@@ -522,6 +533,13 @@ const statusTone = (s: string) =>
           </label>
           <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
           <label class="flex items-center gap-2 text-sm">
+            Response
+            <select data-response-mode class="rounded-md border border-line bg-surface px-2 py-1 text-sm" :value="data.responseMode" @change="setResponseMode(($event.target as HTMLSelectElement).value)">
+              <option value="direct_post.cwt">CWT (COSE_Encrypt)</option>
+              <option value="direct_post.jwt">JWT (JWE)</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" data-profiling :checked="data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
             Profiling
           </label>
@@ -530,7 +548,7 @@ const statusTone = (s: string) =>
             Trust new issuers
           </label>
         </div>
-        <p v-if="threadError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || profilingError || issuerError }}</p>
+        <p v-if="threadError || modeError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || modeError || profilingError || issuerError }}</p>
         <ul v-if="data.learnedIssuers.length" class="mt-2 space-y-1 text-xs" data-learned-issuers>
           <li v-for="i in data.learnedIssuers" :key="i.fingerprint" class="flex flex-wrap items-center gap-x-2">
             <span class="break-all">{{ i.format === 'bbs_cd' ? 'BBS issuer key' : i.subject || 'Unnamed issuer' }}</span>
@@ -618,7 +636,7 @@ const statusTone = (s: string) =>
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
                   <p v-else-if="t.step === 'decrypt' || t.step === 'wallet.encrypt'" class="text-xs text-muted">
-                    {{ t.data?.header?.alg }} · {{ t.data?.header?.enc }} · {{ kb(t.data?.bytes) }} · {{ ms(t.data?.decrypt_ms ?? t.data?.encrypt_ms) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
+                    <template v-if="t.data?.mode">{{ t.data.mode }} · </template>{{ t.data?.header?.alg }} · {{ t.data?.header?.enc }} · {{ kb(t.data?.bytes) }} · {{ ms(t.data?.decrypt_ms ?? t.data?.encrypt_ms) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
                   <p v-else-if="t.step === 'wallet.match' && t.data?.reason" class="text-xs text-muted">{{ t.data.reason }}</p>
                   <p v-else-if="(t.step === 'verify' || t.step === 'refused') && t.data?.code" class="text-xs text-adult">

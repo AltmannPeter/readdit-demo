@@ -256,7 +256,8 @@ There is no guide panel here.
   **Request**. The **nym_auth** button shows the attestation in both encodings, with the demo
   credentials' values.
 - **QR popup.** The real request: a phone whose wallet supports `zkp_req` and encrypted responses
-  (`direct_post.jwt`), and that can reach the site, can scan it. **Simulate scan** lists the three
+  (`direct_post.cwt`, or `direct_post.jwt` by the technical view's switch), and that can reach the
+  site, can scan it. **Simulate scan** lists the three
   demo phones beside the code, each with its credential's encoding and whether the technical view
   accepts it now; pick one and **Scan**. **Change phone** goes back to the list until the phone has
   scanned. The popup stays until **Close** on the phone's success screen. **Cancel request** ends
@@ -264,7 +265,7 @@ There is no guide panel here.
 - **The diagram.** One row per step, from the session's trace. **OID4VP extensions** and **ZKP**
   highlight the steps the rulebook adds and the proof steps. Click a row for its details.
 - **Inspector** (under the diagram). The DCQL query, the request (QR payload, signed Request Object),
-  the response (JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
+  the response (COSE_Encrypt or JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
   checks.
 A request here creates the Community account or logs in, and records the proven age range, as on
 the site.
@@ -361,6 +362,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
+| `NUXT_RESPONSE_MODE` | `direct_post.cwt` | How requests ask the wallet to encrypt its response at start and after a reset: `direct_post.cwt` (CBOR in a COSE_Encrypt, zkp_req.md §6.2) or `direct_post.jwt` (JSON in a JWE); the technical view switches it |
 | `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 on every core at start and after a reset; the technical view switches it |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |

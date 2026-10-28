@@ -1,0 +1,26 @@
+{
+  "comment": "TEST ONLY. direct_post.cwt messages made by an independent COSE implementation (pycose 1.1, cbor2 5.4) to the private key below: a CBOR Authorization Response in a COSE_Encrypt (tag 96), ECDH-ES + HKDF-256, kid \"k2\". scripts/cwt-check.mjs decrypts them with shared/utils/cwt.ts.",
+  "private_jwk": {
+    "key_ops": [
+      "deriveBits"
+    ],
+    "ext": true,
+    "kty": "EC",
+    "x": "dT__8uJY0pWMOND9JQBnkFwKmfG83qlUV9P6LXRSIGo",
+    "y": "pVDwKngqUzvq-BnyMgsY4mNi6rmTgvUhTCvY6OArM2I",
+    "crv": "P-256",
+    "d": "lLzWqdWRKjttENA1uisKPiR_0b7ARAM7PWyxHC__MTc"
+  },
+  "messages": [
+    {
+      "enc": "A128GCM",
+      "cwt": "d8608443a10101a1054c79586ed724ee0b9834a81e3e583fdf3cc89d3462fbf1d793c8ecc5fa60f82aeabf56b9c85e5c9f62f8f0ab479585d56df5fe3aa06933ccfac57445613a3455dec3ed50840bd27dbd06b56c0dad818344a1013818a204426b3220a401022001215820ce5a6a4352364b48fa26552a8954cd50169279509203239d1540036f269f7d9e225820de4fe1466e8e26e00aedf489a73a848da0d2942e6ee8c78c04ec330eb72ba64140",
+      "plaintext": "a26876705f746f6b656ea1617181a26973797374656d5f696461786570726f6f664201026573746174656473742d32"
+    },
+    {
+      "enc": "A256GCM",
+      "cwt": "d8608443a10103a1054cb11e53320ca60d0665b5cb05583f86755ac0cf11f4c5382cd397ec3f71528d642c34a07a26417b89ee49edd53672add7ba98d660af7fedf563c8eeaa43c24d87b1819a398940a9ecb0a0f7fc55818344a1013818a204426b3220a4010220012158209776e9231b750cff1a33d76a1fe200c47025728bd1f5b0a22aeb861830d49e0f2258204d6c499f2bd6a2fb89357311c708e351c3745fcc24a2242ecba488cdee36185340",
+      "plaintext": "a26876705f746f6b656ea1617181a26973797374656d5f696461786570726f6f664201026573746174656473742d32"
+    }
+  ]
+}
