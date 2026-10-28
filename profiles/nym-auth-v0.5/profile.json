@@ -10,8 +10,8 @@
   },
   "source": {
     "repository": "https://github.com/AltmannPeter/readdit-demo",
-    "commit": "63e2508214e5cb701cbda9c72dcc120cfa24ac07",
-    "branch": "main"
+    "commit": "c263b8902e8c189e4cec9b633e1a8bac0659670d",
+    "branch": "rulebook-v05"
   },
   "credential": {
     "id": "nym_auth",
