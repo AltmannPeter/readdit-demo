@@ -36,6 +36,8 @@ pub mod request;
 pub mod sha;
 pub mod witness;
 pub mod zk;
+#[cfg_attr(feature = "reference", allow(dead_code, unused_imports))]
+mod rt;
 
 pub use request::{AgeRange, Date, Session};
 pub use witness::Holder;
@@ -71,6 +73,12 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// The threads proving and verifying run on: the size of the rayon pool the call runs in (the
+/// caller chooses it with `pool.install(…)`), or 1 without the feature `parallel`.
+pub fn threads() -> usize {
+    rt::par::threads()
+}
 
 /// A presentation request, as both sides hold it.
 #[derive(Clone, Debug)]

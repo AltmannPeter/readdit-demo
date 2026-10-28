@@ -142,7 +142,7 @@ interface Store {
   /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
    *  configured ones, runtime config acceptedProofSystems). */
   acceptedProofSystems: string[]
-  /** Vega and BBS on every core (/tech's switch; a demo reset restores runtime config multithreading). */
+  /** Vega, BBS and Longfellow v0.5 on every core (/tech's switch; a demo reset restores runtime config multithreading). */
   multithreading: boolean
   /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
   profiling: boolean
@@ -160,7 +160,7 @@ export function configuredProofSystems(): string[] {
     .filter(Boolean)
 }
 
-/** Whether Vega and BBS run on every core at start (runtime config multithreading). */
+/** Whether Vega, BBS and Longfellow v0.5 run on every core at start (runtime config multithreading). */
 export function configuredMultithreading(): boolean {
   const v = useRuntimeConfig().multithreading as unknown
   return v === true || v === 'true' || v === '1'

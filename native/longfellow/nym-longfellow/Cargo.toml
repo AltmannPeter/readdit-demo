@@ -15,6 +15,8 @@ runtime-random = { workspace = true }
 runtime-zk = { workspace = true }
 # The rulebook v0.5 circuits (bsc) and their witness, prover and verifier (src/bsc.rs).
 nym-auth-zk = { path = "../nym-auth-zk" }
+# /tech's multithreading switch: the pools the v0.5 circuits prove and verify on (src/threads.rs).
+rayon = "1.10"
 # circuits/mdoc/circuits.zst.
 zstd = "0.13"
 serde = { version = "1.0", features = ["derive"] }

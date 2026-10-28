@@ -374,11 +374,11 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
   }, 'circuits')
 }
 
-/** /tech's switches in the call's JSON: `parallel` for the addons that have threads (Vega, BBS;
- *  Longfellow runs on one thread whatever the switch says), and `profile`. */
-function threading(backend: CircuitBackend | 'bbs'): { parallel?: boolean; profile?: boolean } {
+/** /tech's switches in the call's JSON: `parallel` (every addon; Longfellow's v0.4 circuits run on
+ *  one thread whatever it says, its v0.5 circuits follow it), and `profile`. */
+function threading(): { parallel?: boolean; profile?: boolean } {
   const profile = store().profiling ? { profile: true } : {}
-  return backend === 'longfellow' ? profile : { parallel: store().multithreading, ...profile }
+  return { parallel: store().multithreading, ...profile }
 }
 
 const gp = globalThis as unknown as { __communityProfiled?: Promise<unknown> }
@@ -422,7 +422,7 @@ export const prover = {
    *  circuit; the addon of `circuitId` signs, or the first loaded one. */
   async sign(body: SignBody, circuitId?: string): Promise<SignResult & { profile?: StepProfile }> {
     const b = await backendFor('prover', circuitId)
-    const r = outcome<SignResult>(await call('prover', 'prover.sign', () => oneAtATime(async () => JSON.parse(await b.n.prover.sign(JSON.stringify({ ...body, ...threading(b.name) })))), b.name))
+    const r = outcome<SignResult>(await call('prover', 'prover.sign', () => oneAtATime(async () => JSON.parse(await b.n.prover.sign(JSON.stringify({ ...body, ...threading() })))), b.name))
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 
@@ -431,7 +431,7 @@ export const prover = {
   async prove(body: ProveBody): Promise<ProveResult & { backend: CircuitBackend; profiles: { witness?: StepProfile; prove?: StepProfile }; proof_parts?: SizePart[] }> {
     const b = await backendFor('prover', body.system_id)
     const done = await call('prover', 'prover.prove', () => oneAtATime(async () => {
-      const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading(b.name) }))
+      const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading() }))
       if (typeof w === 'string') return { refusal: JSON.parse(w) }
       const witness = JSON.parse(w.summary) as WitnessSummary
       return { result: JSON.parse(await b.n.prover.prove(w)), witness }
@@ -455,7 +455,7 @@ export const verifier = {
    *  not trusted carries it as `certificate` (base64 DER). */
   async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
-    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult), b.name)
+    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading() }))) as VerifyResult), b.name)
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 }
@@ -601,7 +601,7 @@ export const bbsProver = {
   /** One presentation: commitments, the device signature inside ecdsa-pop, the plugin proofs. */
   async prove(body: BbsProveBody): Promise<BbsProveResult & { profile?: StepProfile; proof_parts?: SizePart[] }> {
     const n = await bbsNative('prover')
-    const r = outcome<BbsProveResult>(await call('prover', 'prover.prove', () => oneAtATime(async () => JSON.parse(await n.prover.prove(JSON.stringify({ ...body, ...threading('bbs') })))), 'bbs'))
+    const r = outcome<BbsProveResult>(await call('prover', 'prover.prove', () => oneAtATime(async () => JSON.parse(await n.prover.prove(JSON.stringify({ ...body, ...threading() })))), 'bbs'))
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile'), proof_parts: take<SizePart[]>(r.metrics, 'proof_parts') }
   },
 }
@@ -619,7 +619,7 @@ export const bbsVerifier = {
    *  the verifier's clock and tolerance for proof_time (v0.5, with an age check). */
   async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now?: string; proof_time_tolerance_s?: number; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
     const n = await bbsNative('verifier')
-    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading('bbs') }))) as BbsVerifyResult), 'bbs')
+    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading() }))) as BbsVerifyResult), 'bbs')
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 }

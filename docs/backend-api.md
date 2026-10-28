@@ -381,7 +381,7 @@ these differences.
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
 | `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
 | Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
-| Threads | 1: Google's runtime at `61a8a73` has no parallel code. `parallel` is ignored; `info.threads` and `metrics.threads` are 1 |
+| Threads | v0.4 circuits: 1 (Google's runtime at `61a8a73` directly, which has no parallel code; `parallel` is ignored and `metrics.threads` is 1). v0.5 circuits (`nym-auth-zk` 0.3.0, since 2026-10-28): the witness (prebuild), prove and verify inputs take `"parallel"` as Vega's do, and run in a rayon pool of one thread or one per core (`nym-longfellow/src/threads.rs`); `metrics.threads` reports the threads used, `info.max_threads` the cores. The proof bytes and verdicts do not depend on it |
 
 `loadProver(circuits)` and `loadVerifier(circuits, trustAnchorsPem, toleranceS)` take the directory
 of `circuits.zst`, `params.tsv` and `hash-semantic.tsv`, read both circuits once and check them
@@ -427,9 +427,10 @@ There is no `public_input` code.
 ### Rulebook v0.5: the bsc circuits
 
 Circuit `urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52` (the SHA-256 of `nym_auth_mdoc_bsc.lfa2.zst`, `nym_auth_zk::system_id()`) is
-`nym-auth-zk` 0.2.0 (Peter's package `nym-auth-longfellow` v1.1, revision 2 of the bsc baseline),
-delivered as is in `native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the same
-vendored runtime. It reads rulebook v0.5 requests and credentials. Both addon objects load it next
+`nym-auth-zk` 0.3.0 (Peter's package `nym-auth-longfellow` v1.1, revision 2 of the bsc baseline,
+with the prover and verifier on threads since 2026-10-28: `src/rt`, `CHANGES.md`; the same proof
+bytes and verdicts), in `native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the
+same vendored runtime. It reads rulebook v0.5 requests and credentials. Both addon objects load it next
 to the v0.4 circuits (the archive compiled into the crate), and `info.circuits` lists both, each
 under its own id with `rulebook: "0.4" | "0.5"`, `artifact`, `artifact_sha256` and
 `public_inputs`. The circuit id in the witness input and in the presentation picks the circuits; an
@@ -451,7 +452,7 @@ Public inputs in circuit order: `doctype` 8, `proof_time` 2, `pseudonym.verifier
 from `nym_auth_zk::Request`, which `nym-longfellow/src/bsc.rs` (the package's adapter) builds from
 the request, the handover and the certificate's key; nothing else is passed to it.
 
-**Prover.** Two phases (`nym-auth-zk` 0.2.0). `witness` takes `birth_date` (`YYYY-MM-DD`)
+**Prover.** Two phases (`nym-auth-zk` 0.2.0 and later). `witness` takes `birth_date` (`YYYY-MM-DD`)
 besides `secret_seed`; it reads the credential (`bad_credential`, also for a v0.4 credential),
 checks the device signature (`bad_credential`), then runs the crate's `prebuild`: the holder-side
 checks with their reasons (INTEGRATION.md §6: the issuer signature, the opening of `bsc`, the birth

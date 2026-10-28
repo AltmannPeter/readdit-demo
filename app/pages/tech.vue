@@ -319,10 +319,12 @@ async function issuers(body: { trust_new: boolean } | { forget: string }) {
   await load()
 }
 const day = (iso: string) => iso.slice(0, 10)
-/** The threads a backend runs on now: Vega and BBS follow the switch, Longfellow has one. */
+/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 circuits follow the switch;
+ *  Longfellow's v0.4 circuits run on one thread. */
 const threadsNow = computed(() => (data.value?.multithreading ? data.value.measurements.machine.cores : 1))
+const longfellowSingle = (svc: Service) => !!svc.implementation?.startsWith('Longfellow') && profile.value?.version !== '0.5'
 const threadText = (svc: Service) => {
-  const n = svc.max_threads != null ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
+  const n = svc.max_threads != null && !longfellowSingle(svc) ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
   return `${n} thread${n === 1 ? '' : 's'}`
 }
 
@@ -516,7 +518,7 @@ const statusTone = (s: string) =>
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3">
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" data-threads :checked="data.multithreading" @change="setThreads(($event.target as HTMLInputElement).checked)" />
-            Multithreading (Vega and BBS)
+            Multithreading ({{ profile?.version === '0.5' ? 'Vega, Longfellow and BBS' : 'Vega and BBS' }})
           </label>
           <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
           <label class="flex items-center gap-2 text-sm">

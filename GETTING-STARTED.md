@@ -185,9 +185,10 @@ screen.
   circuits took to load once at start, the threads it runs on now and the circuit it runs (the
   verifier: also its trust anchor and the `proof_time` tolerance). The lock icon is **Request
   signing**, the certificate that signs Community's requests.
-- **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
-  one thread. On, they run on one thread per core, and the line next to the switch says how many.
-  Longfellow always runs on one thread: Google's runtime has no parallel code.
+- **Multithreading.** Off at start and after **Reset demo**: everything runs on one thread. On,
+  Vega, BBS and Longfellow's v0.5 circuits run on one thread per core, and the line next to the
+  switch says how many; the switch's label names them ("Vega, Longfellow and BBS" under v0.5,
+  "Vega and BBS" under v0.4). Longfellow's v0.4 circuits always run on one thread.
 - **Trust new issuers.** On at start and after **Reset demo**. Community's verifiers trust the
   demo issuers. With this on, a presentation from a wallet whose credential comes from another
   issuer is accepted, and that issuer is trusted from then on (kept in
@@ -360,7 +361,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
-| `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
+| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 on every core at start and after a reset; the technical view switches it |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
 | `NUXT_TRUST_NEW_ISSUERS` | `true` | Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start and after a demo reset |

@@ -2866,7 +2866,7 @@ async function groupQ() {
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
 
-  begin('Q6', 'Longfellow under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym')
+  begin('Q6', 'Longfellow under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym, threads')
   eq('server: Longfellow on, BBS off', [(await accept(LONGFELLOW_SYSTEM, true)).status, (await accept(BBS_SYSTEM, false)).body.acceptedProofSystems], [200, [LONGFELLOW_SYSTEM]])
   const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V05] } } })
   o = await overview()
@@ -2927,6 +2927,28 @@ async function groupQ() {
     await respond(c7, r7, vpForm(r7, ap.presentation))
     eq("the adult proves 18+", (await sessionView(s7.id)).status, 'verified')
     await c7.dispose()
+    // /tech's multithreading switch reaches the v0.5 circuits (nym-auth-zk 0.3.0): every core with
+    // it on, one thread with it off, the same verdict.
+    const cores = (await overview()).measurements.machine.cores
+    const threadsOf = async (parallel) => {
+      expectAnswer(`server: multithreading ${parallel ? 'on' : 'off'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { parallel } }), 200)
+      const c8 = await client()
+      const s8 = await newSession(c8, { purpose: 'signin', intent: 'login' })
+      const r8 = await fetchRequest(c8, s8, lfOnly)
+      const p8 = await presentV05(c8, r8, teen)
+      await respond(c8, r8, vpForm(r8, p8.presentation))
+      const v8 = await sessionView(s8.id)
+      await c8.dispose()
+      const at = (step) => v8.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
+      return { status: v8.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
+    }
+    eq(`multithreading on: Longfellow v0.5 on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    const t6 = await ctxBrowser.newPage()
+    await t6.goto('/tech')
+    await t6.locator('[data-threads]').waitFor()
+    check('/tech: the switch names Longfellow under v0.5', (await t6.locator('label', { has: t6.locator('[data-threads]') }).textContent()).includes('Vega, Longfellow and BBS'))
+    await t6.close()
+    eq('multithreading off: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
   }
 
   begin('Q7', "Longfellow under v0.5 in the browser: the teen's phone answers with its v0.5 mdoc")
@@ -3085,6 +3107,19 @@ async function groupQ() {
     check('/tech renders after a v0.5 Vega presentation', !broken.length, broken.join('; '))
     await t9.close()
   }
+  {
+    // The nym_auth attestation popup on /dev under v0.5: bsc and psc; birth_date held by the wallet.
+    const d9 = await ctxBrowser.newPage()
+    await d9.goto('/dev')
+    await d9.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
+    await d9.locator('button.att').click()
+    const att = d9.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.5: the data elements', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['bsc', 'psc'])
+    eq('/dev attestation, v0.5: held by the wallet', await att.locator('[data-att-secret]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-secret'))), ['secret_seed', 'birth_date', 'private_seed'])
+    check('/dev attestation, v0.5: the title and the digestIDs', (await att.locator('h3').textContent()).includes('v0.5') && (await att.textContent()).includes('bsc (digestID 0) and psc (digestID 1)'))
+    await d9.close()
+  }
   await accept(LONGFELLOW_SYSTEM, true)
   eq('both circuits on: the offer, Vega first', (await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'login' }))).client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05, LONGFELLOW_V05])
 
@@ -3144,6 +3179,17 @@ async function groupV() {
   }
   check('no proof system switch here', !(await dev().locator('input[type=checkbox]').count()))
   check('an empty diagram', await dev().getByText('Choose an age proof and press Request').isVisible())
+
+  {
+    // The nym_auth attestation popup, under the v0.4 profile: birth_date, ssc and psc.
+    await dev().locator('button.att').click()
+    const att = page.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.4: the data elements', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['birth_date', 'ssc', 'psc'])
+    check('/dev attestation, v0.4: the title', (await att.locator('h3').textContent()).includes('v0.4'))
+    await page.keyboard.press('Escape')
+    await att.waitFor({ state: 'detached' })
+  }
 
   begin('V2', "18+ on the teen's phone: Requirement Not Met, access_denied, encrypted; nothing applied")
   let m = mark()

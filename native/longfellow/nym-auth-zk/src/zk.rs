@@ -5,6 +5,11 @@
 //! absorbing its circuit and public inputs. The proof bytes are Google's `MdocProof` layout: the
 //! six MAC tags (16 bytes each, little-endian), the hash circuit's `ZkProof`, the signature
 //! circuit's.
+//!
+//! The commitments, proofs and verifications run on [`crate::rt`], Google's prover and verifier
+//! with their independent work at once on the rayon pool the caller runs in; the bytes and
+//! verdicts are Google's at any thread count. With the feature `reference` they run on Google's
+//! `ZkProver` and `ZkVerifier` themselves (0.2.0's path), which the tests compare against.
 
 use core_algebra::SerializableField;
 use core_proto::circuit::{Circuit, FieldID};
@@ -17,7 +22,9 @@ use runtime_algebra::{
 use runtime_ligero::param::LigeroConfig;
 use runtime_proto::{ZkProof, ZkProofGeometry};
 use runtime_random::{RandomEngine, Transcript};
-use runtime_zk::{common::ZkContext, prover::ZkCommitResult, ZkProver, ZkVerifier};
+#[cfg(feature = "reference")]
+use runtime_zk::prover::ZkCommitResult;
+use runtime_zk::{common::ZkContext, ZkProver, ZkVerifier};
 
 use crate::Error;
 
@@ -146,6 +153,12 @@ fn p_elts(f: &P256Field, xs: &[[u8; 32]]) -> Result<Vec<ElementOf<P256Field>>, E
         .collect()
 }
 
+/// The public inputs of both circuits (without the constant 1): the hash circuit's, the
+/// signature circuit's.
+pub(crate) type Publics = (Vec<u128>, Vec<[u8; 32]>);
+/// [`Publics`] and the six MAC tags, which the prover computes from the challenge.
+pub(crate) type PublicsAndTags = (Vec<u128>, Vec<[u8; 32]>, [u128; 6]);
+
 pub(crate) fn transcript_init(device_digest: &[u8; 32]) -> Vec<u8> {
     let mut v = TRANSCRIPT_DOMAIN.to_vec();
     v.extend_from_slice(device_digest);
@@ -158,7 +171,10 @@ pub(crate) fn transcript_init(device_digest: &[u8; 32]) -> Vec<u8> {
 pub(crate) struct HashCommitted {
     tp: Transcript,
     wh: Vec<ElementOf<Gf2_128Field>>,
+    #[cfg(feature = "reference")]
     commit: ZkCommitResult<2, Gf2_128Field>,
+    #[cfg(not(feature = "reference"))]
+    commit: crate::rt::zk::Committed<2, Gf2_128Field>,
     geom: ZkProofGeometry,
 }
 
@@ -179,7 +195,10 @@ pub(crate) fn commit_hash<R: RandomEngine>(
     }
     let wh = gf_elts(&fl.gf2, hash_private);
     let mut tp = Transcript::new(init);
+    #[cfg(feature = "reference")]
     let (commit, geom) = pv.hash.commit(&wh, &ctx_hash, &mut tp, rng, &fl.sf_hash);
+    #[cfg(not(feature = "reference"))]
+    let (commit, geom) = crate::rt::zk::commit(ch, pv.hash.config, &wh, &ctx_hash, &mut tp, rng, &fl.sf_hash)?;
     Ok(HashCommitted { tp, wh, commit, geom })
 }
 
@@ -190,7 +209,7 @@ pub(crate) fn finish<R: RandomEngine>(
     pv: &Prover,
     hc: HashCommitted,
     sig_private: &[[u8; 32]],
-    publics: &dyn Fn(u128) -> (Vec<u128>, Vec<[u8; 32]>, [u128; 6]),
+    publics: &dyn Fn(u128) -> PublicsAndTags,
     rng: &mut R,
 ) -> Result<Vec<u8>, Error> {
     let fl = Fields::new();
@@ -207,7 +226,10 @@ pub(crate) fn finish<R: RandomEngine>(
     }
     let ws = p_elts(&fl.p256, sig_private)?;
     let HashCommitted { mut tp, wh, commit: commit_hash, geom: geom_hash } = hc;
+    #[cfg(feature = "reference")]
     let (commit_sig, geom_sig) = pv.sig.commit(&ws, &ctx_sig, &mut tp, rng, &sf_sig);
+    #[cfg(not(feature = "reference"))]
+    let (commit_sig, geom_sig) = crate::rt::zk::commit(cs, pv.sig.config, &ws, &ctx_sig, &mut tp, rng, &sf_sig)?;
 
     let challenge = tp.u128();
     let (ph, ps, tags) = publics(challenge);
@@ -222,14 +244,24 @@ pub(crate) fn finish<R: RandomEngine>(
     let mut pub_sig = vec![one];
     pub_sig.extend_from_slice(&ps);
 
-    let proof_hash = pv
-        .hash
-        .prove(gf_elts(&fl.gf2, &pub_hash), wh, &commit_hash, &mut tp, &ctx_hash)
-        .map_err(|_| Error::Unsatisfied)?;
-    let proof_sig = pv
-        .sig
-        .prove(p_elts(&fl.p256, &pub_sig)?, ws, &commit_sig, &mut tp, &ctx_sig)
-        .map_err(|_| Error::Unsatisfied)?;
+    #[cfg(feature = "reference")]
+    let (proof_hash, proof_sig) = (
+        pv.hash
+            .prove(gf_elts(&fl.gf2, &pub_hash), wh, &commit_hash, &mut tp, &ctx_hash)
+            .map_err(|_| Error::Unsatisfied)?,
+        pv.sig
+            .prove(p_elts(&fl.p256, &pub_sig)?, ws, &commit_sig, &mut tp, &ctx_sig)
+            .map_err(|_| Error::Unsatisfied)?,
+    );
+    #[cfg(not(feature = "reference"))]
+    let (proof_hash, proof_sig) = {
+        // A witness the circuit does not hold is `Unsatisfied`, as 0.2.0 reports it; any other
+        // error is this library's.
+        let unsatisfied = |e: Error| if matches!(e, Error::Internal(_)) { e } else { Error::Unsatisfied };
+        let h = crate::rt::zk::prove(ch, commit_hash, gf_elts(&fl.gf2, &pub_hash), wh, &mut tp, &ctx_hash).map_err(unsatisfied)?;
+        let s = crate::rt::zk::prove(cs, commit_sig, p_elts(&fl.p256, &pub_sig)?, ws, &mut tp, &ctx_sig).map_err(unsatisfied)?;
+        (h, s)
+    };
 
     let mut out = Vec::with_capacity(330_000);
     for t in tags {
@@ -250,7 +282,7 @@ pub(crate) fn verify(
     vf: &Verifier,
     init: &[u8],
     proof: &[u8],
-    publics: &dyn Fn(u128, &[u128; 6]) -> (Vec<u128>, Vec<[u8; 32]>),
+    publics: &dyn Fn(u128, &[u128; 6]) -> Publics,
 ) -> Result<(), Error> {
     let fl = Fields::new();
     let p256_2 = Fp2Field::new(&fl.p256);
@@ -296,12 +328,23 @@ pub(crate) fn verify(
     one[0] = 1;
     let mut pub_sig = vec![one];
     pub_sig.extend_from_slice(&ps);
-    verifier_hash
-        .verify(gf_elts(&fl.gf2, &pub_hash), &proof_hash, &mut tp, &ctx_hash)
-        .map_err(|_| Error::Proof("hash proof does not verify"))?;
-    verifier_sig
-        .verify(p_elts(&fl.p256, &pub_sig)?, &proof_sig, &mut tp, &ctx_sig)
-        .map_err(|_| Error::Proof("signature proof does not verify"))?;
+    #[cfg(feature = "reference")]
+    {
+        verifier_hash
+            .verify(gf_elts(&fl.gf2, &pub_hash), &proof_hash, &mut tp, &ctx_hash)
+            .map_err(|_| Error::Proof("hash proof does not verify"))?;
+        verifier_sig
+            .verify(p_elts(&fl.p256, &pub_sig)?, &proof_sig, &mut tp, &ctx_sig)
+            .map_err(|_| Error::Proof("signature proof does not verify"))?;
+    }
+    #[cfg(not(feature = "reference"))]
+    {
+        use crate::rt::{zk, Barycentric, Interpolated};
+        zk::verify(&verifier_hash.circuit, verifier_hash.config, gf_elts(&fl.gf2, &pub_hash), &proof_hash, &mut tp, &ctx_hash, &Interpolated(&mi_hash))
+            .map_err(|_| Error::Proof("hash proof does not verify"))?;
+        zk::verify(&verifier_sig.circuit, verifier_sig.config, p_elts(&fl.p256, &pub_sig)?, &proof_sig, &mut tp, &ctx_sig, &Barycentric)
+            .map_err(|_| Error::Proof("signature proof does not verify"))?;
+    }
     Ok(())
 }
 

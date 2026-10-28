@@ -1,0 +1,7 @@
+nym-auth-zk
+
+src/rt/zk.rs, src/rt/ligero.rs, src/rt/sumcheck.rs and src/rt/par.rs are derived from Google's
+longfellow-zk (https://github.com/google/longfellow-zk, commit 61a8a735964d1b22bccf79bf14ef6767249cdf92,
+rust/runtime/zk, rust/runtime/ligero, rust/runtime/sumcheck), Copyright 2026 Google LLC, licensed
+under the Apache License, Version 2.0. Modified: independent work runs in parallel; every output
+is identical to the original.

@@ -84,6 +84,10 @@ pub struct WitnessInput {
   /// v0.5: the holder's birth date, `YYYY-MM-DD` (10 bytes), which opens `bsc` with secret_seed.
   #[serde(default)]
   pub birth_date: Option<String>,
+  /// v0.5: one thread per core for prebuild and the proof (`/tech`'s switch); one thread when
+  /// false or absent. The v0.4 circuits always run on one thread.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// What the prove step proves from: v0.4's two input vectors, or v0.5's first phase
@@ -103,6 +107,8 @@ pub struct WitnessData {
   /// v0.5: the first phase's time (`prebuild`), which a wallet can run while the consent screen
   /// is shown; part of witness_ms.
   prebuild_ms: Option<f64>,
+  /// v0.5: the switch the witness step ran under, which the prove step follows.
+  parallel: bool,
   /// The heap held before the witness step, and the most it held during it (measure::Heap).
   heap_base: usize,
   witness_high: usize,
@@ -201,7 +207,7 @@ impl Prover {
       "circuits": circuit_info(&self.circuits_sha256, &self.v5.sha256),
       "load_ms": self.load_ms,
       "keys_mb": self.keys_mb,
-      "threads": 1,
+      "max_threads": crate::threads::cores(),
     })
   }
 
@@ -340,6 +346,7 @@ impl Prover {
     Ok(WitnessData {
       body: Body::V04 { witness: w, transcript_seed: s.session_transcript.clone() },
       prebuild_ms: None,
+      parallel: false,
       presentation: Presentation {
         system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
@@ -360,14 +367,17 @@ impl Prover {
     let peak = Peak::start();
     let heap = Heap::start();
     let t = Instant::now();
+    let mut threads = 1;
     let proved = match w.body {
       Body::V04 { witness, transcript_seed } => self.pair.prove(witness, &transcript_seed)?,
       Body::V05 { prebuilt, device_signature } => {
-        let p = self
-          .v5
-          .side
-          .prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new())
-          .map_err(|e| format!("the v0.5 circuits: {e:?}"))?;
+        let pool = crate::threads::pool(w.parallel);
+        let (p, n) = pool.install(|| {
+          let p = self.v5.side.prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new());
+          (p, v5::threads())
+        });
+        threads = n;
+        let p = p.map_err(|e| format!("the v0.5 circuits: {e:?}"))?;
         let rest = p.proof.len().saturating_sub(96);
         let parts = json!([
           { "name": "MAC tags (6)", "bytes": 96, "children": [] },
@@ -402,7 +412,7 @@ impl Prover {
         "proof_bytes": proof_bytes,
         "proof_parts": proved.parts,
         "presentation_bytes": presentation.len(),
-        "threads": 1,
+        "threads": threads,
       },
     }))
   }
@@ -435,7 +445,9 @@ impl Prover {
     let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
     let holder = v5::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
     let tp = Instant::now();
-    let prebuilt = self.v5.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()).map_err(|e| bsc::prover_refusal(&e))?;
+    let pool = crate::threads::pool(input.parallel);
+    let (prebuilt, threads) = pool.install(|| (self.v5.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()), v5::threads()));
+    let prebuilt = prebuilt.map_err(|e| bsc::prover_refusal(&e))?;
     let prebuild_ms = ms(tp);
     let nym = prebuilt.pseudonym();
     let witness_ms = ms(t);
@@ -469,7 +481,7 @@ impl Prover {
         "hash": { "inputs": self.v5.counts[0].0, "public": self.v5.counts[0].1 },
         "signature": { "inputs": self.v5.counts[1].0, "public": self.v5.counts[1].1 },
       },
-      "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()) },
+      "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads },
     });
     Ok(WitnessData {
       body: Body::V05 { prebuilt, device_signature: device },
@@ -483,6 +495,7 @@ impl Prover {
       results,
       witness_ms,
       prebuild_ms: Some(prebuild_ms),
+      parallel: input.parallel,
       heap_base: heap.base(),
       witness_high: heap.high(),
       summary,

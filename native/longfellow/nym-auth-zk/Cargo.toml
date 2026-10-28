@@ -1,6 +1,6 @@
 [package]
 name = "nym-auth-zk"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
@@ -16,6 +16,12 @@ runtime-zk = { git = "https://github.com/google/longfellow-zk", rev = "61a8a7359
 runtime-random = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
 runtime-ligero = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
 runtime-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+# The parts of the prover and verifier that src/rt runs at once on the runtime's public types:
+# the sumcheck and the Merkle tree. Already in the build through runtime-zk, at the same commit.
+runtime-sumcheck = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-merkle = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+# Independent work at once (src/rt/par.rs), with the feature `parallel`.
+rayon = { version = "1.10", optional = true }
 # The circuit archive is zstd-compressed, as Google's mdoc circuits are shipped.
 zstd = "0.13"
 # SHA-256 (the transcript-independent hashes: verifier_input, the session's handover, e2).
@@ -24,8 +30,18 @@ sha2 = "0.10"
 # the prover's checks before proving.
 p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field", "ecdsa"] }
 
+[features]
+# Independent work at once on the rayon pool the caller runs in; without it, in order on the
+# calling thread. The proof bytes and verdicts are the same either way.
+default = ["parallel"]
+parallel = ["dep:rayon"]
+# Google's ZkProver and ZkVerifier themselves (0.2.0's path), for comparing against.
+reference = []
+
 [dev-dependencies]
 serde_json = "1"
+# The deterministic random engine, for examples/gates.rs only (never for proving in an app).
+runtime-random = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92", features = ["testonly"] }
 
 [profile.release]
 debug = false

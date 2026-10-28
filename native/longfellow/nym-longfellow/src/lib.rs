@@ -43,6 +43,7 @@ pub mod presentation;
 pub mod prover;
 pub mod request;
 pub mod sha;
+pub mod threads;
 pub mod v05;
 pub mod verifier;
 pub mod witness;

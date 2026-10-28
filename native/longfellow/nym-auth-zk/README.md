@@ -104,11 +104,13 @@ the holder's secrets. It is `Send`, not `Clone`, and is consumed by `prove_prebu
 | `src/witness.rs` | both circuits' public and private inputs, in input order |
 | `src/sha.rs`, `src/ecdsa.rs`, `src/gf.rs`, `src/cbor.rs` | SHA-256 trace, ECDSA ladder witness, GF(2^128), CBOR |
 | `src/zk.rs` | circuit loading; commit, challenge, prove and verify on Google's runtime |
+| `src/rt/` | Google's ZK prover and verifier with their independent work at once (feature `parallel`, rayon); `NOTICE` |
 | `tests/vectors.rs` | end to end on the rulebook's test vectors (`tests/data`) |
 | `tests/synthetic.rs` | three more holders (`tests/data/synthetic`, TEST ONLY): a birthday edge, 29 February, no `psc` |
 | `tests/two_phase.rs` | the two-phase prover, its refusals, `system_id` |
 | `tests/golden.rs`, `tests/golden/` | fixed presentations every verifier must accept (written by `examples/golden.rs`) |
-| `examples/bench.rs` | timings |
+| `examples/bench.rs` | timings, at the thread count of rayon's pool (`RAYON_NUM_THREADS`) |
+| `examples/gates.rs` | TEST ONLY: deterministic proofs and every verdict, to compare builds (`CHANGES.md`) |
 
 ## The circuits
 
@@ -229,6 +231,11 @@ Single thread, cloud Xeon @ 2.1 GHz, `target-cpu=native` (copy `cargo-config.tom
 | proof | ~323 KB (+ 32 B pseudonym) |
 
 A generic x86-64 build, without the carry-less multiply, is about 5× slower.
+
+**Threads (0.3.0).** Proving and verifying use the rayon pool they run in: callers choose one
+thread or several with `pool.install(…)`, and `threads()` reports the count. The proof bytes for
+the same random engine and every verdict are the same at any thread count and without the
+feature `parallel` (`CHANGES.md`).
 
 ## Tests
 

@@ -7,8 +7,9 @@
 #   circuits/mdoc/         circuits.zst, params.tsv, hash-semantic.tsv and test/, the archive's, unchanged
 #   fixtures/              the archive's credential/ fixtures that the tests read, unchanged
 #   nym-longfellow/        witness, prover and verifier around the runtime (no unsafe code)
-#   nym-auth-zk/           the rulebook v0.5 circuits (bsc) with their witness, prover and verifier,
-#                          as delivered (circuits/nym_auth_mdoc_bsc.lfa2.zst); built on the vendored runtime
+#   nym-auth-zk/           the rulebook v0.5 circuits (bsc) with their witness, prover and verifier
+#                          (0.3.0: Google's prover and verifier with their independent work at once,
+#                          src/rt); built on the vendored runtime
 #   node/                  the napi-rs addon: Prover and Verifier objects for Node (napi glue only)
 [workspace]
 resolver = "2"
@@ -43,6 +44,8 @@ core-algebra = { path = "vendor/longfellow-zk/rust/core/algebra" }
 core-proto = { path = "vendor/longfellow-zk/rust/core/proto" }
 runtime-algebra = { path = "vendor/longfellow-zk/rust/runtime/algebra" }
 runtime-ligero = { path = "vendor/longfellow-zk/rust/runtime/ligero" }
+runtime-merkle = { path = "vendor/longfellow-zk/rust/runtime/merkle" }
 runtime-proto = { path = "vendor/longfellow-zk/rust/runtime/proto" }
 runtime-random = { path = "vendor/longfellow-zk/rust/runtime/random" }
+runtime-sumcheck = { path = "vendor/longfellow-zk/rust/runtime/sumcheck" }
 runtime-zk = { path = "vendor/longfellow-zk/rust/runtime/zk" }

@@ -1,5 +1,6 @@
-// What the nym_auth attestation looks like in each encoding (rulebook v0.4), with the values of the
-// demo's own credentials (app/wallet/demo-wallet*.json, decoded by app/wallet/holder.ts).
+// What the nym_auth attestation looks like in each encoding, in the demo profile's rulebook version
+// (v0.4: birth_date, ssc and psc; v0.5: bsc and psc), with the values of the demo's own credentials
+// (app/wallet/demo-wallet*.json, decoded by app/wallet/holder.ts).
 import { findScheme } from '#shared/registry/circuits'
 import type { CredentialView } from '~/wallet/holder'
 
@@ -29,13 +30,75 @@ const packed = (iso: string) => {
   return (y - 1900) * 372 + (m - 1) * 31 + (d - 1)
 }
 
+/** The mdoc's IssuerSignedItem values and its MSO, for the full structure; the MSO's members in
+ *  the order the credential has them (v0.5's compact profile puts docType second after the
+ *  algorithm). */
+function mdocStructure(c: CredentialView, value: Record<string, string>): Record<string, unknown> {
+  const ns = c.namespace || c.docType
+  const msoBody = {
+    version: c.mso.version,
+    digestAlgorithm: c.mso.digestAlgorithm,
+    ...(c.rulebook === '0.5' && { docType: c.docType }),
+    valueDigests: { [ns]: Object.fromEntries(c.elements.map((e) => [e.digestID, "h'…'"])) },
+    deviceKeyInfo: { deviceKey: { kty: 'EC2', crv: c.deviceKey.crv, jwk_thumbprint: c.deviceKey.jwkThumbprint } },
+    ...(c.rulebook !== '0.5' && { docType: c.docType }),
+    validityInfo: c.validity,
+  }
+  return {
+    docType: c.docType,
+    issuerSigned: {
+      nameSpaces: { [ns]: c.elements.map((e) => ({ digestID: e.digestID, random: "h'…' (16 bytes)", elementIdentifier: e.id, elementValue: value[e.id] ?? '…' })) },
+      issuerAuth: {
+        COSE_Sign1: {
+          protected: { alg: c.mso.signatureAlgorithm },
+          unprotected: { '33 (x5chain)': c.issuer.documentSigner },
+          payload: { MobileSecurityObject: msoBody },
+          signature: `h'…' (${c.mso.signatureAlgorithm})`,
+        },
+      },
+    },
+  }
+}
+
+/** Rulebook v0.5: bsc = SHA-256(secret_seed ‖ birth_date) and psc = SHA-256(private_seed) (or 32
+ *  zero bytes); birth_date is not a data element, the wallet holds it beside the attestation. */
+function mdocV05(c: CredentialView): AttestationView {
+  const bsc = c.attributes.bsc ?? ''
+  const psc = c.attributes.psc
+  const zeroPsc = !psc || /^0+$/.test(psc)
+  const digest = (id: string) => c.elements.find((e) => e.id === id)?.digestID
+  return {
+    encoding: 'mso_mdoc',
+    title: 'nym_auth attestation v0.5, ISO/IEC 18013-5 (mso_mdoc)',
+    typeLabel: 'docType and namespace',
+    typeValue: c.docType,
+    rows: [
+      { id: 'bsc', type: 'bstr .size 32', presence: 'REQ', value: short(bsc), note: 'SHA-256(secret_seed ‖ birth_date), birth_date as the 10-byte full-date. Input to pseudonym and age_check' },
+      { id: 'psc', type: 'bstr .size 32', presence: 'REQ', value: psc ? short(psc) : 'not in this credential', note: zeroPsc ? '32 zero bytes: no private seed' : 'SHA-256(private_seed), or 32 zero bytes without a private seed' },
+    ],
+    secrets: [
+      { id: 'secret_seed', type: '16 bytes', value: 'held by the wallet and the issuer', note: 'Opens bsc with birth_date; input to the pseudonym' },
+      { id: 'birth_date', type: 'full-date, 10 bytes', value: c.attributes.birth_date, note: 'Opens bsc with secret_seed; input to age_check' },
+      ...(zeroPsc ? [] : [{ id: 'private_seed', type: '16 bytes', value: 'held by the wallet only', note: 'Opens psc' }]),
+    ],
+    notes: [
+      `Each data element is a separate IssuerSignedItem: bsc (digestID ${digest('bsc') ?? '–'}) and psc (digestID ${digest('psc') ?? '–'}).`,
+      'birth_date is not a data element: it is carried only inside bsc.',
+      'bsc and psc are never disclosed; only zkp_req presentations are allowed.',
+      'A proof establishes validFrom ≤ proof_time ≤ validUntil, both bounds included.',
+      'issuerAuth carries x5chain (label 33); the circuit checks the signature.',
+      `Compact profile: ${c.compactProfile ? 'yes' : 'no'}. Issuer: ${c.issuer.name}. ${c.sizes.issuerSigned} bytes of IssuerSigned.`,
+    ],
+    structure: mdocStructure(c, { bsc: `${short(bsc)} (32 bytes)`, ...(psc && { psc: `${short(psc)} (32 bytes)` }) }),
+  }
+}
+
 function mdoc(c: CredentialView): AttestationView {
   const birth = c.attributes.birth_date
-  const ns = c.namespace || c.docType
   const value: Record<string, string> = { birth_date: `1004("${birth}")`, ssc: `${short(c.attributes.ssc)} (32 bytes)`, ...(c.attributes.psc && { psc: `${short(c.attributes.psc)} (32 bytes)` }) }
   return {
     encoding: 'mso_mdoc',
-    title: 'nym_auth attestation, ISO/IEC 18013-5 (mso_mdoc)',
+    title: 'nym_auth attestation v0.4, ISO/IEC 18013-5 (mso_mdoc)',
     typeLabel: 'docType and namespace',
     typeValue: c.docType,
     rows: [
@@ -53,33 +116,11 @@ function mdoc(c: CredentialView): AttestationView {
       'issuerAuth carries x5chain (label 33); the circuit checks the signature.',
       `Compact profile: ${c.compactProfile ? 'yes' : 'no'}. Issuer: ${c.issuer.name}. ${c.sizes.issuerSigned} bytes of IssuerSigned.`,
     ],
-    structure: {
-      docType: c.docType,
-      issuerSigned: {
-        nameSpaces: { [ns]: c.elements.map((e) => ({ digestID: e.digestID, random: "h'…' (16 bytes)", elementIdentifier: e.id, elementValue: value[e.id] ?? '…' })) },
-        issuerAuth: {
-          COSE_Sign1: {
-            protected: { alg: c.mso.signatureAlgorithm },
-            unprotected: { '33 (x5chain)': c.issuer.documentSigner },
-            payload: {
-              MobileSecurityObject: {
-                version: c.mso.version,
-                digestAlgorithm: c.mso.digestAlgorithm,
-                valueDigests: { [ns]: Object.fromEntries(c.elements.map((e) => [e.digestID, "h'…'"])) },
-                deviceKeyInfo: { deviceKey: { kty: 'EC2', crv: c.deviceKey.crv, jwk_thumbprint: c.deviceKey.jwkThumbprint } },
-                docType: c.docType,
-                validityInfo: c.validity,
-              },
-            },
-            signature: `h'…' (${c.mso.signatureAlgorithm})`,
-          },
-        },
-      },
-    },
+    structure: mdocStructure(c, value),
   }
 }
 
-function bbs(c: CredentialView): AttestationView {
+function bbs(c: CredentialView, rulebook: string): AttestationView {
   const birth = c.attributes.birth_date
   const scheme = findScheme('urn:mms:bbs-cd:nym_auth:v1')
   const notes: Record<string, string> = {
@@ -95,7 +136,7 @@ function bbs(c: CredentialView): AttestationView {
   const attributes = c.bbs?.attributes ?? []
   return {
     encoding: 'bbs_cd',
-    title: 'nym_auth attestation, BBS committed disclosures (bbs_cd)',
+    title: `nym_auth attestation v${rulebook}, BBS committed disclosures (bbs_cd)`,
     typeLabel: 'schema',
     typeValue: c.bbs?.schemaId ?? c.docType,
     rows: attributes.map((a) => ({ id: a.name, type: a.type, presence: `${a.messages} message${a.messages === 1 ? '' : 's'}`, value: values[a.name] ?? '…', note: notes[a.name] })),
@@ -117,7 +158,9 @@ function bbs(c: CredentialView): AttestationView {
   }
 }
 
-/** The view of one credential, by its encoding. */
-export function attestationFor(c: CredentialView): AttestationView {
-  return c.format === 'bbs_cd' ? bbs(c) : mdoc(c)
+/** The view of one credential, by its encoding, in rulebook version `rulebook` (the demo
+ *  profile's): an mdoc shows the holder's v0.5 mdoc under v0.5. */
+export function attestationFor(c: CredentialView, rulebook = '0.4'): AttestationView {
+  if (c.format === 'bbs_cd') return bbs(c, rulebook)
+  return rulebook === '0.5' && c.v05 ? mdocV05(c.v05) : mdoc(c)
 }

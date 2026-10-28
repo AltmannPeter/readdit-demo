@@ -126,7 +126,7 @@ watch(
     </main>
 
     <DevQrPopup v-model:open="qrOpen" />
-    <DevAttestationPopup v-model:open="attestationOpen" />
+    <DevAttestationPopup v-model:open="attestationOpen" :rulebook="state.profile?.version" />
     <DevStepDetail :step="selectedIndex + 1" :event="selectedEvent" :prev-at="prevAt" @close="selectedId = null" />
   </div>
 </template>

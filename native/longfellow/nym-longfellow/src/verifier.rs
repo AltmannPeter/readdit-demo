@@ -54,6 +54,10 @@ pub struct VerifyInput {
   /// The rulebook version the site's request follows (the demo profile): "0.4" (absent) or "0.5".
   #[serde(default)]
   pub rulebook: Option<String>,
+  /// v0.5: one thread per core for the proof check (`/tech`'s switch); one thread when false or
+  /// absent. The v0.4 circuits always run on one thread.
+  #[serde(default)]
+  pub parallel: bool,
 }
 
 /// Why a presentation is refused.
@@ -115,7 +119,7 @@ impl Verifier {
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
       "keys_mb": self.keys_mb,
-      "threads": 1,
+      "max_threads": crate::threads::cores(),
     })
   }
 
@@ -231,9 +235,10 @@ impl Verifier {
     if rulebook == Rulebook::V05 {
       let req = bsc::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
         .map_err(|e| refuse("request", e))?;
-      let outcome = self.v5.side.verify(&req, &v5::Presentation { pseudonym: *nym, proof: p.proof.clone() });
+      let presentation = v5::Presentation { pseudonym: *nym, proof: p.proof.clone() };
+      let (outcome, threads) = crate::threads::pool(input.parallel).install(|| (self.v5.side.verify(&req, &presentation), v5::threads()));
       metrics.insert("verify_ms".into(), json!(ms(t)));
-      metrics.insert("threads".into(), json!(1));
+      metrics.insert("threads".into(), json!(threads));
       if let Err(e) = outcome {
         return Err(match bsc::failing_circuit(&e) {
           Some(c) => Refused {

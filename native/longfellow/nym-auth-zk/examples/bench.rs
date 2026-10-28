@@ -1,4 +1,5 @@
-//! Times a presentation on the rulebook's test vectors: circuit load, prove, verify, proof size.
+//! Times a presentation on the rulebook's test vectors: circuit load, prebuild, the proof after
+//! the signature, verify, proof size, at the thread count of rayon's pool (`RAYON_NUM_THREADS`).
 //!
 //!   cargo run --release --example bench [REPS]
 //!
@@ -48,6 +49,7 @@ fn main() {
     };
     let sig: [u8; 64] = hex(&s(&["sessions", "dcapi", "device_signature_r_s"])).try_into().unwrap();
 
+    println!("threads {}", nym_auth_zk::threads());
     let t = Instant::now();
     let prover = Prover::load().unwrap();
     let load_p = t.elapsed();
@@ -55,6 +57,8 @@ fn main() {
     let verifier = Verifier::load().unwrap();
     let load_v = t.elapsed();
     println!("load: prover {load_p:.1?}, verifier {load_v:.1?}");
+    let (mut pre_ms, mut after_ms, mut ver_ms) = (Vec::new(), Vec::new(), Vec::new());
+    let mut bytes = 0;
     for _ in 0..reps {
         let rng = &mut SecureRandomEngine::new();
         let t = Instant::now();
@@ -67,6 +71,25 @@ fn main() {
         let t = Instant::now();
         verifier.verify(&request, &pres).unwrap();
         let tv = t.elapsed();
-        println!("prove {tp:.1?} (prebuild {t1:.1?} + after signature {t2:.1?})  verify {tv:.1?}  proof {} bytes (+32 pseudonym)", pres.proof.len());
+        bytes = pres.proof.len();
+        println!("prove {tp:.1?} (prebuild {t1:.1?} + after signature {t2:.1?})  verify {tv:.1?}  proof {bytes} bytes (+32 pseudonym)");
+        pre_ms.push(t1.as_secs_f64() * 1e3);
+        after_ms.push(t2.as_secs_f64() * 1e3);
+        ver_ms.push(tv.as_secs_f64() * 1e3);
     }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    // The peak resident set size, where the system reports it (Linux).
+    let peak = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("VmHWM:")).map(|l| l[6..].trim().to_string()))
+        .unwrap_or_else(|| "n/a".into());
+    println!(
+        "median of {reps}: prebuild {:.1} ms, after signature {:.1} ms, verify {:.1} ms; proof {bytes} bytes; peak RSS {peak}",
+        median(&mut pre_ms),
+        median(&mut after_ms),
+        median(&mut ver_ms)
+    );
 }

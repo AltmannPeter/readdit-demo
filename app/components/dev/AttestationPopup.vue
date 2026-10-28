@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// The nym_auth attestation in either encoding, with the values of a demo credential: for mso_mdoc
-// the phone on screen's mdoc (the teen's when that phone holds the BBS credential), for bbs_cd the
-// teen's BBS credential. Closes on a click outside or Esc.
+// The nym_auth attestation in either encoding, in the demo profile's rulebook version (`rulebook`),
+// with the values of a demo credential: for mso_mdoc the phone on screen's mdoc (the teen's when
+// that phone holds the BBS credential; its v0.5 mdoc under v0.5), for bbs_cd the teen's BBS
+// credential. Closes on a click outside or Esc.
 import { attestationFor } from '~/dev/attestation'
 import { PHONES, loadCredentials, type CredentialView } from '~/wallet/holder'
 
 const open = defineModel<boolean>('open', { default: false })
+const props = defineProps<{ rulebook?: string }>()
 const { phone } = usePhone()
 const encoding = ref<'mso_mdoc' | 'bbs_cd'>('mso_mdoc')
 const credentials = ref<CredentialView[]>([])
@@ -16,7 +18,7 @@ const credential = computed(() => {
   return all.find((c) => phone.value.credentials.includes(c.index)) ?? all[0]
 })
 const owner = computed(() => PHONES.find((p) => credential.value && p.credentials.includes(credential.value.index))?.label)
-const view = computed(() => (credential.value ? attestationFor(credential.value) : null))
+const view = computed(() => (credential.value ? attestationFor(credential.value, props.rulebook) : null))
 
 watch(open, async (o) => {
   if (!o) return
@@ -40,7 +42,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="open && view" class="vd backdrop" @mousedown.self="open = false">
-        <div class="win" role="dialog" aria-modal="true" :aria-label="view.title">
+        <div class="win" role="dialog" aria-modal="true" :aria-label="view.title" data-attestation>
           <header>
             <div class="seg" role="radiogroup" aria-label="Encoding">
               <button type="button" role="radio" :aria-checked="encoding === 'mso_mdoc'" :class="{ on: encoding === 'mso_mdoc' }" @click="encoding = 'mso_mdoc'">
@@ -62,7 +64,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <tr><th>Attribute</th><th>Type</th><th>{{ encoding === 'bbs_cd' ? 'Messages' : 'Presence' }}</th><th>Example value</th></tr>
             </thead>
             <tbody>
-              <tr v-for="r in view.rows" :key="r.id">
+              <tr v-for="r in view.rows" :key="r.id" :data-att-row="r.id">
                 <td class="mono strong">{{ r.id }}</td>
                 <td class="mono">{{ r.type }}</td>
                 <td>{{ r.presence }}</td>
@@ -78,7 +80,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <h4 class="section-label">Held by the wallet, not in the attestation</h4>
             <table>
               <tbody>
-                <tr v-for="r in view.secrets" :key="r.id">
+                <tr v-for="r in view.secrets" :key="r.id" :data-att-secret="r.id">
                   <td class="mono strong">{{ r.id }}</td>
                   <td class="mono">{{ r.type }}</td>
                   <td>{{ r.value }}</td>
