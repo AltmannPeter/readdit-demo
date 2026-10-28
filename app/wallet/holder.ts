@@ -6,6 +6,11 @@
 // binding: a real wallet keeps the device key in secure hardware and never shows the seed. The
 // wallet sends each native step only what it needs (app/wallet/prover.ts), from the credential
 // the person chose, and decodes its own credentials for the screens below.
+//
+// Each mdoc holder also has a rulebook v0.5 mdoc (`v05` in demo-wallet.json: bsc and psc, with the
+// birth_date and private_seed that open them), from the same issuer over the same device key and
+// seed. The phone shows one card per holder; a request is answered with the version it reads under
+// (engine.ts analyzeVersions), and with the site's version when both read it.
 
 import walletFile from './demo-wallet.json'
 import bbsWalletFile from './demo-wallet-bbs.json'
@@ -34,8 +39,11 @@ export interface DeviceKeyJwk {
 export interface MdocMaterial {
   credential: WalletCredential
   device_key: DeviceKeyJwk
-  /** 16 bytes, hex: the opening of the credential's ssc. */
+  /** 16 bytes, hex: the opening of the credential's ssc (v0.4) and, with birth_date, of bsc (v0.5). */
   secret_seed: string
+  /** The holder's rulebook v0.5 mdoc, with what the wallet holds alongside it (rulebook v0.5,
+   *  "Attribute encodings": secret_seed, birth_date and private_seed). */
+  v05?: { credential: WalletCredential; birth_date: string; private_seed: string }
 }
 
 /** The BBS credential as bbs-issuer writes it (native/bbs/nym-bbs/src/credential.rs). */
@@ -64,6 +72,7 @@ export const holders: WalletMaterial[] = [
     credential: h.credential as WalletCredential,
     device_key: h.device_key as DeviceKeyJwk,
     secret_seed: h.secret_seed,
+    ...('v05' in h && h.v05 && { v05: { credential: h.v05.credential as WalletCredential, birth_date: h.v05.birth_date, private_seed: h.v05.private_seed } }),
   })),
   ...bbsWalletFile.holders.map((h) => ({ credential: h.credential as BbsWalletCredential, device_key: h.device_key as DeviceKeyJwk })),
 ]
@@ -79,6 +88,10 @@ export function mdocMaterial(index: number): MdocMaterial {
 export interface CredentialView {
   /** Position in the wallet (holders[index]). */
   index: number
+  /** mso_mdoc: the rulebook version of this mdoc ("0.4", "0.5"); bbs_cd: undefined (it fits both). */
+  rulebook?: string
+  /** The same holder's rulebook v0.5 mdoc, on the same card (mso_mdoc, v0.4 views only). */
+  v05?: CredentialView
   /** The attestation's encoding (a zkp_req query's source_format): the mdoc, or the BBS credential. */
   format: SourceFormat
   /** The mdoc's docType, or the BBS credential's schema id. */
@@ -90,7 +103,8 @@ export interface CredentialView {
   compactProfile: boolean
   issuer: { name: string; country?: string; documentSigner: string; certificateValidUntil: string }
   validity: { signed: string; validFrom: string; validUntil: string }
-  attributes: { birth_date: string; ssc: string; psc: string | null }
+  /** birth_date: the item (v0.4), or held beside the credential (v0.5, committed in bsc). */
+  attributes: { birth_date: string; ssc: string; psc: string | null; bsc?: string }
   elements: Array<{ id: string; digestID: number }>
   mso: { version: string; digestAlgorithm: string; signatureAlgorithm: string }
   deviceKey: { kty: string; crv: string; jwkThumbprint: string }
@@ -135,7 +149,7 @@ export const NYM_TITLE = 'Age and pseudonym'
 export const NYM_BBS_TITLE = 'Age and pseudonym (BBS)'
 
 function compact(v: IssuerSignedView): boolean {
-  const known = ['birth_date', 'ssc', 'psc']
+  const known = v.bsc ? ['bsc', 'psc'] : ['birth_date', 'ssc', 'psc']
   const ids = v.items.map((i) => i.digestID).sort((a, b) => a - b)
   return (
     v.items.every((i) => known.includes(i.elementIdentifier)) &&
@@ -156,7 +170,13 @@ let cached: Promise<CredentialView[]> | undefined
 
 /** Decodes the wallet's credentials once. */
 export function loadCredentials(): Promise<CredentialView[]> {
-  cached ??= Promise.all(holders.map((h, index) => (isMdoc(h) ? decode(h, index) : decodeBbs(h, index))))
+  cached ??= Promise.all(
+    holders.map(async (h, index) => {
+      if (!isMdoc(h)) return decodeBbs(h, index)
+      const view = await decode(h, index, h.credential)
+      return h.v05 ? { ...view, v05: await decode(h, index, h.v05.credential, h.v05.birth_date) } : view
+    }),
+  )
   return cached
 }
 
@@ -228,8 +248,11 @@ async function decodeBbs(holder: BbsMaterial, index: number): Promise<Credential
   }
 }
 
-async function decode(holder: MdocMaterial, index: number): Promise<CredentialView> {
-  const v = readIssuerSigned(holder.credential.issuer_signed)
+/** An mdoc of the holder: its v0.4 credential, or its v0.5 one with the birth date held beside it. */
+async function decode(holder: MdocMaterial, index: number, credential: WalletCredential, heldBirthDate?: string): Promise<CredentialView> {
+  const v = readIssuerSigned(credential.issuer_signed)
+  const birthDate = v.birthDate ?? heldBirthDate
+  if (!birthDate) throw new Error('IssuerSigned: no birth_date item, and none held beside it')
   // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
   await import('reflect-metadata')
   const x509 = await import('@peculiar/x509')
@@ -237,6 +260,7 @@ async function decode(holder: MdocMaterial, index: number): Promise<CredentialVi
   const field = (name: string) => cert.subjectName.getField(name)[0]
   return {
     index,
+    rulebook: v.bsc ? '0.5' : '0.4',
     format: 'mso_mdoc',
     docType: v.docType,
     namespace: v.namespace,
@@ -250,7 +274,7 @@ async function decode(holder: MdocMaterial, index: number): Promise<CredentialVi
       certificateValidUntil: cert.notAfter.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     },
     validity: v.validity,
-    attributes: { birth_date: v.birthDate, ssc: toHex(v.ssc), psc: v.psc ? toHex(v.psc) : null },
+    attributes: { birth_date: birthDate, ssc: v.ssc ? toHex(v.ssc) : '', psc: v.psc ? toHex(v.psc) : null, ...(v.bsc && { bsc: toHex(v.bsc) }) },
     elements: v.items.map((i) => ({ id: i.elementIdentifier, digestID: i.digestID })),
     mso: { version: v.version, digestAlgorithm: v.digestAlgorithm, signatureAlgorithm: v.signatureAlgorithm },
     deviceKey: {

@@ -796,6 +796,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nym-auth-zk"
+version = "0.1.0"
+dependencies = [
+ "core-algebra",
+ "core-proto",
+ "p256",
+ "runtime-algebra",
+ "runtime-ligero",
+ "runtime-proto",
+ "runtime-random",
+ "runtime-zk",
+ "serde_json",
+ "sha2",
+ "zstd",
+]
+
+[[package]]
 name = "nym-longfellow"
 version = "0.1.0"
 dependencies = [
@@ -805,6 +822,7 @@ dependencies = [
  "core-proto",
  "der",
  "hex",
+ "nym-auth-zk",
  "p256",
  "runtime-algebra",
  "runtime-ligero",

@@ -7,6 +7,10 @@
 //! 2. [`Prover::witness`]: the credential taken apart, every holder-side check, and both input
 //!    vectors (SPEC.md L3 to L5).
 //! 3. [`Prover::prove`]: the two-circuit proof (SPEC.md L6.2), and the presentation.
+//!
+//! Under rulebook v0.5 the circuits are `nym-auth-zk`'s (`bsc`, [`crate::v05`]): the witness step
+//! makes the holder-side checks of the package's INTEGRATION.md §6 and keeps the request and the
+//! holder material, and the prove step lets the crate build the witness and both proofs.
 
 use std::path::Path;
 use std::time::Instant;
@@ -25,7 +29,8 @@ use crate::request::{RequestObject, Rulebook, Statement, statement_for};
 use crate::witness::{self, Private, Public};
 use crate::x509::PublicKey;
 use crate::zk::{Circuits, ZkProverPair};
-use crate::{dates, hex, mdoc, unb64url, unhex, x509};
+use crate::{bsc, dates, hex, mdoc, unb64url, unhex, v05, x509};
+use nym_auth_zk as v5;
 
 /// The device key as the wallet holds it: a P-256 JWK with its private part.
 #[derive(Clone, Debug, Deserialize)]
@@ -76,12 +81,21 @@ pub struct WitnessInput {
   /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
   #[serde(default)]
   pub rulebook: Option<String>,
+  /// v0.5: the holder's birth date, `YYYY-MM-DD` (10 bytes), which opens `bsc` with secret_seed.
+  #[serde(default)]
+  pub birth_date: Option<String>,
+}
+
+/// What the prove step proves from: v0.4's two input vectors, or v0.5's request and holder
+/// material (the crate builds the witness inside its prove).
+enum Body {
+  V04 { witness: witness::Witness, transcript_seed: Vec<u8> },
+  V05 { request: v5::Request, credential: Vec<u8>, secret_seed: [u8; 16], birth_date: [u8; 10], device_signature: [u8; 64] },
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
 pub struct WitnessData {
-  witness: witness::Witness,
-  transcript_seed: Vec<u8>,
+  body: Body,
   presentation: Presentation,
   results: Map<String, Json>,
   witness_ms: f64,
@@ -96,6 +110,8 @@ pub struct Prover {
   pair: ZkProverPair,
   pub circuits_sha256: [u8; 32],
   pub load_ms: f64,
+  /// The v0.5 circuits (`nym-auth-zk`), loaded with the v0.4 ones.
+  v5: v05::Loaded<v5::Prover>,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
   pub keys_mb: Option<f64>,
 }
@@ -113,14 +129,27 @@ fn ecdsa(rs: &[u8; 64]) -> Result<EcdsaSignature, String> {
   EcdsaSignature::from_slice(rs).map_err(|e| format!("not an ECDSA signature: {e}"))
 }
 
-/// The registry's description of the circuits, for both sides' `info`.
-pub fn circuit_info(sha256: &[u8; 32]) -> Json {
-  json!([{
-    "system_id": CIRCUIT_ID,
-    "proof_system": PROOF_SYSTEM,
-    "artifact_sha256": hex(sha256),
-    "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
-  }])
+/// The registry's description of the circuits, for both sides' `info`: the same circuit id under
+/// each rulebook version, with that version's artifact and public inputs.
+pub fn circuit_info(sha256: &[u8; 32], v05_sha256: &[u8; 32]) -> Json {
+  json!([
+    {
+      "system_id": CIRCUIT_ID,
+      "proof_system": PROOF_SYSTEM,
+      "rulebook": "0.4",
+      "artifact": crate::circuit::ARTIFACT,
+      "artifact_sha256": hex(sha256),
+      "public_inputs": PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
+    },
+    {
+      "system_id": CIRCUIT_ID,
+      "proof_system": PROOF_SYSTEM,
+      "rulebook": "0.5",
+      "artifact": v05::ARTIFACT,
+      "artifact_sha256": hex(v05_sha256),
+      "public_inputs": v05::PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
+    },
+  ])
 }
 
 /// The public values a witness claims, by input, as the guide shows them: text for T, E and C,
@@ -155,16 +184,17 @@ impl Prover {
     let c = Circuits::load(dir)?;
     let (circuits_sha256, load_ms) = (c.sha256, c.load_ms);
     let pair = ZkProverPair::new(c);
-    Ok(Prover { pair, circuits_sha256, load_ms, keys_mb: mb(heap.held()) })
+    let v5 = v05::load_prover()?;
+    Ok(Prover { pair, circuits_sha256, load_ms: load_ms + v5.load_ms, v5, keys_mb: mb(heap.held()) })
   }
 
   pub fn info(&self) -> Json {
     json!({
       "service": "prover",
-      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits; Node addon"),
+      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5); Node addon"),
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": circuit_info(&self.circuits_sha256),
+      "circuits": circuit_info(&self.circuits_sha256, &self.v5.sha256),
       "load_ms": self.load_ms,
       "keys_mb": self.keys_mb,
       "threads": 1,
@@ -217,6 +247,9 @@ impl Prover {
     }
     if input.credential.format != "mso_mdoc" || input.credential.doctype != DOC_TYPE {
       return Err(bad(format!("the credential is not an mso_mdoc of {DOC_TYPE}")));
+    }
+    if rulebook == Rulebook::V05 {
+      return self.witness_v05(input, &s, &now, t, heap);
     }
     let m = mdoc::parse(&input.credential.issuer_signed).map_err(bad)?;
     if m.doc_type != DOC_TYPE {
@@ -291,8 +324,7 @@ impl Prover {
       "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()) },
     });
     Ok(WitnessData {
-      witness: w,
-      transcript_seed: s.session_transcript.clone(),
+      body: Body::V04 { witness: w, transcript_seed: s.session_transcript.clone() },
       presentation: Presentation {
         system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
@@ -313,7 +345,23 @@ impl Prover {
     let peak = Peak::start();
     let heap = Heap::start();
     let t = Instant::now();
-    let proved = self.pair.prove(w.witness, &w.transcript_seed)?;
+    let proved = match w.body {
+      Body::V04 { witness, transcript_seed } => self.pair.prove(witness, &transcript_seed)?,
+      Body::V05 { request, credential, secret_seed, birth_date, device_signature } => {
+        let holder = v5::Holder { credential: &credential, secret_seed, birth_date };
+        let p = self
+          .v5
+          .side
+          .prove(&request, &holder, &device_signature, &mut runtime_random::SecureRandomEngine::new())
+          .map_err(|e| format!("the v0.5 circuits: {e:?}"))?;
+        let rest = p.proof.len().saturating_sub(96);
+        let parts = json!([
+          { "name": "MAC tags (6)", "bytes": 96, "children": [] },
+          { "name": "Hash and signature circuit proofs", "bytes": rest, "children": [] },
+        ]);
+        crate::zk::Proved { proof: p.proof, nym: p.pseudonym, parts }
+      }
+    };
     let prove_ms = ms(t);
     let peak_mb = peak.read();
     // The proof's working memory: the most the witness and prove steps held at once, above what
@@ -341,5 +389,97 @@ impl Prover {
         "threads": 1,
       },
     }))
+  }
+}
+
+impl Prover {
+  /// Step 2 under rulebook v0.5: the holder-side checks of the package's INTEGRATION.md §6, in
+  /// its order, so a refusal says why (`nym_auth_zk`'s prove refuses all of them too, without a
+  /// reason): the credential is the compact profile the circuits read, the issuer signature
+  /// verifies under the x5chain key, (secret_seed, birth_date) opens bsc, the device signature
+  /// verifies, validFrom <= proof_time <= validUntil (both inclusive), and the birth date lies in
+  /// [E, C] on the UTC date of proof_time.
+  fn witness_v05(&self, input: &WitnessInput, s: &Statement, now: &dates::Time, t: Instant, heap: Heap) -> Result<WitnessData, Refusal> {
+    let issuer_signed = unb64url("issuer_signed", &input.credential.issuer_signed).map_err(bad)?;
+    let c = v05::credential(&issuer_signed).map_err(bad)?;
+    let signer = x509::parse(&c.document_signer).map_err(|e| bad(format!("x5chain: {e}")))?;
+    verifying_key(&signer.key)
+      .and_then(|vk| ecdsa(&c.parsed.issuer_sig).and_then(|sig| vk.verify(&c.parsed.sig_structure, &sig).map_err(|e| e.to_string())))
+      .map_err(|e| bad(format!("the issuer signature does not verify under the Document Signer's key: {e}")))?;
+    let seed: [u8; 16] = unhex("secret_seed", &input.secret_seed).map_err(bad)?;
+    let birth_text = input.birth_date.as_deref().ok_or_else(|| bad("v0.5: birth_date is required (it opens bsc)"))?;
+    let birth = dates::date(birth_text).map_err(|e| bad(format!("birth_date: {e}")))?;
+    let birth_date: [u8; 10] = birth_text.as_bytes().try_into().map_err(|_| bad("birth_date is not 10 bytes"))?;
+    if crate::sha256(&[&seed[..], &birth_date[..]].concat()) != c.parsed.bsc {
+      return Err(bad("secret_seed and birth_date do not open the credential's bsc"));
+    }
+    let device: [u8; 64] = unhex("device_signature", &input.device_signature).map_err(bad)?;
+    let device_key = PublicKey { x: c.parsed.device_x, y: c.parsed.device_y };
+    verifying_key(&device_key)
+      .and_then(|vk| {
+        let sig = ecdsa(&device)?;
+        vk.verify(&handover::device_message(&s.session_transcript, DOC_TYPE), &sig).map_err(|e| e.to_string())
+      })
+      .map_err(|e| bad(format!("the device signature does not verify under the credential's device key: {e}")))?;
+    let (now_s, from_s, until_s) = (dates::unix(now), dates::unix(&c.valid_from), dates::unix(&c.valid_until));
+    if !(from_s <= now_s && now_s <= until_s) {
+      return Err(Refusal::unsatisfiable(format!(
+        "the credential is valid from {} until {}, not at {}",
+        c.valid_from.text(),
+        c.valid_until.text(),
+        now.text()
+      )));
+    }
+    if !s.age.holds(&birth) {
+      return Err(Refusal::unsatisfiable("the birth date lies outside the requested range"));
+    }
+    let request = bsc::request(&signer.key, &now.text(), &input.request, &input.credential_query_id, &input.handover).map_err(Refusal::bad_request)?;
+    let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
+    let nym = v5::witness::pseudonym(&seed, &statement.verifier_input);
+    let witness_ms = ms(t);
+
+    let mut results = Map::new();
+    results.insert(s.nym_handle.clone(), Json::String(hex(&nym)));
+    let mut q = [0u8; 64];
+    q[..32].copy_from_slice(&signer.key.x);
+    q[32..].copy_from_slice(&signer.key.y);
+    let public: Vec<Json> = [
+      ("doctype", vec![DOC_TYPE.to_string()]),
+      ("proof_time", vec![now.text()]),
+      ("pseudonym.verifier_input", vec![hex(&statement.verifier_input)]),
+      ("results.nym", vec![hex(&nym)]),
+      ("age_check.ge", vec![s.age.earliest()]),
+      ("age_check.le", vec![s.age.cutoff()]),
+      ("mac.challenge", vec![]),
+      ("mac.tags", vec![]),
+      ("issuer_key_set", vec![hex(&q[..32]), hex(&q[32..])]),
+      ("session_transcript", vec![hex(&statement.device_digest)]),
+    ]
+    .into_iter()
+    .map(|(name, values)| json!({ "name": name, "values": values }))
+    .collect();
+    let summary = json!({
+      "proof_time": now.text(),
+      "rulebook": "0.5",
+      "results": results,
+      "public_inputs": public,
+      "counts": { "hash": { "public": 278 }, "signature": { "public": 1155 } },
+      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()) },
+    });
+    Ok(WitnessData {
+      body: Body::V05 { request, credential: issuer_signed, secret_seed: seed, birth_date, device_signature: device },
+      presentation: Presentation {
+        system_id: CIRCUIT_ID.into(),
+        proof: Vec::new(),
+        issuer_key_set: vec![c.document_signer.clone()],
+        proof_time: now.text(),
+        results: vec![(s.nym_handle.clone(), ResultValue::Pseudonym(nym))],
+      },
+      results,
+      witness_ms,
+      heap_base: heap.base(),
+      witness_high: heap.high(),
+      summary,
+    })
   }
 }

@@ -1,0 +1,32 @@
+[package]
+name = "nym-auth-zk"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Longfellow zero-knowledge presentations of the nym_auth mdoc attestation (eu.europa.ec.eudi.nym_auth.1): age range check on the committed birth date and the known-offender-matching-ssc pseudonym, in one proof. Two Longfellow circuits (LFC2 in an LFA2 archive) and their native witness generator."
+
+[dependencies]
+# Google's Longfellow Rust implementation: circuits (LFC2/LFA2), fields, the ZK prover and
+# verifier (Ligero + sumcheck), the Fiat-Shamir transcript and the proof encoding.
+core-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+core-algebra = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-algebra = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-zk = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-random = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-ligero = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+# The circuit archive is zstd-compressed, as Google's mdoc circuits are shipped.
+zstd = "0.13"
+# SHA-256 (the transcript-independent hashes: verifier_input, the session's handover, e2).
+sha2 = "0.10"
+# P-256 field and scalar arithmetic for the signature circuit's witness.
+p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field"] }
+
+[dev-dependencies]
+serde_json = "1"
+# The synthetic holders' device signatures (tests/synthetic.rs).
+p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field", "ecdsa"] }
+
+[profile.release]
+debug = false

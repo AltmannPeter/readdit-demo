@@ -22,6 +22,7 @@
 //! | [`measure`] | Timing and peak memory |
 //! | [`prover`] | The holder's native steps: unlock and sign, witness, prove |
 //! | [`verifier`] | Verification of a presentation against the verifier's own values |
+//! | [`v05`], [`bsc`] | Rulebook v0.5: the `nym-auth-zk` bsc circuits (Peter's package), the adapter, the credential checks |
 //!
 //! The SessionTranscript differs from the archive's fixtures, which use the Digital Credentials
 //! API handover (`OpenID4VPDCAPIHandover`). Community's wallet is invoked by a QR code, so B.2.6.1
@@ -30,6 +31,7 @@
 //!
 //! The prover keeps no holder state: every call brings the credential material it needs.
 
+pub mod bsc;
 pub mod cbor;
 pub mod circuit;
 pub mod dates;
@@ -41,6 +43,7 @@ pub mod presentation;
 pub mod prover;
 pub mod request;
 pub mod sha;
+pub mod v05;
 pub mod verifier;
 pub mod witness;
 pub mod x509;

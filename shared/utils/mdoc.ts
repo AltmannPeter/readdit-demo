@@ -12,8 +12,11 @@ export interface IssuerSignedView {
   namespace: string
   /** The items in the order issued. */
   items: Array<{ digestID: number; elementIdentifier: string; value: unknown; bytes: number }>
-  birthDate: string
-  ssc: Uint8Array
+  /** v0.4: the birth_date item; v0.5 commits to it in bsc, so null. */
+  birthDate: string | null
+  /** v0.4's ssc, v0.5's bsc (null when the credential has none). */
+  ssc: Uint8Array | null
+  bsc: Uint8Array | null
   psc: Uint8Array | null
   /** DER Document Signer certificate from x5chain. */
   documentSigner: Uint8Array
@@ -92,16 +95,17 @@ export function readIssuerSigned(issuerSigned: string): IssuerSignedView {
   })
   const value = (id: string) => items.find((i) => i.elementIdentifier === id)?.value
   const birth = value('birth_date')
-  if (!(birth instanceof Tag) || birth.tag !== 1004 || typeof birth.value !== 'string') fail('birth_date is not tag 1004')
-  const psc = value('psc')
+  if (birth !== undefined && (!(birth instanceof Tag) || birth.tag !== 1004 || typeof birth.value !== 'string')) fail('birth_date is not tag 1004')
+  const opt = (id: string) => (value(id) === undefined ? null : bytes(value(id), id))
 
   return {
     docType: String(mso.get('docType')),
     namespace: NYM_DOCTYPE,
     items,
-    birthDate: birth.value,
-    ssc: bytes(value('ssc'), 'ssc'),
-    psc: psc === undefined ? null : bytes(psc, 'psc'),
+    birthDate: birth instanceof Tag ? (birth.value as string) : null,
+    ssc: opt('ssc'),
+    bsc: opt('bsc'),
+    psc: opt('psc'),
     documentSigner,
     validity: {
       signed: tdate(validity.get('signed'), 'signed'),

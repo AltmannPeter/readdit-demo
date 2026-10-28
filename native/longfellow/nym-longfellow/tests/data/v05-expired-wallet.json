@@ -1,0 +1,30 @@
+{
+  "comment": "Test only (nym-longfellow tests/bsc_flow.rs): the teen's v0.5 credential, valid from 2026-01-01T00:00:00Z until 2026-02-01T00:00:00Z, signed by a throwaway Document Signer (nym-issuer with --valid-from 2026-01-01 --valid-until 2026-02-01T00:00:00Z --keep app/wallet/demo-wallet.json --v05). The prover refuses it as expired.",
+  "holders": [
+    {
+      "credential": {
+        "doctype": "eu.europa.ec.eudi.nym_auth.1",
+        "format": "mso_mdoc",
+        "issuer_signed": "ompuYW1lU3BhY2VzoXgcZXUuZXVyb3BhLmVjLmV1ZGkubnltX2F1dGguMYLYGFhbpGhkaWdlc3RJRABmcmFuZG9tUMGwI60YS2fINzQu4M2fcntxZWxlbWVudElkZW50aWZpZXJqYmlydGhfZGF0ZWxlbGVtZW50VmFsdWXZA-xqMjAxMS0wMy0xNNgYWGikaGRpZ2VzdElEAWZyYW5kb21Qa-yfZ07jhO3R3ucRo9HXhXFlbGVtZW50SWRlbnRpZmllcmNzc2NsZWxlbWVudFZhbHVlWCCFtsqCGkGoCM6rZWjMx-kxAFqNARdFtjo7FFI2sGiqJ2ppc3N1ZXJBdXRohEOhASahGCFZAd4wggHaMIIBgKADAgECAhEA_-kauM_gQlJdp11w6jO_XjAKBggqhkjOPQQDAjBCMR0wGwYDVQQDDBREZW1vIERvY3VtZW50IFNpZ25lcjEUMBIGA1UECgwLRGVtbyBJc3N1ZXIxCzAJBgNVBAYMAlNFMB4XDTI2MDEwMTAwMDAwMFoXDTI3MDIwMTAwMDAwMFowQjEdMBsGA1UEAwwURGVtbyBEb2N1bWVudCBTaWduZXIxFDASBgNVBAoMC0RlbW8gSXNzdWVyMQswCQYDVQQGDAJTRTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJR-HLsG7ksSd90pYBo1UBB792K8qFRLydFfST0BDaLRYRLBMT3YdkuA-fp9t-GPRwVUDahJS4aifNCjAGWWhxWjVzBVMA8GA1UdDwEB_wQFAwMHgAAwEgYDVR0lBAswCQYHKIGMXQUBAjAdBgNVHQ4EFgQU1je7mRKDeIsoacX7YIsXu6GaEvUwDwYDVR0TAQH_BAUwAwEBADAKBggqhkjOPQQDAgNIADBFAiAve5l5uwxi9P7krDpdei3lsDkMAjD3WXwudwjvWaZVsgIhALUa1mq-vH2MSYv3dMMoX2qlaGaFR6-jYoHZBJG_UJzRWQGT2BhZAY6mZ3ZlcnNpb25jMS4wb2RpZ2VzdEFsZ29yaXRobWdTSEEtMjU2bHZhbHVlRGlnZXN0c6F4HGV1LmV1cm9wYS5lYy5ldWRpLm55bV9hdXRoLjGiAFggiGttPzhJs_S4qm26HOql5qnoLIXO1xMipcUGMw5AstkBWCArO0hbKHE_-mWyuIzW0tZkAXMyJ3wmwvk_cuF7-H77IW1kZXZpY2VLZXlJbmZvoWlkZXZpY2VLZXmkAQIgASFYIH5vi9ft6_BFfmjFHPdoQ0NlQM4WQUSsSXMc-jmRwrTsIlggJOE7qWdYrjSuECyJAq0coEs3iEMZ0VTCUmDqyeMsEclnZG9jVHlwZXgcZXUuZXVyb3BhLmVjLmV1ZGkubnltX2F1dGguMWx2YWxpZGl0eUluZm-jZnNpZ25lZMB0MjAyNi0wMS0wMVQwMDowMDowMFppdmFsaWRGcm9twHQyMDI2LTAxLTAxVDAwOjAwOjAwWmp2YWxpZFVudGlswHQyMDI2LTAyLTAxVDAwOjAwOjAwWlhANjyRV4nIDxocJrWNzQTGe27aNcbDlDemRP4u11rqp6BBC1ub01ebg5IJcI56rEr1QPHFuRqzhco0qxsnx-rOsg"
+      },
+      "device_key": {
+        "crv": "P-256",
+        "d": "-kIPShCJOixF-0VqWGTR-1WAcB_OQZQ401JiJyODC_c",
+        "kty": "EC",
+        "x": "fm-L1-3r8EV-aMUc92hDQ2VAzhZBRKxJcxz6OZHCtOw",
+        "y": "JOE7qWdYrjSuECyJAq0coEs3iEMZ0VTCUmDqyeMsEck"
+      },
+      "secret_seed": "9835b2fa5fff78a12a2331813612c95a",
+      "v05": {
+        "birth_date": "2011-03-14",
+        "credential": {
+          "doctype": "eu.europa.ec.eudi.nym_auth.1",
+          "format": "mso_mdoc",
+          "issuer_signed": "ompuYW1lU3BhY2VzoXgcZXUuZXVyb3BhLmVjLmV1ZGkubnltX2F1dGguMYLYGFhopGhkaWdlc3RJRABmcmFuZG9tUDjI8B8a9sgpUmyhFJsCgKlxZWxlbWVudElkZW50aWZpZXJjYnNjbGVsZW1lbnRWYWx1ZVggphQD6dPcqtsHlmBmomntr1Vuh_VLBHafeY3_ZTJX8WLYGFhopGhkaWdlc3RJRAFmcmFuZG9tUDII4DQ0T8CxtD6msu_CDaZxZWxlbWVudElkZW50aWZpZXJjcHNjbGVsZW1lbnRWYWx1ZVgg_1HW0lTDR-0s8HCvlknrLoc5DrRTj7eRI4qouUHTqZ9qaXNzdWVyQXV0aIRDoQEmoRghWQHeMIIB2jCCAYCgAwIBAgIRAP_pGrjP4EJSXaddcOozv14wCgYIKoZIzj0EAwIwQjEdMBsGA1UEAwwURGVtbyBEb2N1bWVudCBTaWduZXIxFDASBgNVBAoMC0RlbW8gSXNzdWVyMQswCQYDVQQGDAJTRTAeFw0yNjAxMDEwMDAwMDBaFw0yNzAyMDEwMDAwMDBaMEIxHTAbBgNVBAMMFERlbW8gRG9jdW1lbnQgU2lnbmVyMRQwEgYDVQQKDAtEZW1vIElzc3VlcjELMAkGA1UEBgwCU0UwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASUfhy7Bu5LEnfdKWAaNVAQe_divKhUS8nRX0k9AQ2i0WESwTE92HZLgPn6fbfhj0cFVA2oSUuGonzQowBllocVo1cwVTAPBgNVHQ8BAf8EBQMDB4AAMBIGA1UdJQQLMAkGByiBjF0FAQIwHQYDVR0OBBYEFNY3u5kSg3iLKGnF-2CLF7uhmhL1MA8GA1UdEwEB_wQFMAMBAQAwCgYIKoZIzj0EAwIDSAAwRQIgL3uZebsMYvT-5Kw6XXot5bA5DAIw91l8LncI71mmVbICIQC1GtZqvrx9jEmL93TDKF9qpWhmhUevo2KB2QSRv1Cc0VkBk9gYWQGOpmd2ZXJzaW9uYzEuMG9kaWdlc3RBbGdvcml0aG1nU0hBLTI1Nmdkb2NUeXBleBxldS5ldXJvcGEuZWMuZXVkaS5ueW1fYXV0aC4xbHZhbHVlRGlnZXN0c6F4HGV1LmV1cm9wYS5lYy5ldWRpLm55bV9hdXRoLjGiAFggqMNERuL4D1Ia4zqnberTqAtVkDtt4rKL3nBis9CAMJoBWCBeQoXcIkVFzSTvZp6nP3usTC-xxhrFoWGJKpzdTYcdeG1kZXZpY2VLZXlJbmZvoWlkZXZpY2VLZXmkAQIgASFYIH5vi9ft6_BFfmjFHPdoQ0NlQM4WQUSsSXMc-jmRwrTsIlggJOE7qWdYrjSuECyJAq0coEs3iEMZ0VTCUmDqyeMsEclsdmFsaWRpdHlJbmZvo2ZzaWduZWTAdDIwMjYtMDEtMDFUMDA6MDA6MDBaaXZhbGlkRnJvbcB0MjAyNi0wMS0wMVQwMDowMDowMFpqdmFsaWRVbnRpbMB0MjAyNi0wMi0wMVQwMDowMDowMFpYQPFeqYkj1-2VglSiwgED04vIGgZNsrXJNtJjcULLh7xpbNaB-6iQvsp-tXQ9-sKcvwBAfLvVTK07KoxGuLooyQA",
+          "rulebook": "0.5"
+        },
+        "private_seed": "79f3b1ab1c29d9fcd872c8b8f575e5f6"
+      }
+    }
+  ]
+}

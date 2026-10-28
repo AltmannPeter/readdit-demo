@@ -9,7 +9,7 @@ fit stops the built server.
 | Profile | Rulebook | Proof systems |
 | --- | --- | --- |
 | `nym-auth-v0.4` | [v0.4](../docs/nym_auth_rulebook.md), 2026-10-20 | Vega, Longfellow, BBS |
-| `nym-auth-v0.5` | [v0.5](../docs/nym_auth_rulebook-v0.5.md), 2026-10-27 | BBS; Vega and Longfellow pending (circuits over `bsc` and `psc`) |
+| `nym-auth-v0.5` | [v0.5](../docs/nym_auth_rulebook-v0.5.md), 2026-10-27 | Longfellow (the `nym-auth-zk` bsc circuits), BBS; Vega pending |
 
 ## What a profile holds
 
@@ -46,7 +46,10 @@ The native addons take the version as `rulebook` ("0.4" when absent) in the prov
    `PROFILES` in `shared/profiles/index.ts`.
 2. A new way to write or read params: a new operator in `shared/protocol/operators.ts` (never change
    an existing one), named in the function's `wire`.
-3. A new wire or presentation rule in the addons: a new `Rulebook` variant there.
+3. A new wire or presentation rule in the addons: a new `Rulebook` variant there. New circuits
+   under the same system id: an entry in its registry entry's `byRulebook`
+   (`shared/registry/circuits.ts`), and the addon lists them in `info.circuits` with `rulebook`
+   (Longfellow v0.5: `nym-longfellow/src/v05.rs`).
 4. Copy the rulebook's test vectors to `profiles/<id>/test-vectors/` and point `scripts/vectors-check.mjs`
    and the addons' `tests/rulebook_vectors.rs` at them (v0.5: `npm run vectors:check`, see
    [`nym-auth-v0.5/test-vectors`](nym-auth-v0.5/test-vectors/README.md)).

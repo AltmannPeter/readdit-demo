@@ -13,6 +13,8 @@ runtime-algebra = { workspace = true }
 runtime-ligero = { workspace = true }
 runtime-random = { workspace = true }
 runtime-zk = { workspace = true }
+# The rulebook v0.5 circuits (bsc) and their witness, prover and verifier (src/bsc.rs).
+nym-auth-zk = { path = "../nym-auth-zk" }
 # circuits/mdoc/circuits.zst.
 zstd = "0.13"
 serde = { version = "1.0", features = ["derive"] }

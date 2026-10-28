@@ -135,14 +135,13 @@
       "system_id": "urn:circuits:vega:nym_auth:v1",
       "status": "pending",
       "proof_time": "always",
-      "note": "Waiting for the v0.5 circuits (bsc, psc); the demo mdocs are v0.4."
+      "note": "Waiting for the v0.5 Vega circuits (bsc)."
     },
     {
       "proof_system": "longfellow-libzk-v1",
       "system_id": "urn:circuits:longfellow:nym_auth:v1",
-      "status": "pending",
-      "proof_time": "always",
-      "note": "Waiting for the v0.5 circuits (bsc, psc); the demo mdocs are v0.4."
+      "status": "available",
+      "proof_time": "always"
     },
     { "proof_system": "bbs-cd-plugins-v0.1", "system_id": "urn:mms:bbs-cd:nym_auth:v1", "status": "available", "proof_time": "with-age_check" }
   ]

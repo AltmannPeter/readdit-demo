@@ -10,6 +10,10 @@
 //! 5. both circuits' proofs verify with the public inputs (SPEC.md L6.3), the transcript seeded
 //!    with the SessionTranscript.
 //!
+//! Under rulebook v0.5, step 5 runs `nym-auth-zk`'s verifier on the `bsc` circuits
+//! ([`crate::v05`]), with the request built from the session's request and handover and the
+//! certificate's key ([`crate::bsc::request`]); the crate computes the public inputs.
+//!
 //! A refusal names its rule (`code`). Longfellow's verifier says which circuit failed, not which
 //! public input: a wrong T, E, C, verifier_input or pseudonym fails the hash circuit, a wrong
 //! issuer key or e2 the signature circuit.
@@ -28,7 +32,8 @@ use crate::request::{RequestObject, Rulebook, statement_for};
 use crate::witness::Public;
 use crate::x509::TrustAnchors;
 use crate::zk::{Circuits, Rejection, ZkVerifierPair};
-use crate::{dates, hex};
+use crate::{bsc, dates, hex, v05};
+use nym_auth_zk as v5;
 
 /// The largest proof the verifier reads. A proof of these circuits is about 344 kB.
 const MAX_PROOF_BYTES: usize = 1 << 20;
@@ -73,6 +78,8 @@ fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
 
 pub struct Verifier {
   pair: ZkVerifierPair,
+  /// The v0.5 circuits (`nym-auth-zk`), loaded with the v0.4 ones.
+  v5: v05::Loaded<v5::Verifier>,
   pub circuits_sha256: [u8; 32],
   pub load_ms: f64,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
@@ -93,16 +100,17 @@ impl Verifier {
     let c = Circuits::load(dir)?;
     let (circuits_sha256, load_ms) = (c.sha256, c.load_ms);
     let pair = ZkVerifierPair::new(c);
-    Ok(Verifier { pair, circuits_sha256, load_ms, keys_mb: mb(heap.held()), anchors, tolerance_s })
+    let v5 = v05::load_verifier()?;
+    Ok(Verifier { pair, circuits_sha256, load_ms: load_ms + v5.load_ms, v5, keys_mb: mb(heap.held()), anchors, tolerance_s })
   }
 
   pub fn info(&self) -> Json {
     json!({
       "service": "verifier",
-      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits; Node addon"),
+      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5); Node addon"),
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": crate::prover::circuit_info(&self.circuits_sha256),
+      "circuits": crate::prover::circuit_info(&self.circuits_sha256, &self.v5.sha256),
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
@@ -205,6 +213,24 @@ impl Verifier {
       return Err(refuse("proof_encoding", format!("a proof of {} bytes", p.proof.len())));
     }
     let t = Instant::now();
+    if rulebook == Rulebook::V05 {
+      let req = bsc::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
+        .map_err(|e| refuse("request", e))?;
+      let outcome = self.v5.side.verify(&req, &v5::Presentation { pseudonym: *nym, proof: p.proof.clone() });
+      metrics.insert("verify_ms".into(), json!(ms(t)));
+      metrics.insert("threads".into(), json!(1));
+      if let Err(e) = outcome {
+        return Err(match bsc::failing_circuit(&e) {
+          Some(c) => Refused {
+            code: "proof_invalid",
+            input: Some(c),
+            certificate: None,
+            reason: format!("the {c} circuit's proof does not verify with the verifier's public inputs"),
+          },
+          None => refuse("proof_encoding", format!("the proof does not decode: {e:?}")),
+        });
+      }
+    } else {
     let public = Public {
       time: proof_time.text(),
       earliest: s.age.earliest(),
@@ -227,6 +253,7 @@ impl Verifier {
           reason: format!("the {circuit} circuit's proof does not verify with the verifier's public inputs"),
         });
       }
+    }
     }
 
     let mut results = Map::new();

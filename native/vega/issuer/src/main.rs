@@ -14,13 +14,25 @@
 //! credential, device private key and seed, and the page's mocked wallet carries them. The issuer's
 //! private key is not written anywhere; to re-issue, run the tool again, which replaces both files.
 //!
+//! With `--v05`, each holder also gets a rulebook v0.5 mdoc (`docs/nym_auth_rulebook-v0.5.md`,
+//! compact profile), signed by the same Document Signer over the same device key, seed and
+//! validity: the items `bsc` = SHA-256(secret_seed ‖ birth_date) (digestID 0) and `psc` =
+//! SHA-256(private_seed) (digestID 1), each a 32-byte bstr with a 16-byte random, the MSO members
+//! in the profile's order (version, digestAlgorithm, docType, valueDigests, deviceKeyInfo,
+//! validityInfo), and a fresh 16-byte private_seed per holder (kept by `--keep` when the earlier
+//! file has one). The wallet file holds it under the holder's `v05`, with `birth_date` (10 ASCII
+//! bytes, which open `bsc` with the seed) and `private_seed`. Each v0.5 credential is checked
+//! against the layout the v0.5 Longfellow circuits read (Peter's nym-auth-longfellow-v1 package,
+//! INTEGRATION.md §5): Sig_structure 423 B (376 to 439), bsc item 108 B (56 to 119), and each
+//! byte pattern exactly once.
+//!
 //! Before writing, the tool checks the profile's lengths for each credential (Sig_structure 423 B,
 //! birth_date item 95 B, ssc item 108 B), prints them, and takes each credential apart again as the
 //! prover does.
 //!
 //! ```text
 //! nym-issuer --holder YYYY-MM-DD[:DAYS] [--holder ...] --wallet-out <file.json> --trust-out <file.pem>
-//!            [--valid-from YYYY-MM-DD] [--days N | --valid-until YYYY-MM-DDThh:mm:ssZ] [--keep <file.json>]
+//!            [--valid-from YYYY-MM-DD] [--days N | --valid-until YYYY-MM-DDThh:mm:ssZ] [--keep <file.json>] [--v05]
 //! ```
 //! Each holder's validity runs from `--valid-from` (default: yesterday, UTC) 00:00:00Z for DAYS days
 //! (default `--days`, 366), or to `--valid-until` for every holder; `9999-12-31T23:59:59Z` is the
@@ -65,6 +77,8 @@ struct Args {
   days: i64,
   valid_until: Option<Time>,
   keep: Option<String>,
+  /// Also issue each holder's rulebook v0.5 mdoc.
+  v05: bool,
 }
 
 fn holder(value: &str) -> Result<Holder, String> {
@@ -78,8 +92,12 @@ fn holder(value: &str) -> Result<Holder, String> {
 fn args() -> Result<Args, String> {
   let mut it = std::env::args().skip(1);
   let (mut holders, mut wallet_out, mut trust_out, mut valid_from, mut days) = (Vec::new(), None, None, None, 366);
-  let (mut valid_until, mut keep) = (None, None);
+  let (mut valid_until, mut keep, mut v05) = (None, None, false);
   while let Some(flag) = it.next() {
+    if flag == "--v05" {
+      v05 = true;
+      continue;
+    }
     let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
     match flag.as_str() {
       "--holder" | "--birth-date" => holders.push(holder(&value)?),
@@ -107,6 +125,7 @@ fn args() -> Result<Args, String> {
     days,
     valid_until,
     keep,
+    v05,
   })
 }
 
@@ -165,11 +184,18 @@ fn kept(holder: &serde_json::Value, k: usize) -> Result<(SigningKey, [u8; 16]), 
   Ok((device, seed))
 }
 
+/// The private_seed of an earlier wallet file's holder, if it has a v0.5 credential.
+fn kept_private_seed(p: &serde_json::Value, k: usize) -> Result<Option<[u8; 16]>, String> {
+  match p.get("v05").and_then(|v| v.get("private_seed")).and_then(|s| s.as_str()) {
+    None => Ok(None),
+    Some(s) => nym_vega::unhex::<16>(&format!("--keep: holder {}: v05.private_seed", k + 1), s).map(Some),
+  }
+}
+
 /// One holder's credential, device key and seed, signed by `issuer` with the Document Signer `ds`;
 /// checked against the profile's lengths and read back as the prover reads it. `keep` reuses a
 /// device key and seed; without it both are fresh.
-fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time, keep: Option<(SigningKey, [u8; 16])>) -> Result<serde_json::Value, String> {
-  let (device, seed) = keep.unwrap_or_else(|| (SigningKey::random(&mut OsRng), random()));
+fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time, device: &SigningKey, seed: [u8; 16]) -> Result<serde_json::Value, String> {
   let device_point = device.verifying_key().to_encoded_point(false);
   let (dx, dy) = (device_point.x().ok_or("device x")?, device_point.y().ok_or("device y")?);
   let ssc = sha256(&seed);
@@ -255,6 +281,109 @@ fn issue(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, v
   }))
 }
 
+/// The one position of `pat` in `hay`, or an error naming `what`.
+fn once(hay: &[u8], pat: &[u8], what: &str) -> Result<(), String> {
+  let n = hay.windows(pat.len()).filter(|w| *w == pat).count();
+  if n == 1 { Ok(()) } else { Err(format!("{what}: found {n} times, the v0.5 circuits read it exactly once")) }
+}
+
+/// One holder's rulebook v0.5 credential (compact profile): `bsc` and `psc`, the same device key,
+/// seed, Document Signer and validity as the v0.4 one; checked against the layout the v0.5
+/// Longfellow circuits read.
+#[allow(clippy::too_many_arguments)]
+fn issue_v05(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time, device: &SigningKey, seed: &[u8; 16], private_seed: &[u8; 16]) -> Result<serde_json::Value, String> {
+  let device_point = device.verifying_key().to_encoded_point(false);
+  let (dx, dy) = (device_point.x().ok_or("device x")?, device_point.y().ok_or("device y")?);
+  let birth = birth_date.text();
+  if birth.len() != 10 {
+    return Err(format!("birth_date {birth} is not 10 bytes"));
+  }
+  let bsc = sha256(&[&seed[..], birth.as_bytes()].concat());
+  let psc = sha256(private_seed);
+  let bsc_item = item_bytes(0, &random::<16>(), "bsc", Value::Bytes(bsc.to_vec()));
+  let psc_item = item_bytes(1, &random::<16>(), "psc", Value::Bytes(psc.to_vec()));
+  let cose_key = Value::Map(vec![
+    (int(1), int(2)),
+    (int(-1), int(1)),
+    (int(-2), Value::Bytes(dx.to_vec())),
+    (int(-3), Value::Bytes(dy.to_vec())),
+  ]);
+  let bsc_digest = sha256(&bsc_item);
+  let digests = Value::Map(vec![
+    (Value::Unsigned(0), Value::Bytes(bsc_digest.to_vec())),
+    (Value::Unsigned(1), Value::Bytes(sha256(&psc_item).to_vec())),
+  ]);
+  // The compact profile's order (rulebook v0.5, "Compact profile").
+  let mso = record(vec![
+    ("version", text("1.0")),
+    ("digestAlgorithm", text("SHA-256")),
+    ("docType", text(DOC_TYPE)),
+    ("valueDigests", Value::Map(vec![(text(DOC_TYPE), digests)])),
+    ("deviceKeyInfo", record(vec![("deviceKey", cose_key)])),
+    (
+      "validityInfo",
+      record(vec![
+        ("signed", tag(0, text(&valid_from.text()))),
+        ("validFrom", tag(0, text(&valid_from.text()))),
+        ("validUntil", tag(0, text(&valid_until.text()))),
+      ]),
+    ),
+  ]);
+  let payload = tag(24, Value::Bytes(mso.encode())).encode();
+  let protected = Value::Map(vec![(int(1), int(-7))]).encode();
+  let sig_structure = Value::Array(vec![
+    text("Signature1"),
+    Value::Bytes(protected.clone()),
+    Value::Bytes(Vec::new()),
+    Value::Bytes(payload.clone()),
+  ])
+  .encode();
+  let signature: Signature = issuer.sign(&sig_structure);
+  let issuer_auth = Value::Array(vec![
+    Value::Bytes(protected),
+    Value::Map(vec![(int(33), Value::Bytes(ds.to_vec()))]),
+    Value::Bytes(payload),
+    Value::Bytes(signature.to_bytes().to_vec()),
+  ]);
+  let issuer_signed = record(vec![
+    ("nameSpaces", Value::Map(vec![(text(DOC_TYPE), Value::Array(vec![Value::Encoded(bsc_item.clone()), Value::Encoded(psc_item.clone())]))])),
+    ("issuerAuth", issuer_auth),
+  ])
+  .encode();
+
+  // The layout the v0.5 circuits read (nym-auth-longfellow-v1, INTEGRATION.md §5).
+  println!("    Sig_structure: {} B (circuits: 376 to 439; rulebook vector: 423)", sig_structure.len());
+  println!("    bsc item: {} B (circuits: 56 to 119), psc item: {} B", bsc_item.len(), psc_item.len());
+  if !(376..=439).contains(&sig_structure.len()) || !(56..=119).contains(&bsc_item.len()) {
+    return Err("the v0.5 credential is outside the lengths the circuits read: not written".into());
+  }
+  let mut doc_type = vec![0x67];
+  doc_type.extend_from_slice(b"docType");
+  doc_type.extend_from_slice(&text(DOC_TYPE).encode());
+  let mut device_key = b"\x69deviceKey\xa4\x01\x02\x20\x01\x21\x58\x20".to_vec();
+  device_key.extend_from_slice(dx);
+  device_key.extend_from_slice(b"\x22\x58\x20");
+  device_key.extend_from_slice(dy);
+  let mut listed = vec![0x58, 0x20];
+  listed.extend_from_slice(&bsc_digest);
+  once(&sig_structure, &doc_type, "docType")?;
+  once(&sig_structure, &device_key, "deviceKey")?;
+  once(&sig_structure, b"\x69validFrom\xc0\x74", "validFrom")?;
+  once(&sig_structure, b"\x6avalidUntil\xc0\x74", "validUntil")?;
+  once(&sig_structure, &listed, "the bsc digest")?;
+  once(&bsc_item, b"\x71elementIdentifier\x63bsc", "the bsc identifier")?;
+  let mut value = b"\x6celementValue\x58\x20".to_vec();
+  value.extend_from_slice(&bsc);
+  once(&bsc_item, &value, "the bsc value")?;
+  println!("    IssuerSigned: {} B; bsc {}; psc {}", issuer_signed.len(), nym_vega::hex(&bsc), nym_vega::hex(&psc));
+
+  Ok(json!({
+    "credential": { "format": "mso_mdoc", "doctype": DOC_TYPE, "rulebook": "0.5", "issuer_signed": b64url(&issuer_signed) },
+    "birth_date": birth,
+    "private_seed": nym_vega::hex(private_seed),
+  }))
+}
+
 fn run() -> Result<(), String> {
   let a = args()?;
   let valid_from = midnight(a.valid_from);
@@ -297,11 +426,21 @@ fn run() -> Result<(), String> {
   for (k, h) in a.holders.iter().enumerate() {
     println!("holder {} (born {}){}:", k + 1, h.birth_date.text(), if a.keep.is_some() { ", device key and seed kept" } else { "" });
     let keep = previous.get(k).map(|p| kept(p, k)).transpose()?;
-    holders.push(issue(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], keep)?);
+    let (device, seed) = keep.unwrap_or_else(|| (SigningKey::random(&mut OsRng), random()));
+    let mut holder = issue(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], &device, seed)?;
+    if a.v05 {
+      let private_seed = match previous.get(k) {
+        Some(p) => kept_private_seed(p, k)?.unwrap_or_else(random),
+        None => random(),
+      };
+      println!("  v0.5:");
+      holder["v05"] = issue_v05(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], &device, &seed, &private_seed)?;
+    }
+    holders.push(holder);
   }
 
   let wallet = json!({
-    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer): one credential per holder, all signed by the same Document Signer. No true holder binding: the device private keys and the secret seeds sit in the page.",
+    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer): one rulebook v0.4 credential per holder and, under v05, its rulebook v0.5 credential (bsc, psc) with the birth_date and private_seed that open them, all signed by the same Document Signer over the same device key and secret_seed. No true holder binding: the device private keys and the seeds sit in the page.",
     "holders": holders,
   });
   let text = serde_json::to_string_pretty(&wallet).map_err(|e| e.to_string())? + "\n";

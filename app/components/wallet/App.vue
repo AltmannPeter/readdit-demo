@@ -5,7 +5,7 @@ import type { ConsentView, RequestView, WalletCaps } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
 import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
-import { analyzeRequest, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
+import { analyzeVersions, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
 import { TransportError, encryptResponse, httpTransport } from '~/wallet/transport'
 import { report } from '~/wallet/report'
 import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
@@ -78,6 +78,9 @@ const today = useToday()
 /** Presentations made from this page, per credential, for Recent History and Presentations. */
 const history = useState<Array<{ audience: string; at: number; credential: number }>>(`siros-history-${props.phone.id}`, () => [])
 const current = computed(() => credentials.value?.find((c) => c.index === focus.value) ?? null)
+/** The version of the card's credential that answers the current request (an mdoc card holds a
+ *  v0.4 and a v0.5 mdoc; analyzeVersions). */
+const answering = ref<CredentialView | null>(null)
 /** The home screen's card position of the selected credential, and back. */
 const selectedPosition = computed(() => Math.max(0, credentials.value?.findIndex((c) => c.index === selected.value) ?? 0))
 const selectPosition = (k: number) => (selected.value = credentials.value?.[k]?.index ?? selected.value)
@@ -90,7 +93,7 @@ watchEffect(() => {
   flow.value = {
     phone: props.phone.label,
     screen: screen.value,
-    credential: current.value,
+    credential: answering.value ?? current.value,
     matching: matching.value.length,
     switching: switching.value,
     walletCircuits: phoneSystems().filter((id) => findSystem(id)?.source_format === 'mso_mdoc'),
@@ -208,8 +211,13 @@ async function onScanned() {
 
 /** The request against the chosen credential: the request screen, or Requirement Not Met. */
 async function analyze() {
-  const cred = current.value!
-  view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { systemIds: [] })
+  // The rulebook version the site runs: when both of the card's mdocs read the request, the demo
+  // wallet answers with that one (a real wallet holds one version).
+  const site = await $fetch<{ rulebook?: string }>('/api/wallet/capabilities').catch(() => null)
+  const picked = analyzeVersions(request.value!, current.value!, today.value, caps.value ?? { systemIds: [] }, site?.rulebook)
+  const cred = picked.credential
+  answering.value = cred
+  view.value = picked.view
   consent.value = view.value.satisfiable ? await consentFor(view.value, cred, verifierSubject.value) : null
   screen.value = view.value.satisfiable ? 'request' : 'unmet'
   const v = view.value

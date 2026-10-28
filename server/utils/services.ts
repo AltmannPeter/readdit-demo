@@ -71,6 +71,11 @@ export interface ServiceCircuit {
   shapes_sha256?: string | null
   artifact_sha256?: string | null
   public_inputs?: string[]
+  /** The rulebook version these circuits are for, when an addon loads one set per version
+   *  (Longfellow: "0.4" and "0.5"); absent: v0.4. */
+  rulebook?: string
+  /** The artifact's file name. */
+  artifact?: string
 }
 
 export interface ServiceInfo {
@@ -134,6 +139,8 @@ export interface ProveBody {
   device_signature: string
   /** The rulebook version ("0.4" when absent). */
   rulebook?: string
+  /** v0.5: the holder's birth date (YYYY-MM-DD), which opens bsc with secret_seed. */
+  birth_date?: string
 }
 
 export interface WitnessSummary {

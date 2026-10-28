@@ -32,7 +32,7 @@ export default defineEventHandler(async () => {
         tailored: s.tailored ?? false,
         request: s.request ?? null,
         requestJwsBytes: s.requestJwsBytes ?? null,
-        circuit: done?.format === 'mso_mdoc' ? (findCircuit(done.proofId) ?? { system_id: done.proofId }) : null,
+        circuit: done?.format === 'mso_mdoc' ? (findCircuit(done.proofId, sessionProfile(s).rulebook.version) ?? { system_id: done.proofId }) : null,
         scheme: done?.format === 'bbs_cd' ? (findScheme(done.proofId) ?? { system_id: done.proofId }) : null,
         outcome: s.outcome ?? null,
         completion: s.completion ?? null,

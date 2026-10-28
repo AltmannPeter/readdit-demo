@@ -3,7 +3,7 @@ import type { RequestObject } from '#shared/types/oid4vp'
 /**
  * Mock phone, the proof.
  * mso_mdoc (Vega or Longfellow, by `system_id`), native steps 2 and 3: the witness from the credential, then the proof. The
- * phone sends its credential, its secret_seed and the device signature of step 1; the prover keeps
+ * phone sends its credential, its secret_seed (v0.5: and its birth_date, which open bsc) and the device signature of step 1; the prover keeps
  * none of them, and the witness lives only for this call.
  * bbs_cd (BBS): one step. The phone sends its BBS credential and its device key, which signs inside
  * the ecdsa-pop plugin; the prover keeps neither.
@@ -12,11 +12,12 @@ import type { RequestObject } from '#shared/types/oid4vp'
  * wallet picks it from the request, shared/protocol/request.ts).
  */
 export default defineEventHandler(async (event) => {
-  const { request, system_id, credential, secret_seed, device_signature, device_key, credential_query_id, rulebook } = await readObject<{
+  const { request, system_id, credential, secret_seed, birth_date, device_signature, device_key, credential_query_id, rulebook } = await readObject<{
     request: RequestObject
     system_id: unknown
     credential: WalletCredential | BbsCredential
     secret_seed: unknown
+    birth_date: unknown
     device_signature: unknown
     device_key: DeviceKeyJwk
     credential_query_id: unknown
@@ -36,6 +37,7 @@ export default defineEventHandler(async (event) => {
     typeof credential !== 'object' ||
     !credential ||
     typeof secret_seed !== 'string' ||
+    (birth_date !== undefined && typeof birth_date !== 'string') ||
     typeof device_signature !== 'string'
   ) {
     throw refusal(400, 'bad_request', proverMessage('bad_request'))
@@ -56,6 +58,7 @@ export default defineEventHandler(async (event) => {
       secret_seed,
       device_signature,
       ...(version && { rulebook: version }),
+      ...(typeof birth_date === 'string' && { birth_date }),
     })
     keepProfile(s, 'witness', result.profiles.witness)
     keepProfile(s, 'prove', result.profiles.prove)

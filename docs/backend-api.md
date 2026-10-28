@@ -226,6 +226,10 @@ it does not know (such as a `pin`) is ignored.
 }
 ```
 
+Under `"rulebook": "0.5"` (Longfellow only; Vega has no v0.5 circuits yet) the credential is the
+holder's v0.5 mdoc and the input adds `"birth_date": "YYYY-MM-DD"`, which opens `bsc` with the seed
+(the Longfellow section, "Rulebook v0.5").
+
 Before building the witness, the prover checks: the request against what the circuit proves
 (a `zkp_req` query over `mso_mdoc`; one `pseudonym` with `known-offender-matching-ssc`, `ver` 1 and
 `prf` `sha-256`, verifier_id = an `x509_san_dns` client_id; at most one `age_check` with `ge`/`le`,
@@ -336,7 +340,7 @@ these differences.
 | --- | --- |
 | Circuit id | `urn:circuits:longfellow:nym_auth:v1` |
 | Proof system | `longfellow-libzk-v1`: google/longfellow-zk `61a8a73`, Rust runtime; Ligero (rate 1/7, 132 columns) over sumcheck. The 11 runtime crates are vendored unchanged in `native/longfellow/vendor/longfellow-zk` (`native/longfellow/VENDOR-SHA256SUMS`) |
-| Circuits | the nym-auth-circuits archive's `longfellow/mdoc`, unchanged: an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
+| Circuits | rulebook v0.4: the nym-auth-circuits archive's `longfellow/mdoc`, unchanged (v0.5: below): an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
 | `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
 | Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
@@ -382,6 +386,44 @@ of these circuits' geometry do not read, or bytes remain; at most 1 MiB); `proof
 input differs: a wrong T, E, C, verifier_input or pseudonym fails the hash circuit; a wrong issuer
 key or e2 the signature circuit; a presentation for another request fails on the transcript.
 There is no `public_input` code.
+
+### Rulebook v0.5: the bsc circuits
+
+Under `"rulebook": "0.5"` the same circuit id runs other circuits: `nym-auth-zk` (Peter's package
+`nym-auth-longfellow-v1`, revision 2 of the bsc baseline), delivered as is in
+`native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the same vendored runtime.
+Both addon objects load them next to the v0.4 circuits (the archive is compiled into the crate,
+from `nym-auth-zk/circuits/nym_auth_mdoc_bsc.lfa2.zst`), and `info.circuits` lists the circuit once
+per version: `{ system_id, proof_system, rulebook: "0.4" | "0.5", artifact, artifact_sha256,
+public_inputs }`. The site takes the entry of the demo profile's version (`shared/registry/circuits.ts`,
+`byRulebook`; `server/utils/vp.ts`).
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.5, compact profile: `bsc` = SHA-256(secret_seed ‖ birth_date) at digestID 0, `psc` at 1 (signed, not read). Sig_structure 376 to 439 bytes, bsc item 56 to 119 (package INTEGRATION.md §5); `nym_auth_zk::mdoc::parse` refuses anything else |
+| Statement | the issuer's signature under Q, the docType, validFrom ≤ proof_time ≤ validUntil (both inclusive), the device signature on e2, (secret_seed, birth_date) opens bsc, E ≤ birth_date ≤ C from the range and the UTC date of proof_time, the `known-offender-matching-ssc` pseudonym (the same formula as v0.4, so the same pseudonym) |
+| Artifact SHA-256 | `nym_auth_mdoc_bsc.lfa2.zst` `f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52`; hash circuit id `a5856d5c…36ca` (278 public slots), signature circuit id `6a62a572…315f` (1,155) |
+| MAC | the affine `t = a + c·m`; the challenge is `mac.challenge` (no `mac.a_v`); the transcript starts from `"nym_auth/v1/mdoc-bsc/longfellow" ‖ e2` |
+| Proof | about 323 kB: 6 tags, the hash proof, the signature proof (`proof_parts`: the tags and the rest) |
+
+Public inputs in circuit order: `doctype` 8, `proof_time` 2, `pseudonym.verifier_input` 256,
+`results.nym` 2, `age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 6 + 768,
+`issuer_key_set` 2, `session_transcript` 256 (hash + signature). The crate computes all of them
+from `nym_auth_zk::Request`, which `nym-longfellow/src/bsc.rs` (the package's adapter) builds from
+the request, the handover and the certificate's key; nothing else is passed to it.
+
+**Prover.** `witness` takes `birth_date` (`YYYY-MM-DD`) besides `secret_seed`, and makes the
+holder-side checks in the package's order (INTEGRATION.md §6): the credential parses as the compact
+profile (`bad_credential`, also for a v0.4 credential), the issuer signature verifies, the seed and
+birth date open `bsc` (`bad_credential`), the device signature verifies, validity is inclusive at
+now (`unsatisfiable`), the birth date lies in [E, C] (`unsatisfiable`). `prove` lets the crate build
+the witness and both proofs. The witness summary has `rulebook: "0.5"` and the v0.5 input names.
+
+**Verifier.** Steps 1 to 4 as above (the `results` keys are the pseudonym's handle only: v0.5's
+`age_check` has no output); step 5 is the crate's verifier. `proof_invalid.input` names the first
+circuit that fails: another session already fails `hash`, since e2 seeds the transcript; another
+issuer key fails only `signature`. `bounds` are E and C from the range and the date of
+`proof_time` (`dates::range_bounds`, which agrees with the crate).
 
 **Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
 GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on

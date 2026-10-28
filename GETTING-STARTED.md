@@ -401,8 +401,15 @@ them before writing:
 cd native/vega
 cargo run --release -p nym-issuer -- --holder 2011-03-14 --holder 1990-05-20 \
   --valid-from 2026-10-13 --valid-until 9999-12-31T23:59:59Z --keep ../../app/wallet/demo-wallet.json \
-  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem
+  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem --v05
 ```
+
+`--v05` also issues each holder's rulebook v0.5 mdoc (`bsc`, `psc`, the compact profile the v0.5
+Longfellow circuits read; each is checked against their layout before writing), under the same
+Document Signer, device key, seed and validity, into the holder's `v05` with its `birth_date` and
+`private_seed`. The phone shows one card per holder and answers a request with the mdoc of the
+version it reads under; a request for the pseudonym only reads the same under both, so the demo
+wallet takes the version the site runs. The pseudonym is the same in both versions.
 
 The credentials do not expire: `validUntil` is `9999-12-31T23:59:59Z`, the farthest an mdoc tdate
 holds, and the Document Signer certificate's `notAfter` is `99991231235959Z`, RFC 5280's value for

@@ -46,6 +46,11 @@ export interface CircuitEntry {
   public_inputs: PublicInput[]
   /** The circuit as data, pinned by hash: the services must report the same. */
   artifact?: { name: string; sha256: string }
+  /** The rulebook version this entry describes (the demo profile's `rulebook.version`). */
+  rulebook?: string
+  /** The same system id under a later rulebook version, with its own circuits: what differs from
+   *  this entry (the v0.4 one). `registryFor(version)` and `findCircuit(id, version)` apply it. */
+  byRulebook?: Record<string, Pick<CircuitEntry, 'profile' | 'functions' | 'public_inputs' | 'artifact'> & { label?: string }>
 }
 
 // Vega nym_auth (nym-auth-circuits, SPEC.md V3.2): 18 core public values in this order.
@@ -73,6 +78,22 @@ const LONGFELLOW_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, as two GF(2^128) halves (hash circuit)' },
   { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (signature circuit)' },
   { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the SessionTranscript [null, null, OpenID4VPHandover] also seeds the Fiat–Shamir transcript' },
+]
+
+// Longfellow nym_auth under rulebook v0.5: the nym-auth-zk bsc circuits (Peter's package
+// nym-auth-longfellow-v1, INTEGRATION.md §7), the same system id. Hash circuit 277 + 1 = 278 public
+// slots, signature circuit 1154 + 1 = 1155; values = elements in both, circuit order.
+const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'doctype', source: 'verifier', values: 8, derivation: 'the pattern 67 "docType" 78 1c and the docType eu.europa.ec.eudi.nym_auth.1: two 16-byte limbs, then 6 byte elements (hash circuit)' },
+  { name: 'proof_time', source: 'presentation', values: 2, derivation: 'T = YYYYMMDDhhmmss as x^(T+533333333333328) and x^(T+533333333333329) (hash circuit), checked against the verifier clock within tolerance, outside the proof' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 256, derivation: 'SHA-256(verifier_id), verifier_id = client_id (x509_san_dns form), as bits (hash circuit)' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, as two 16-byte halves (hash circuit)' },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'E from the range and the UTC date of proof_time, as x^(E+533333328); 0 when absent (hash circuit)' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'C from the range and the UTC date of proof_time, as x^(C+533333328); 99999999 when absent (hash circuit)' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat–Shamir bytes drawn after both commitments, in both circuits (bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c·m_k, the six 16-byte words at the head of the proof, in both circuits: they tie the signed message and the device key the hash circuit reads to those the signature circuit verifies' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (signature circuit)' },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the transcript starts from "nym_auth/v1/mdoc-bsc/longfellow" ‖ e2' },
 ]
 
 export const CIRCUIT_REGISTRY: CircuitEntry[] = [
@@ -107,11 +128,34 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     checks_validity: true,
     public_inputs: LONGFELLOW_PUBLIC_INPUTS,
     artifact: { name: 'circuits.zst', sha256: '6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b' },
+    rulebook: '0.4',
+    byRulebook: {
+      '0.5': {
+        label: 'Longfellow nym_auth v1 (bsc)',
+        profile: 'compact',
+        functions: {
+          pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+          age_check: { params: ['range'] },
+        },
+        public_inputs: LONGFELLOW_V05_PUBLIC_INPUTS,
+        artifact: { name: 'nym_auth_mdoc_bsc.lfa2.zst', sha256: 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52' },
+      },
+    },
   },
 ]
 
-export function findCircuit(id: string): CircuitEntry | undefined {
-  return CIRCUIT_REGISTRY.find((c) => c.system_id === id)
+/** A circuit entry as it holds under rulebook `version` (absent: the entry as written, v0.4). */
+function forRulebook(c: CircuitEntry, version?: string): CircuitEntry {
+  const v = version ? c.byRulebook?.[version] : undefined
+  if (!v) return c
+  const { byRulebook: _, ...base } = c
+  return { ...base, ...v, label: v.label ?? c.label, rulebook: version }
+}
+
+/** The circuit `id`, under rulebook `version` when given. */
+export function findCircuit(id: string, version?: string): CircuitEntry | undefined {
+  const c = CIRCUIT_REGISTRY.find((x) => x.system_id === id)
+  return c && forRulebook(c, version)
 }
 
 // ---- bbs_cd: schemes (rulebook v0.4, "BBS committed-disclosure encoding"; docs/bbs_cd.md) ----
@@ -177,8 +221,14 @@ export type SystemEntry = CircuitEntry | SchemeEntry
 /** Every approved system, in the order of preference: Vega, Longfellow, BBS. */
 export const SYSTEM_REGISTRY: SystemEntry[] = [...CIRCUIT_REGISTRY, ...SCHEME_REGISTRY]
 
-export function findSystem(id: string): SystemEntry | undefined {
-  return SYSTEM_REGISTRY.find((s) => s.system_id === id)
+export function findSystem(id: string, version?: string): SystemEntry | undefined {
+  const e = SYSTEM_REGISTRY.find((s) => s.system_id === id)
+  return e && e.source_format === 'mso_mdoc' ? forRulebook(e, version) : e
+}
+
+/** Every approved system as it holds under rulebook `version` (the demo profile's). */
+export function registryFor(version?: string): SystemEntry[] {
+  return SYSTEM_REGISTRY.map((e) => (e.source_format === 'mso_mdoc' ? forRulebook(e, version) : e))
 }
 
 /** The type value a system is for: the doctype (mso_mdoc) or the schema id (bbs_cd). */

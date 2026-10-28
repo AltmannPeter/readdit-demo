@@ -142,6 +142,18 @@ async function present(ctx, request, wallet, circuit = VEGA) {
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
+/** mso_mdoc under rulebook v0.5: the holder's v0.5 mdoc (demo-wallet.json `v05`) with the birth
+ *  date that opens its bsc, `rulebook` "0.5". */
+async function presentV05(ctx, request, wallet, circuit = LONGFELLOW) {
+  const q = queryOf(request, 'mso_mdoc')
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
+  if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
+  const p = await call(ctx, 'POST', '/api/wallet/prove', {
+    data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v05.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v05.birth_date, device_signature: s.body.device_signature, rulebook: '0.5' },
+  })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
 /** bbs_cd: one prove call with the BBS credential and its device key. */
 async function presentBbs(ctx, request, wallet = teenBbs, rulebook) {
   const q = queryOf(request, 'bbs_cd')
@@ -2719,6 +2731,7 @@ function boundsOn(gate, date) {
  *  for age_check as an assertion with a range in years, the BBS presentation carries proof_time,
  *  and both sides compute the bounds from its date; the mdoc circuits are pending in v0.5. */
 async function groupQ() {
+  let v04Nym = ''
   const ctx = await client()
   const setProfile = (id) => call(ctx, 'POST', '/api/tech/demo-profile', { data: { profile: id } })
   await setProfile('nym-auth-v0.4')
@@ -2745,13 +2758,14 @@ async function groupQ() {
     const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
     const r = await fetchRequest(ctx, s)
     const p = await present(ctx, r, teen)
+    v04Nym = p.results.nym
     await respond(ctx, r, vpForm(r, p.presentation))
     eq('a v0.4 sign-up verifies', (await sessionView(s.id)).status, 'verified')
     await call(ctx, 'POST', `/api/vp/session/${s.id}/complete`)
   }
   check('an account exists', (await accounts()).length > 0)
 
-  begin('Q2', '/tech: switching to v0.5 resets the demo; the mdoc circuits are pending')
+  begin('Q2', '/tech: switching to v0.5 resets the demo; Vega is pending, Longfellow has its v0.5 circuits')
   await tech.locator('[data-demo-profile]').selectOption('nym-auth-v0.5')
   for (let k = 0; k < 30 && (await overview()).profile !== 'nym-auth-v0.5'; k++) await page.waitForTimeout(100)
   o = await overview()
@@ -2759,8 +2773,9 @@ async function groupQ() {
   eq('the demo was reset', (await accounts()).length, 0)
   eq('a pending system is not accepted', o.acceptedProofSystems, [])
   await tech.locator('[data-pending="vega-v1"]').waitFor()
-  check('/tech: Vega and Longfellow pending', (await tech.locator('[data-pending]').count()) === 2 && (await tech.locator('[data-accept="vega-v1"]').isDisabled()))
-  check('/tech: v0.5 is not committed yet', (await tech.locator('[data-profile-commit]').textContent()).includes('not committed yet'))
+  check('/tech: Vega pending, Longfellow available', (await tech.locator('[data-pending]').count()) === 1 && (await tech.locator('[data-accept="vega-v1"]').isDisabled()) && !(await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+  const v05 = o.profiles[1]
+  check('/tech: the commit v0.5 is based on', (await tech.locator('[data-profile-commit]').getAttribute('href')) === v05.commitUrl && /^[0-9a-f]{40}$/.test(v05.commit ?? ''), v05.commitUrl)
   expectAnswer('server: Vega cannot be switched on under v0.5', await accept('vega-v1', true), 409, 'pending_system')
   eq('server: BBS can', (await accept(BBS_SYSTEM, true)).body.acceptedProofSystems, [BBS_SYSTEM])
   await tech.close()
@@ -2769,6 +2784,7 @@ async function groupQ() {
   await dev.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
   check('/dev: the profile in the header', true)
   check('/dev: Vega pending', (await dev.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await dev.locator('[data-accept="vega-v1"]').isDisabled()))
+  check('/dev: Longfellow not pending', !(await dev.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).textContent()).includes('pending'))
   await dev.close()
 
   begin('Q3', 'v0.5 over HTTP: age_check as a range, proof_time in the BBS presentation, bounds from its date')
@@ -2817,7 +2833,7 @@ async function groupQ() {
     await other.dispose()
   }
 
-  begin('Q4', "v0.5 in the browser: the teen's BBS phone at c/teenspace; the mdoc phone has no v0.5 credential")
+  begin('Q4', "v0.5 in the browser: the teen's BBS phone at c/teenspace; with BBS only, the mdoc phone has nothing to answer")
   await goto('/c/teenspace')
   await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN_BBS)
   await scan()
@@ -2842,6 +2858,94 @@ async function groupQ() {
   await scan()
   await readRequest()
   await phoneShows('Unsupported Request')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+
+  begin('Q6', 'Longfellow under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym')
+  eq('server: Longfellow on, BBS off', [(await accept(LONGFELLOW_SYSTEM, true)).status, (await accept(BBS_SYSTEM, false)).body.acceptedProofSystems], [200, [LONGFELLOW_SYSTEM]])
+  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })
+  o = await overview()
+  const lfInfo = o.services?.lfVerifier?.circuits ?? []
+  check('the verifier lists the v0.5 bsc circuits', lfInfo.some((c) => c.system_id === LONGFELLOW && c.rulebook === '0.5' && c.artifact_sha256 === 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'), JSON.stringify(lfInfo))
+  {
+    const c6 = await client()
+    s = await newSession(c6, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c6, s, lfOnly)
+    eq('the offer: Longfellow', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW])
+    eq('the mdoc _req: pseudonym, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
+      { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } },
+      { fn_id: 'age_check', params: { range: '13-17' } },
+    ])
+    let refused = ''
+    try {
+      await presentV05(c6, r, { ...teen, v05: { ...teen.v05, credential: teen.credential } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 mdoc is refused by the v0.5 circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c6, r, { ...teen, v05: { ...teen.v05, birth_date: '2011-03-15' } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    const lp = await presentV05(c6, r, teen)
+    eq('results: the pseudonym only', Object.keys(lp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 (one seed opens ssc and bsc)', lp.results.nym, v04Nym)
+    await respond(c6, r, vpForm(r, lp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.5, the bsc public inputs', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.5', ['doctype', 'proof_time']])
+    const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    const today = new Date().toISOString().slice(0, 10)
+    eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
+    eq('under v0.5', lv?.profile, 'nym-auth-v0.5')
+    eq('completed: the account, with the age', (await call(c6, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+    o = await overview()
+    check('Benchmark: a Longfellow run under v0.5', o.measurements.rows.some((x) => x.profile === 'nym-auth-v0.5' && /longfellow/i.test(`${x.proofSystem ?? ''}${x.systemId ?? ''}${x.label ?? ''}${JSON.stringify(x)}`)), JSON.stringify(o.measurements.rows.map((x) => x.label ?? x.proofSystem)))
+    await c6.dispose()
+    const c7 = await client()
+    const s7 = await newSession(c7, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r7 = await fetchRequest(c7, s7, lfOnly)
+    refused = ''
+    try {
+      await presentV05(c7, r7, teen)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV05(c7, r7, adult)
+    await respond(c7, r7, vpForm(r7, ap.presentation))
+    eq("the adult proves 18+", (await sessionView(s7.id)).status, 'verified')
+    await c7.dispose()
+  }
+
+  begin('Q7', "Longfellow under v0.5 in the browser: the teen's phone answers with its v0.5 mdoc")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  check('the phone sent its v0.5 mdoc', sv.trace.find((t) => t.step === 'witness')?.data?.rulebook === '0.5', JSON.stringify(sv.trace.find((t) => t.step === 'witness')?.data?.rulebook))
+  await closeFromPhone()
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await goto('/c/afterdark')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Requirement Not Met')
   await phone().getByRole('button', { name: 'Close' }).click()
   await dialogShows('Not completed', 15_000)
   await closeDialog('escape')
