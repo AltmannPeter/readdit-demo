@@ -31,6 +31,7 @@ use crate::x509::PublicKey;
 use crate::zk::{Circuits, ZkProverPair};
 use crate::{bsc, dates, hex, mdoc, unb64url, unhex, v05, x509};
 use nym_auth_zk as v5;
+use nym_auth_zk_decoy as v6;
 
 /// The device key as the wallet holds it: a P-256 JWK with its private part.
 #[derive(Clone, Debug, Deserialize)]
@@ -100,6 +101,8 @@ pub struct WitnessInput {
 enum Body {
   V04 { witness: witness::Witness, transcript_seed: Vec<u8> },
   V05 { prebuilt: v5::Prebuilt, device_signature: Option<[u8; 64]>, device_key: PublicKey, device_message: Vec<u8> },
+  /// v0.6: the decoy circuits' first phase (`nym_auth_zk_decoy::Prebuilt`), as for v0.5.
+  V06 { prebuilt: v6::Prebuilt, device_signature: Option<[u8; 64]>, device_key: PublicKey, device_message: Vec<u8> },
 }
 
 /// The witness of one presentation, which [`Prover::prove`] consumes. It lives for one request.
@@ -126,6 +129,8 @@ pub struct Prover {
   pub load_ms: f64,
   /// The v0.5 circuits (`nym-auth-zk`), loaded with the v0.4 ones.
   v5: v05::Loaded<v5::Prover>,
+  /// The v0.6 circuits (`nym-auth-zk-decoy`), loaded with the others.
+  v6: v05::Loaded<v6::Prover>,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
   pub keys_mb: Option<f64>,
 }
@@ -145,7 +150,9 @@ impl WitnessData {
   /// signature (r ‖ s, hex) over [`WitnessData::device_message`], checked as the witness step
   /// checks it. The prove step then proves as if the witness step had had it.
   pub fn attach_signature(&mut self, device_signature: &str) -> Result<(), Refusal> {
-    let Body::V05 { device_signature: slot, device_key, device_message, .. } = &mut self.body else {
+    let (Body::V05 { device_signature: slot, device_key, device_message, .. }
+    | Body::V06 { device_signature: slot, device_key, device_message, .. }) = &mut self.body
+    else {
       return Err(bad("only the v0.5 circuits take the device signature after the witness step"));
     };
     let device: [u8; 64] = unhex("device_signature", device_signature).map_err(bad)?;
@@ -158,14 +165,14 @@ impl WitnessData {
   /// Sig_structure); None for v0.4, whose witness step needs the signature.
   pub fn device_message(&self) -> Option<&[u8]> {
     match &self.body {
-      Body::V05 { device_message, .. } => Some(device_message),
+      Body::V05 { device_message, .. } | Body::V06 { device_message, .. } => Some(device_message),
       Body::V04 { .. } => None,
     }
   }
 
   /// v0.5: whether the device signature is in (given to the witness step or attached).
   pub fn signed(&self) -> bool {
-    matches!(&self.body, Body::V05 { device_signature: Some(_), .. } | Body::V04 { .. })
+    matches!(&self.body, Body::V05 { device_signature: Some(_), .. } | Body::V06 { device_signature: Some(_), .. } | Body::V04 { .. })
   }
 
   /// The results the presentation will carry (the pseudonym under its handle, hex), known after
@@ -190,7 +197,7 @@ fn ecdsa(rs: &[u8; 64]) -> Result<EcdsaSignature, String> {
 
 /// The registry's description of the circuits, for both sides' `info`: the same circuit id under
 /// each rulebook version, with that version's artifact and public inputs.
-pub fn circuit_info(sha256: &[u8; 32], v05_sha256: &[u8; 32]) -> Json {
+pub fn circuit_info(sha256: &[u8; 32], v05_sha256: &[u8; 32], v06_sha256: &[u8; 32]) -> Json {
   json!([
     {
       "system_id": CIRCUIT_ID,
@@ -207,6 +214,14 @@ pub fn circuit_info(sha256: &[u8; 32], v05_sha256: &[u8; 32]) -> Json {
       "artifact": v05::ARTIFACT,
       "artifact_sha256": hex(v05_sha256),
       "public_inputs": v05::PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
+    },
+    {
+      "system_id": crate::decoy::system_id(),
+      "proof_system": v6::PROOF_SYSTEM,
+      "rulebook": "0.6",
+      "artifact": crate::decoy::ARTIFACT,
+      "artifact_sha256": hex(v06_sha256),
+      "public_inputs": crate::decoy::PUBLIC_INPUTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),
     },
   ])
 }
@@ -244,16 +259,18 @@ impl Prover {
     let (circuits_sha256, load_ms) = (c.sha256, c.load_ms);
     let pair = ZkProverPair::new(c);
     let v5 = v05::load_prover()?;
-    Ok(Prover { pair, circuits_sha256, load_ms: load_ms + v5.load_ms, v5, keys_mb: mb(heap.held()) })
+    let v6 = crate::decoy::load_prover()?;
+    let load_ms = load_ms + v5.load_ms + v6.load_ms;
+    Ok(Prover { pair, circuits_sha256, load_ms, v5, v6, keys_mb: mb(heap.held()) })
   }
 
   pub fn info(&self) -> Json {
     json!({
       "service": "prover",
-      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5); Node addon"),
+      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5) and nym-auth-zk-decoy circuits (v0.6); Node addon"),
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": circuit_info(&self.circuits_sha256, &self.v5.sha256),
+      "circuits": circuit_info(&self.circuits_sha256, &self.v5.sha256, &self.v6.sha256),
       "load_ms": self.load_ms,
       "keys_mb": self.keys_mb,
       "max_threads": crate::threads::cores(),
@@ -295,12 +312,15 @@ impl Prover {
     // The circuit id names the circuits: v0.4's (circuits/mdoc, ssc) or v0.5's (nym-auth-zk, bsc),
     // each read under its own rulebook version.
     let v05_id = v05::circuit_id();
+    let v06_id = crate::decoy::system_id();
     let (circuit_id, needs) = if input.system_id == CIRCUIT_ID {
       (CIRCUIT_ID, Rulebook::V04)
     } else if input.system_id == v05_id {
       (v05_id.as_str(), Rulebook::V05)
+    } else if input.system_id == v06_id {
+      (v06_id.as_str(), Rulebook::V06)
     } else {
-      return Err(Refusal::unsupported_circuit(format!("{} is neither {CIRCUIT_ID} nor {v05_id}", input.system_id)));
+      return Err(Refusal::unsupported_circuit(format!("{} is none of {CIRCUIT_ID}, {v05_id}, {v06_id}", input.system_id)));
     };
     // The time of the proof (proof_time), read first: v0.5 computes an age range's bounds from its date.
     let now = dates::now().map_err(Refusal::bad_request)?;
@@ -319,6 +339,9 @@ impl Prover {
     }
     if rulebook == Rulebook::V05 {
       return self.witness_v05(input, &s, &now, t, heap);
+    }
+    if rulebook == Rulebook::V06 {
+      return self.witness_v06(input, &s, &now, t, heap);
     }
     let m = mdoc::parse(&input.credential.issuer_signed).map_err(bad)?;
     if m.doc_type != DOC_TYPE {
@@ -435,6 +458,22 @@ impl Prover {
         ]);
         crate::zk::Proved { proof: p.proof, nym: p.pseudonym, parts }
       }
+      Body::V06 { prebuilt, device_signature, .. } => {
+        let device_signature = device_signature.ok_or("the device signature is missing (WitnessData::attach_signature)")?;
+        let pool = crate::threads::pool(w.parallel);
+        let (p, n) = pool.install(|| {
+          let p = self.v6.side.prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new());
+          (p, v6::threads())
+        });
+        threads = n;
+        let p = p.map_err(|e| format!("the v0.6 circuits: {e:?}"))?;
+        let rest = p.proof.len().saturating_sub(96);
+        let parts = json!([
+          { "name": "MAC tags (6)", "bytes": 96, "children": [] },
+          { "name": "Hash and signature circuit proofs", "bytes": rest, "children": [] },
+        ]);
+        crate::zk::Proved { proof: p.proof, nym: p.pseudonym, parts }
+      }
     };
     let prove_ms = ms(t);
     let peak_mb = peak.read();
@@ -540,6 +579,92 @@ impl Prover {
       body: Body::V05 { prebuilt, device_signature: device, device_key, device_message },
       presentation: Presentation {
         system_id: v05::circuit_id(),
+        proof: Vec::new(),
+        issuer_key_set: vec![c.document_signer.clone()],
+        proof_time: now.text(),
+        results: vec![(s.nym_handle.clone(), ResultValue::Pseudonym(nym))],
+      },
+      results,
+      witness_ms,
+      prebuild_ms: Some(prebuild_ms),
+      parallel: input.parallel,
+      heap_base: heap.base(),
+      witness_high: heap.high(),
+      summary,
+    })
+  }
+
+  /// Step 2 under rulebook v0.6 (the circuit `decoy::system_id()`): as [`Self::witness_v05`], with
+  /// the decoy-layout credential and `nym-auth-zk-decoy`. The device signature, then the
+  /// crate's first phase, `prebuild`, which makes the holder-side checks with their reasons
+  /// (INTEGRATION.md §6: the issuer signature, the opening of bsc, validity at proof_time, the birth
+  /// date's form and range), builds the hash circuit's witness and commits it. A wallet can run
+  /// `prebuild` while the consent screen is shown, before the device signs; the demo phone signs
+  /// first, so this step checks the signature here for a refusal with its reason, and reports
+  /// `prebuild` apart (`prebuild_ms`, the Benchmark's "Prebuild (consent)").
+  fn witness_v06(&self, input: &WitnessInput, s: &Statement, now: &dates::Time, t: Instant, heap: Heap) -> Result<WitnessData, Refusal> {
+    let issuer_signed = unb64url("issuer_signed", &input.credential.issuer_signed).map_err(bad)?;
+    let c = crate::decoy::credential(&issuer_signed).map_err(bad)?;
+    let signer = x509::parse(&c.document_signer).map_err(|e| bad(format!("x5chain: {e}")))?;
+    let seed: [u8; 16] = unhex("secret_seed", &input.secret_seed).map_err(bad)?;
+    let birth_text = input.birth_date.as_deref().ok_or_else(|| bad("v0.6: birth_date is required (it opens bsc)"))?;
+    let birth_date: [u8; 10] = birth_text.as_bytes().try_into().map_err(|_| bad("birth_date is not 10 bytes"))?;
+    let device_key = PublicKey { x: c.parsed.device_x, y: c.parsed.device_y };
+    let device_message = handover::device_message(&s.session_transcript, DOC_TYPE);
+    // The demo phone signs first and the signature is checked here; a wallet that runs this step
+    // during consent leaves it out and attaches it after (WitnessData::attach_signature).
+    let device = if input.device_signature.is_empty() {
+      None
+    } else {
+      let device: [u8; 64] = unhex("device_signature", &input.device_signature).map_err(bad)?;
+      check_device_signature(&device_key, &device_message, &device)?;
+      Some(device)
+    };
+    let request = crate::decoy::request(&signer.key, &now.text(), &input.request, &input.credential_query_id, &input.handover).map_err(Refusal::bad_request)?;
+    let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
+    let holder = v6::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
+    let tp = Instant::now();
+    let pool = crate::threads::pool(input.parallel);
+    let (prebuilt, threads) = pool.install(|| (self.v6.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()), v6::threads()));
+    let prebuilt = prebuilt.map_err(|e| crate::decoy::prover_refusal(&e))?;
+    let prebuild_ms = ms(tp);
+    let nym = prebuilt.pseudonym();
+    let witness_ms = ms(t);
+
+    let mut results = Map::new();
+    results.insert(s.nym_handle.clone(), Json::String(hex(&nym)));
+    let mut q = [0u8; 64];
+    q[..32].copy_from_slice(&signer.key.x);
+    q[32..].copy_from_slice(&signer.key.y);
+    let public: Vec<Json> = [
+      ("proof_time", vec![now.text()]),
+      ("pseudonym.verifier_input", vec![hex(&statement.verifier_input)]),
+      ("results.nym", vec![hex(&nym)]),
+      ("age_check.ge", vec![s.age.earliest()]),
+      ("age_check.le", vec![s.age.cutoff()]),
+      ("mac.challenge", vec![]),
+      ("mac.tags", vec![]),
+      ("issuer_key_set", vec![hex(&q[..32]), hex(&q[32..])]),
+      ("session_transcript", vec![hex(&statement.device_digest)]),
+    ]
+    .into_iter()
+    .map(|(name, values)| json!({ "name": name, "values": values }))
+    .collect();
+    let summary = json!({
+      "proof_time": now.text(),
+      "rulebook": "0.6",
+      "results": results,
+      "public_inputs": public,
+      "counts": {
+        "hash": { "inputs": self.v6.counts[0].0, "public": self.v6.counts[0].1 },
+        "signature": { "inputs": self.v6.counts[1].0, "public": self.v6.counts[1].1 },
+      },
+      "metrics": { "witness_ms": witness_ms, "prebuild_ms": prebuild_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads },
+    });
+    Ok(WitnessData {
+      body: Body::V06 { prebuilt, device_signature: device, device_key, device_message },
+      presentation: Presentation {
+        system_id: crate::decoy::system_id(),
         proof: Vec::new(),
         issuer_key_set: vec![c.document_signer.clone()],
         proof_time: now.text(),

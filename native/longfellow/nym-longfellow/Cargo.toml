@@ -15,6 +15,8 @@ runtime-random = { workspace = true }
 runtime-zk = { workspace = true }
 # The rulebook v0.5 circuits (bsc) and their witness, prover and verifier (src/bsc.rs).
 nym-auth-zk = { path = "../nym-auth-zk" }
+# The rulebook v0.6 circuits: the decoy-digest layout (src/decoy.rs).
+nym-auth-zk-decoy = { path = "../nym-auth-zk-decoy" }
 # /tech's multithreading switch: the pools the v0.5 circuits prove and verify on (src/threads.rs).
 rayon = "1.10"
 # circuits/mdoc/circuits.zst.

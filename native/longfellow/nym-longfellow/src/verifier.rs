@@ -34,6 +34,7 @@ use crate::x509::TrustAnchors;
 use crate::zk::{Circuits, Rejection, ZkVerifierPair};
 use crate::{bsc, dates, hex, v05};
 use nym_auth_zk as v5;
+use nym_auth_zk_decoy as v6;
 
 /// The largest proof the verifier reads. A proof of these circuits is about 344 kB.
 const MAX_PROOF_BYTES: usize = 1 << 20;
@@ -84,6 +85,8 @@ pub struct Verifier {
   pair: ZkVerifierPair,
   /// The v0.5 circuits (`nym-auth-zk`), loaded with the v0.4 ones.
   v5: v05::Loaded<v5::Verifier>,
+  /// The v0.6 circuits (`nym-auth-zk-decoy`, the decoy-digest layout), loaded with the others.
+  v6: v05::Loaded<v6::Verifier>,
   pub circuits_sha256: [u8; 32],
   pub load_ms: f64,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
@@ -105,16 +108,18 @@ impl Verifier {
     let (circuits_sha256, load_ms) = (c.sha256, c.load_ms);
     let pair = ZkVerifierPair::new(c);
     let v5 = v05::load_verifier()?;
-    Ok(Verifier { pair, circuits_sha256, load_ms: load_ms + v5.load_ms, v5, keys_mb: mb(heap.held()), anchors, tolerance_s })
+    let v6 = crate::decoy::load_verifier()?;
+    let load_ms = load_ms + v5.load_ms + v6.load_ms;
+    Ok(Verifier { pair, circuits_sha256, load_ms, v5, v6, keys_mb: mb(heap.held()), anchors, tolerance_s })
   }
 
   pub fn info(&self) -> Json {
     json!({
       "service": "verifier",
-      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5); Node addon"),
+      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5) and nym-auth-zk-decoy circuits (v0.6); Node addon"),
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": crate::prover::circuit_info(&self.circuits_sha256, &self.v5.sha256),
+      "circuits": crate::prover::circuit_info(&self.circuits_sha256, &self.v5.sha256, &self.v6.sha256),
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
@@ -157,6 +162,8 @@ impl Verifier {
       Rulebook::V04
     } else if p.system_id == v05_id {
       Rulebook::V05
+    } else if p.system_id == crate::decoy::system_id() {
+      Rulebook::V06
     } else {
       return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
     };
@@ -173,7 +180,7 @@ impl Verifier {
     }
     let date = match rulebook {
       Rulebook::V04 => None,
-      Rulebook::V05 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),
+      Rulebook::V05 | Rulebook::V06 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),
     };
     let s = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, date)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
@@ -232,7 +239,25 @@ impl Verifier {
       return Err(refuse("proof_encoding", format!("a proof of {} bytes", p.proof.len())));
     }
     let t = Instant::now();
-    if rulebook == Rulebook::V05 {
+    if rulebook == Rulebook::V06 {
+      let req = crate::decoy::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
+        .map_err(|e| refuse("request", e))?;
+      let presentation = v6::Presentation { pseudonym: *nym, proof: p.proof.clone() };
+      let (outcome, threads) = crate::threads::pool(input.parallel).install(|| (self.v6.side.verify(&req, &presentation), v6::threads()));
+      metrics.insert("verify_ms".into(), json!(ms(t)));
+      metrics.insert("threads".into(), json!(threads));
+      if let Err(e) = outcome {
+        return Err(match crate::decoy::failing_circuit(&e) {
+          Some(c) => Refused {
+            code: "proof_invalid",
+            input: Some(c),
+            certificate: None,
+            reason: format!("the {c} circuit's proof does not verify with the verifier's public inputs"),
+          },
+          None => refuse("proof_encoding", format!("the proof does not decode: {e:?}")),
+        });
+      }
+    } else if rulebook == Rulebook::V05 {
       let req = bsc::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
         .map_err(|e| refuse("request", e))?;
       let presentation = v5::Presentation { pseudonym: *nym, proof: p.proof.clone() };
@@ -281,7 +306,7 @@ impl Verifier {
     if let Some(h) = &s.age_handle {
       results.insert(h.clone(), Json::Bool(true));
     }
-    let bounds = s.age_handle.is_some() || rulebook == Rulebook::V05 && (s.age.born_from.is_some() || s.age.born_by.is_some());
+    let bounds = s.age_handle.is_some() || rulebook.years_range() && (s.age.born_from.is_some() || s.age.born_by.is_some());
     let bounds = bounds.then(|| json!({ "ge": s.age.born_from.map(|d| d.text()), "le": s.age.born_by.map(|d| d.text()) }));
     Ok((results, circuit_id, bounds))
   }

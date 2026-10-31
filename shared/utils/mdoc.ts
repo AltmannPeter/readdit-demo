@@ -1,6 +1,10 @@
 // Reads an ISO/IEC 18013-5 IssuerSigned (base64url) of the nym_auth attestation: the wallet shows
 // its own credential from it. It does not check the issuer's signature; the prover does
 // (native/vega/nym-vega/src/prover.rs).
+//
+// Rulebook v0.6's decoy-digest layout (nym-auth-longfellow-decoy-v1, INTEGRATION.md §5) has no
+// `nameSpaces`: the MSO's valueDigests hold bsc (digestID 0) and psc (1) themselves, so the
+// credential carries no IssuerSignedItem and the MSO no claim. Read as `layout: 'decoy'`.
 
 import { Decoder, Tag } from 'cbor-x'
 import { NYM_DOCTYPE } from '../types/oid4vp'
@@ -8,13 +12,15 @@ import { NYM_DOCTYPE } from '../types/oid4vp'
 const cbor = new Decoder({ mapsAsObjects: false, useRecords: false })
 
 export interface IssuerSignedView {
+  /** `decoy`: rulebook v0.6's decoy-digest layout (no nameSpaces; bsc and psc as valueDigests 0 and 1). */
+  layout: 'items' | 'decoy'
   docType: string
   namespace: string
-  /** The items in the order issued. */
+  /** The items in the order issued (none in the decoy-digest layout). */
   items: Array<{ digestID: number; elementIdentifier: string; value: unknown; bytes: number }>
-  /** v0.4: the birth_date item; v0.5 commits to it in bsc, so null. */
+  /** v0.4: the birth_date item; v0.5 and v0.6 commit to it in bsc, so null. */
   birthDate: string | null
-  /** v0.4's ssc, v0.5's bsc (null when the credential has none). */
+  /** v0.4's ssc, v0.5's and v0.6's bsc (null when the credential has none). */
   ssc: Uint8Array | null
   bsc: Uint8Array | null
   psc: Uint8Array | null
@@ -81,6 +87,35 @@ export function readIssuerSigned(issuerSigned: string): IssuerSignedView {
   const validity = map(mso.get('validityInfo'), 'validityInfo')
   const deviceKey = map(map(mso.get('deviceKeyInfo'), 'deviceKeyInfo').get('deviceKey'), 'deviceKey')
 
+  const common = {
+    docType: String(mso.get('docType')),
+    namespace: NYM_DOCTYPE,
+    documentSigner,
+    validity: {
+      signed: tdate(validity.get('signed'), 'signed'),
+      validFrom: tdate(validity.get('validFrom'), 'validFrom'),
+      validUntil: tdate(validity.get('validUntil'), 'validUntil'),
+    },
+    deviceKey: { x: bytes(deviceKey.get(-2), 'deviceKey x'), y: bytes(deviceKey.get(-3), 'deviceKey y') },
+    digestAlgorithm: String(mso.get('digestAlgorithm')),
+    signatureAlgorithm: COSE_ALGS[Number(protectedHeader.get(1))] ?? `COSE ${protectedHeader.get(1)}`,
+    version: String(mso.get('version')),
+    bytes: { issuerSigned: raw.length },
+  }
+
+  if (!root.has('nameSpaces')) {
+    // The decoy-digest layout: valueDigests holds exactly digestIDs 0 (bsc) and 1 (psc), each a
+    // 32-byte commitment itself, and there are no items.
+    const digests = map(map(mso.get('valueDigests'), 'valueDigests').get(NYM_DOCTYPE), `valueDigests ${NYM_DOCTYPE}`)
+    const ids = [...digests.keys()].map(Number).sort()
+    if (ids.length !== 2 || ids[0] !== 0 || ids[1] !== 1) fail('no nameSpaces, and valueDigests is not exactly digestIDs 0 and 1')
+    const commitment = (id: number, what: string) => {
+      const b = bytes(digests.get(id), what)
+      return b.length === 32 ? b : fail(`${what} is not 32 bytes`)
+    }
+    return { layout: 'decoy', ...common, items: [], birthDate: null, ssc: null, bsc: commitment(0, 'bsc'), psc: commitment(1, 'psc') }
+  }
+
   const nameSpaces = map(root.get('nameSpaces'), 'nameSpaces')
   const list = nameSpaces.get(NYM_DOCTYPE)
   if (!Array.isArray(list)) fail(`no namespace ${NYM_DOCTYPE}`)
@@ -99,23 +134,12 @@ export function readIssuerSigned(issuerSigned: string): IssuerSignedView {
   const opt = (id: string) => (value(id) === undefined ? null : bytes(value(id), id))
 
   return {
-    docType: String(mso.get('docType')),
-    namespace: NYM_DOCTYPE,
+    layout: 'items',
+    ...common,
     items,
     birthDate: birth instanceof Tag ? (birth.value as string) : null,
     ssc: opt('ssc'),
     bsc: opt('bsc'),
     psc: opt('psc'),
-    documentSigner,
-    validity: {
-      signed: tdate(validity.get('signed'), 'signed'),
-      validFrom: tdate(validity.get('validFrom'), 'validFrom'),
-      validUntil: tdate(validity.get('validUntil'), 'validUntil'),
-    },
-    deviceKey: { x: bytes(deviceKey.get(-2), 'deviceKey x'), y: bytes(deviceKey.get(-3), 'deviceKey y') },
-    digestAlgorithm: String(mso.get('digestAlgorithm')),
-    signatureAlgorithm: COSE_ALGS[Number(protectedHeader.get(1))] ?? `COSE ${protectedHeader.get(1)}`,
-    version: String(mso.get('version')),
-    bytes: { issuerSigned: raw.length },
   }
 }

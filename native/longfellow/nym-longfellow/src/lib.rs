@@ -35,6 +35,7 @@ pub mod bsc;
 pub mod cbor;
 pub mod circuit;
 pub mod dates;
+pub mod decoy;
 pub mod error;
 pub mod handover;
 pub mod mdoc;

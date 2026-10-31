@@ -26,13 +26,23 @@
 //! INTEGRATION.md §5): Sig_structure 423 B (376 to 439), bsc item 108 B (56 to 119), and each
 //! byte pattern exactly once.
 //!
+//! With `--v06`, each holder also gets a rulebook v0.6 mdoc in the decoy-digest layout (Peter's
+//! nym-auth-longfellow-decoy-v1 package, INTEGRATION.md §5): the MSO's valueDigests hold `bsc` (0)
+//! and `psc` (1) themselves, there are no IssuerSignedItems and no `nameSpaces`, and the MSO is the
+//! fixed 398-byte form. It is written byte by byte, not with the CBOR writer, with the same seed,
+//! birth_date, private_seed, device key, validity and Document Signer as the holder's v0.5 one, and
+//! checked before writing: MSO 398 B, Sig_structure 423 B, three 20-character tdates, and every byte
+//! outside the seven private fields equal to the circuits' template (`v06_template.hex`, a copy of
+//! `nym_auth_zk_decoy::mdoc::TEMPLATE`; native/longfellow's tests check the copy). The wallet file
+//! holds it under the holder's `v06` as `{ credential, birth_date, private_seed }`.
+//!
 //! Before writing, the tool checks the profile's lengths for each credential (Sig_structure 423 B,
 //! birth_date item 95 B, ssc item 108 B), prints them, and takes each credential apart again as the
 //! prover does.
 //!
 //! ```text
 //! nym-issuer --holder YYYY-MM-DD[:DAYS] [--holder ...] --wallet-out <file.json> --trust-out <file.pem>
-//!            [--valid-from YYYY-MM-DD] [--days N | --valid-until YYYY-MM-DDThh:mm:ssZ] [--keep <file.json>] [--v05]
+//!            [--valid-from YYYY-MM-DD] [--days N | --valid-until YYYY-MM-DDThh:mm:ssZ] [--keep <file.json>] [--v05] [--v06]
 //! ```
 //! Each holder's validity runs from `--valid-from` (default: yesterday, UTC) 00:00:00Z for DAYS days
 //! (default `--days`, 366), or to `--valid-until` for every holder; `9999-12-31T23:59:59Z` is the
@@ -79,6 +89,8 @@ struct Args {
   keep: Option<String>,
   /// Also issue each holder's rulebook v0.5 mdoc.
   v05: bool,
+  /// Also issue each holder's rulebook v0.6 mdoc (the decoy-digest layout).
+  v06: bool,
 }
 
 fn holder(value: &str) -> Result<Holder, String> {
@@ -92,10 +104,14 @@ fn holder(value: &str) -> Result<Holder, String> {
 fn args() -> Result<Args, String> {
   let mut it = std::env::args().skip(1);
   let (mut holders, mut wallet_out, mut trust_out, mut valid_from, mut days) = (Vec::new(), None, None, None, 366);
-  let (mut valid_until, mut keep, mut v05) = (None, None, false);
+  let (mut valid_until, mut keep, mut v05, mut v06) = (None, None, false, false);
   while let Some(flag) = it.next() {
     if flag == "--v05" {
       v05 = true;
+      continue;
+    }
+    if flag == "--v06" {
+      v06 = true;
       continue;
     }
     let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -126,6 +142,7 @@ fn args() -> Result<Args, String> {
     valid_until,
     keep,
     v05,
+    v06,
   })
 }
 
@@ -184,12 +201,15 @@ fn kept(holder: &serde_json::Value, k: usize) -> Result<(SigningKey, [u8; 16]), 
   Ok((device, seed))
 }
 
-/// The private_seed of an earlier wallet file's holder, if it has a v0.5 credential.
+/// The private_seed of an earlier wallet file's holder: its v0.5 credential's, else its v0.6
+/// credential's (both hold the same one), if it has either.
 fn kept_private_seed(p: &serde_json::Value, k: usize) -> Result<Option<[u8; 16]>, String> {
-  match p.get("v05").and_then(|v| v.get("private_seed")).and_then(|s| s.as_str()) {
-    None => Ok(None),
-    Some(s) => nym_vega::unhex::<16>(&format!("--keep: holder {}: v05.private_seed", k + 1), s).map(Some),
+  for v in ["v05", "v06"] {
+    if let Some(s) = p.get(v).and_then(|c| c.get("private_seed")).and_then(|s| s.as_str()) {
+      return nym_vega::unhex::<16>(&format!("--keep: holder {}: {v}.private_seed", k + 1), s).map(Some);
+    }
   }
+  Ok(None)
 }
 
 /// One holder's credential, device key and seed, signed by `issuer` with the Document Signer `ds`;
@@ -384,6 +404,123 @@ fn issue_v05(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Tim
   }))
 }
 
+/// The circuits' Sig_structure template for the v0.6 layout: a copy of
+/// `nym_auth_zk_decoy::mdoc::TEMPLATE` (every constant byte, the seven private fields zero), which
+/// native/longfellow's tests compare with the crate's.
+const V06_TEMPLATE_HEX: &str = include_str!("v06_template.hex");
+/// The private fields of the v0.6 Sig_structure: (offset, length) of bsc, psc, the device key's x
+/// and y, signed, validFrom, validUntil (INTEGRATION.md §5).
+const V06_FIELDS: [(usize, usize); 7] = [(148, 32), (183, 32), (248, 32), (283, 32), (338, 20), (370, 20), (403, 20)];
+const V06_MSO_BYTES: usize = 398;
+
+/// A CBOR text string with a head of one or two bytes (lengths under 256).
+fn tstr(s: &str) -> Vec<u8> {
+  let mut out = if s.len() < 24 { vec![0x60 | s.len() as u8] } else { vec![0x78, s.len() as u8] };
+  out.extend_from_slice(s.as_bytes());
+  out
+}
+
+/// One holder's rulebook v0.6 credential, the decoy-digest layout (INTEGRATION.md §5), written byte
+/// by byte: `bsc` and `psc` as the MSO's valueDigests 0 and 1, no IssuerSignedItems, no
+/// `nameSpaces`. The same device key, seed, private_seed, Document Signer and validity as the
+/// v0.5 one. Checked against the circuits' template before it is returned.
+#[allow(clippy::too_many_arguments)]
+fn issue_v06(issuer: &SigningKey, ds: &[u8], birth_date: &Date, valid_from: &Time, valid_until: &Time, device: &SigningKey, seed: &[u8; 16], private_seed: &[u8; 16]) -> Result<serde_json::Value, String> {
+  let device_point = device.verifying_key().to_encoded_point(false);
+  let (dx, dy) = (device_point.x().ok_or("device x")?, device_point.y().ok_or("device y")?);
+  let birth = birth_date.text();
+  if birth.len() != 10 {
+    return Err(format!("birth_date {birth} is not 10 bytes"));
+  }
+  let bsc = sha256(&[&seed[..], birth.as_bytes()].concat());
+  let psc = sha256(private_seed);
+  let tdate = |t: &Time| -> Result<Vec<u8>, String> {
+    let text = t.text();
+    if text.len() != 20 {
+      return Err(format!("the tdate {text} is not 20 characters"));
+    }
+    Ok([&[0xc0, 0x74][..], text.as_bytes()].concat())
+  };
+  let (signed, from, until) = (tdate(valid_from)?, tdate(valid_from)?, tdate(valid_until)?);
+
+  // The MSO, in the layout's key order and heads (INTEGRATION.md §5).
+  let mut mso = vec![0xa6];
+  mso.extend(tstr("version"));
+  mso.extend(tstr("1.0"));
+  mso.extend(tstr("digestAlgorithm"));
+  mso.extend(tstr("SHA-256"));
+  mso.extend(tstr("docType"));
+  mso.extend(tstr(DOC_TYPE));
+  mso.extend(tstr("valueDigests"));
+  mso.push(0xa1);
+  mso.extend(tstr(DOC_TYPE));
+  mso.extend_from_slice(&[0xa2, 0x00, 0x58, 0x20]);
+  mso.extend_from_slice(&bsc);
+  mso.extend_from_slice(&[0x01, 0x58, 0x20]);
+  mso.extend_from_slice(&psc);
+  mso.extend(tstr("deviceKeyInfo"));
+  mso.push(0xa1);
+  mso.extend(tstr("deviceKey"));
+  mso.extend_from_slice(&[0xa4, 0x01, 0x02, 0x20, 0x01, 0x21, 0x58, 0x20]);
+  mso.extend_from_slice(dx);
+  mso.extend_from_slice(&[0x22, 0x58, 0x20]);
+  mso.extend_from_slice(dy);
+  mso.extend(tstr("validityInfo"));
+  mso.push(0xa3);
+  mso.extend(tstr("signed"));
+  mso.extend(signed);
+  mso.extend(tstr("validFrom"));
+  mso.extend(from);
+  mso.extend(tstr("validUntil"));
+  mso.extend(until);
+  if mso.len() != V06_MSO_BYTES {
+    return Err(format!("the v0.6 MSO is {} B, not {V06_MSO_BYTES}: not written", mso.len()));
+  }
+
+  // payload = bstr(#6.24(bstr(MSO))): 59 01 93 d8 18 59 01 8e <MSO>.
+  let payload = [&[0x59, 0x01, 0x93, 0xd8, 0x18, 0x59, 0x01, 0x8e][..], &mso].concat();
+  // Sig_structure = ["Signature1", h'a10126', h'', payload].
+  let sig_structure = [&[0x84][..], &tstr("Signature1"), &[0x43, 0xa1, 0x01, 0x26, 0x40], &payload].concat();
+  let template_hex: String = V06_TEMPLATE_HEX.split_whitespace().collect();
+  let template: Vec<u8> = (0..template_hex.len())
+    .step_by(2)
+    .map(|i| template_hex.get(i..i + 2).ok_or("odd template hex").and_then(|h| u8::from_str_radix(h, 16).map_err(|_| "template hex")))
+    .collect::<Result<_, _>>()?;
+  if template.len() != SIG_STRUCTURE_BYTES || sig_structure.len() != SIG_STRUCTURE_BYTES {
+    return Err(format!("the v0.6 Sig_structure is {} B and the template {} B, not {SIG_STRUCTURE_BYTES}: not written", sig_structure.len(), template.len()));
+  }
+  let private = |i: usize| V06_FIELDS.iter().any(|&(at, n)| at <= i && i < at + n);
+  if let Some(i) = (0..SIG_STRUCTURE_BYTES).find(|&i| !private(i) && sig_structure[i] != template[i]) {
+    return Err(format!("the v0.6 Sig_structure differs from the circuits' template at byte {i}: not written"));
+  }
+  if sig_structure[148..180] != bsc || sig_structure[183..215] != psc || sig_structure[248..280] != dx[..] || sig_structure[283..315] != dy[..] {
+    return Err("the v0.6 Sig_structure does not hold bsc, psc and the device key at their offsets: not written".into());
+  }
+  let signature: Signature = issuer.sign(&sig_structure);
+
+  // IssuerSigned = { "issuerAuth": [h'a10126', {33: x5chain}, payload, r || s] }, no nameSpaces.
+  let mut issuer_signed = vec![0xa1];
+  issuer_signed.extend(tstr("issuerAuth"));
+  issuer_signed.extend_from_slice(&[0x84, 0x43, 0xa1, 0x01, 0x26, 0xa1, 0x18, 0x21]);
+  match ds.len() {
+    24..=255 => issuer_signed.extend_from_slice(&[0x58, ds.len() as u8]),
+    256..=65535 => issuer_signed.extend_from_slice(&[0x59, (ds.len() >> 8) as u8, ds.len() as u8]),
+    n => return Err(format!("the Document Signer certificate is {n} B: no minimal bstr head of 2 or 3 bytes")),
+  }
+  issuer_signed.extend_from_slice(ds);
+  issuer_signed.extend_from_slice(&payload);
+  issuer_signed.extend_from_slice(&[0x58, 0x40]);
+  issuer_signed.extend_from_slice(&signature.to_bytes());
+  println!("    MSO: {} B, Sig_structure: {} B (the layout: 398, 423); constant bytes equal the circuits' template", mso.len(), sig_structure.len());
+  println!("    IssuerSigned: {} B; bsc {}; psc {}", issuer_signed.len(), nym_vega::hex(&bsc), nym_vega::hex(&psc));
+
+  Ok(json!({
+    "credential": { "format": "mso_mdoc", "doctype": DOC_TYPE, "rulebook": "0.6", "issuer_signed": b64url(&issuer_signed) },
+    "birth_date": birth,
+    "private_seed": nym_vega::hex(private_seed),
+  }))
+}
+
 fn run() -> Result<(), String> {
   let a = args()?;
   let valid_from = midnight(a.valid_from);
@@ -428,19 +565,24 @@ fn run() -> Result<(), String> {
     let keep = previous.get(k).map(|p| kept(p, k)).transpose()?;
     let (device, seed) = keep.unwrap_or_else(|| (SigningKey::random(&mut OsRng), random()));
     let mut holder = issue(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], &device, seed)?;
+    // One private_seed per holder, shared by its v0.5 and v0.6 credentials.
+    let private_seed = match previous.get(k) {
+      Some(p) => kept_private_seed(p, k)?.unwrap_or_else(random),
+      None => random(),
+    };
     if a.v05 {
-      let private_seed = match previous.get(k) {
-        Some(p) => kept_private_seed(p, k)?.unwrap_or_else(random),
-        None => random(),
-      };
       println!("  v0.5:");
       holder["v05"] = issue_v05(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], &device, &seed, &private_seed)?;
+    }
+    if a.v06 {
+      println!("  v0.6 (decoy-digest layout):");
+      holder["v06"] = issue_v06(&issuer, ds.der(), &h.birth_date, &valid_from, &untils[k], &device, &seed, &private_seed)?;
     }
     holders.push(holder);
   }
 
   let wallet = json!({
-    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer): one rulebook v0.4 credential per holder and, under v05, its rulebook v0.5 credential (bsc, psc) with the birth_date and private_seed that open them, all signed by the same Document Signer over the same device key and secret_seed. No true holder binding: the device private keys and the seeds sit in the page.",
+    "comment": "Demo holder material for the mocked SIROS ID wallet, issued by native/vega/issuer (nym-issuer): one rulebook v0.4 credential per holder and, under v05, its rulebook v0.5 credential (bsc, psc) and, under v06, its rulebook v0.6 credential (the decoy-digest layout: bsc and psc as the MSO's valueDigests), each with the birth_date and private_seed that open them, all signed by the same Document Signer over the same device key and secret_seed. No true holder binding: the device private keys and the seeds sit in the page.",
     "holders": holders,
   });
   let text = serde_json::to_string_pretty(&wallet).map_err(|e| e.to_string())? + "\n";

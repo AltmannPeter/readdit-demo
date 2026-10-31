@@ -1,0 +1,142 @@
+{
+  "$schema": "../schema/profile.schema.json",
+  "id": "nym-auth-v0.6",
+  "label": "nym_auth v0.6",
+  "rulebook": {
+    "title": "Nym-authentication Attestation Specification and Rulebook",
+    "version": "0.6",
+    "date": "2026-10-30",
+    "document": "docs/nym_auth_rulebook-v0.6.md"
+  },
+  "source": {
+    "repository": "https://github.com/AltmannPeter/readdit-demo",
+    "commit": null,
+    "branch": "rulebook-v06"
+  },
+  "credential": {
+    "id": "nym_auth",
+    "label": "Age and pseudonym",
+    "encodings": {
+      "mso_mdoc": {
+        "doctype": "eu.europa.ec.eudi.nym_auth.1",
+        "attributes": [
+          {
+            "id": "bsc",
+            "role": "commitment",
+            "opens": ["secret_seed", "birth_date"],
+            "presence": "required",
+            "description": "SHA-256(secret_seed || birth_date): the 16-byte issuer-known seed and the 10-byte full-date, no CBOR tag; the MSO's valueDigests digestID 0 (bsc) itself, no IssuerSignedItem (decoy-digest layout)"
+          },
+          {
+            "id": "psc",
+            "role": "commitment",
+            "opens": ["private_seed"],
+            "presence": "required",
+            "description": "SHA-256(private_seed), or 32 zero bytes when the holder has none; the MSO's valueDigests digestID 1 (psc) itself, no IssuerSignedItem (decoy-digest layout)"
+          }
+        ]
+      },
+      "bbs_cd": {
+        "schema_id": "eu.europa.ec.eudi.nym_auth.bbs.1",
+        "schema_digest": "ab4183a9ed0b57d6bfb8994c92b432bb9731a3e2fd974ac2f67422e2f7dfb7e1",
+        "attributes": [
+          { "id": "device_key", "role": "hidden", "description": "P-256 device key, attested for hashed ECDSA" },
+          { "id": "birth_date", "role": "hidden", "description": "date-packed" },
+          { "id": "secret_seed", "role": "hidden", "description": "an issuer-managed non-zero scalar (the demo issuer derives it with hash_to_scalar from the 16-byte secret_seed)" }
+        ]
+      }
+    },
+    "metadata": [
+      { "label": "Type metadata (mso_mdoc)", "file": "credentials/nym_auth.mdoc.json" },
+      { "label": "Schema metadata", "file": "credentials/nym_auth.schema-meta.yaml" }
+    ]
+  },
+  "functions": {
+    "pseudonym": {
+      "kind": "value",
+      "return": "nym",
+      "wire": "pseudonym.config@1",
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["config", "ver", "prf"],
+        "properties": {
+          "config": { "type": "string" },
+          "ver": { "const": 1 },
+          "prf": { "enum": ["sha-256", "hashdh-bls12381g1"] },
+          "verifier_context": { "type": "string", "minLength": 1 }
+        }
+      },
+      "meaning": "A pseudonym for this verifier, from the seed the configuration names.",
+      "translation": [
+        "Verifier: verifier_input = SHA-256(verifier_id) (sha-256) or UTF-8(verifier_id) (hashdh-bls12381g1), verifier_id = client_id.",
+        "Wallet: the same, from the validated Request Object."
+      ],
+      "proof": "mso_mdoc: SHA-256(secret_seed || birth_date) == bsc (or SHA-256(private_seed) == psc) and the pseudonym in results is derived from that seed; bbs_cd: from the committed secret_seed.",
+      "source_attributes": { "mso_mdoc": ["bsc", "psc"], "bbs_cd": ["secret_seed"] }
+    },
+    "age_check": {
+      "kind": "assertion",
+      "wire": "age.years-range@1",
+      "bounds_date": "proof_time",
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["range"],
+        "properties": {
+          "range": { "type": "string", "pattern": "^([0-9]+-[0-9]+|[0-9]+\\+|[0-9]+-)$" }
+        }
+      },
+      "meaning": "The holder's age in whole years lies in range (A-B, A+ or B-) on D, the UTC date of proof_time.",
+      "translation": [
+        "Verifier: sends range from the community's age gate.",
+        "Wallet: sets proof_time (UTC, to the second), computes E and C from range and its date D, and checks its birth date against them.",
+        "Verifier: checks proof_time against its clock within its tolerance, and computes E and C from range and D itself.",
+        "C = the latest calendar date on or before D minus A years; E = the earliest calendar date after D minus (B + 1) years; no E for A+, no C for B-."
+      ],
+      "proof": "E <= birth_date <= C (mso_mdoc: the birth date opened from bsc; bbs_cd: the date-packed attribute). No output: results has no entry for it.",
+      "source_attributes": { "mso_mdoc": ["bsc"], "bbs_cd": ["birth_date"] }
+    }
+  },
+  "pseudonym_configs": [
+    {
+      "id": "known-offender-matching-ssc",
+      "seed": "secret_seed",
+      "seed_attribute": { "mso_mdoc": "bsc", "bbs_cd": "secret_seed" },
+      "prf": { "mso_mdoc": "sha-256", "bbs_cd": "hashdh-bls12381g1" },
+      "requested": true,
+      "properties": { "distinctPerVerifier": true, "sameAcrossVerifiers": false, "issuerCanLink": true, "knownOffenderMatching": true }
+    },
+    {
+      "id": "known-offender-matching-psc",
+      "seed": "private_seed",
+      "seed_attribute": { "mso_mdoc": "psc" },
+      "prf": { "mso_mdoc": "sha-256" },
+      "properties": { "distinctPerVerifier": true, "sameAcrossVerifiers": false, "issuerCanLink": false, "knownOffenderMatching": true }
+    },
+    {
+      "id": "account-recovery-ssc",
+      "seed": "secret_seed",
+      "seed_attribute": { "mso_mdoc": "bsc" },
+      "prf": { "mso_mdoc": "sha-256" },
+      "properties": { "distinctPerVerifier": true, "sameAcrossVerifiers": false, "issuerCanLink": true, "knownOffenderMatching": true }
+    },
+    {
+      "id": "user-managed-pseudonym-xsite-ssc",
+      "seed": "secret_seed",
+      "seed_attribute": { "mso_mdoc": "bsc" },
+      "prf": { "mso_mdoc": "sha-256" },
+      "properties": { "distinctPerVerifier": false, "sameAcrossVerifiers": true, "issuerCanLink": false, "knownOffenderMatching": false }
+    }
+  ],
+  "systems": [
+    { "proof_system": "vega-v1", "status": "pending", "note": "no Vega circuit for the decoy-digest layout yet", "proof_time": "always" },
+    {
+      "proof_system": "longfellow-libzk-v1",
+      "system_id": "urn:circuits:sha256:5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac",
+      "status": "available",
+      "proof_time": "always"
+    },
+    { "proof_system": "bbs-cd-plugins-v0.1", "status": "pending", "note": "waiting for the v0.6 rulebook text on bbs_cd", "proof_time": "with-age_check" }
+  ]
+}

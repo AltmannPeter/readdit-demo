@@ -13,7 +13,7 @@
 #   node/                  the napi-rs addon: Prover and Verifier objects for Node (napi glue only)
 [workspace]
 resolver = "2"
-members = ["nym-longfellow", "node", "nym-auth-zk"]
+members = ["nym-longfellow", "node", "nym-auth-zk", "nym-auth-zk-decoy"]
 exclude = ["vendor"]
 
 [workspace.dependencies]

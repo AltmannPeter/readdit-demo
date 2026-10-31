@@ -847,6 +847,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nym-auth-zk-decoy"
+version = "0.1.0"
+dependencies = [
+ "core-algebra",
+ "core-proto",
+ "p256",
+ "rayon",
+ "runtime-algebra",
+ "runtime-ligero",
+ "runtime-merkle",
+ "runtime-proto",
+ "runtime-random",
+ "runtime-sumcheck",
+ "runtime-zk",
+ "serde_json",
+ "sha2",
+ "zstd",
+]
+
+[[package]]
 name = "nym-longfellow"
 version = "0.1.0"
 dependencies = [
@@ -857,6 +877,7 @@ dependencies = [
  "der",
  "hex",
  "nym-auth-zk",
+ "nym-auth-zk-decoy",
  "p256",
  "rayon",
  "runtime-algebra",

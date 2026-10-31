@@ -58,9 +58,10 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
 /** `rulebook`: the version the wallet read the request under (shared/protocol/request.ts). */
 export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number; rulebook?: string }): Promise<ProveOutput> {
   const m = mdocMaterial(o.credential)
-  // v0.5: the holder's v0.5 mdoc, and the birth date that opens its bsc with the seed.
-  const v05 = o.rulebook === '0.5' ? m.v05 : undefined
-  if (o.rulebook === '0.5' && !v05) throw new ProverError('error', 'no v0.5 credential on this phone')
+  // v0.5 and v0.6: the holder's mdoc of that version, and the birth date that opens its bsc with
+  // the seed. v0.4: the v0.4 mdoc.
+  const held = o.rulebook === '0.5' ? m.v05 : o.rulebook === '0.6' ? m.v06 : undefined
+  if ((o.rulebook === '0.5' || o.rulebook === '0.6') && !held) throw new ProverError('error', `no v${o.rulebook} credential on this phone`)
   try {
     return await $fetch<ProveOutput>('/api/wallet/prove', {
       method: 'POST',
@@ -68,9 +69,9 @@ export async function prove(o: { request: RequestObject; queryId: string; system
         request: o.request,
         credential_query_id: o.queryId,
         system_id: o.systemId,
-        credential: v05?.credential ?? m.credential,
+        credential: held?.credential ?? m.credential,
         secret_seed: m.secret_seed,
-        ...(v05 && { birth_date: v05.birth_date }),
+        ...(held && { birth_date: held.birth_date }),
         device_signature: o.deviceSignature,
         ...(o.rulebook && { rulebook: o.rulebook }),
       },

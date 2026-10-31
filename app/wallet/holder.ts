@@ -10,7 +10,8 @@
 // Each mdoc holder also has a rulebook v0.5 mdoc (`v05` in demo-wallet.json: bsc and psc, with the
 // birth_date and private_seed that open them), from the same issuer over the same device key and
 // seed. The phone shows one card per holder; a request is answered with the version it reads under
-// (engine.ts analyzeVersions), and with the site's version when both read it.
+// (engine.ts analyzeVersions), and with the site's version when both read it. Likewise a rulebook
+// v0.6 mdoc (`v06`): the decoy-digest layout, bsc and psc as the MSO's valueDigests, no items.
 
 import walletFile from './demo-wallet.json'
 import bbsWalletFile from './demo-wallet-bbs.json'
@@ -25,6 +26,8 @@ export interface WalletCredential {
   doctype: string
   /** base64url IssuerSigned */
   issuer_signed: string
+  /** The rulebook version nym-issuer wrote it for ("0.5", "0.6"); absent for v0.4. */
+  rulebook?: string
 }
 
 /** P-256 JWK with its private part. */
@@ -44,6 +47,8 @@ export interface MdocMaterial {
   /** The holder's rulebook v0.5 mdoc, with what the wallet holds alongside it (rulebook v0.5,
    *  "Attribute encodings": secret_seed, birth_date and private_seed). */
   v05?: { credential: WalletCredential; birth_date: string; private_seed: string }
+  /** The holder's rulebook v0.6 mdoc (the decoy-digest layout), with the same three values beside it. */
+  v06?: { credential: WalletCredential; birth_date: string; private_seed: string }
 }
 
 /** The BBS credential as bbs-issuer writes it (native/bbs/nym-bbs/src/credential.rs). */
@@ -73,6 +78,7 @@ export const holders: WalletMaterial[] = [
     device_key: h.device_key as DeviceKeyJwk,
     secret_seed: h.secret_seed,
     ...('v05' in h && h.v05 && { v05: { credential: h.v05.credential as WalletCredential, birth_date: h.v05.birth_date, private_seed: h.v05.private_seed } }),
+    ...('v06' in h && h.v06 && { v06: { credential: h.v06.credential as WalletCredential, birth_date: h.v06.birth_date, private_seed: h.v06.private_seed } }),
   })),
   ...bbsWalletFile.holders.map((h) => ({ credential: h.credential as BbsWalletCredential, device_key: h.device_key as DeviceKeyJwk })),
 ]
@@ -88,10 +94,13 @@ export function mdocMaterial(index: number): MdocMaterial {
 export interface CredentialView {
   /** Position in the wallet (holders[index]). */
   index: number
-  /** mso_mdoc: the rulebook version of this mdoc ("0.4", "0.5"); bbs_cd: undefined (it fits both). */
+  /** mso_mdoc: the rulebook version of this mdoc ("0.4", "0.5", "0.6"); bbs_cd: undefined (it fits both). */
   rulebook?: string
-  /** The same holder's rulebook v0.5 mdoc, on the same card (mso_mdoc, v0.4 views only). */
+  /** The same holder's rulebook v0.5 and v0.6 mdocs, on the same card (mso_mdoc, v0.4 views only). */
   v05?: CredentialView
+  v06?: CredentialView
+  /** mso_mdoc: `decoy` for rulebook v0.6's decoy-digest layout (bsc and psc as valueDigests, no items). */
+  layout?: 'items' | 'decoy'
   /** The attestation's encoding (a zkp_req query's source_format): the mdoc, or the BBS credential. */
   format: SourceFormat
   /** The mdoc's docType, or the BBS credential's schema id. */
@@ -149,6 +158,8 @@ export const NYM_TITLE = 'Age and pseudonym'
 export const NYM_BBS_TITLE = 'Age and pseudonym (BBS)'
 
 function compact(v: IssuerSignedView): boolean {
+  // The decoy-digest layout is its own fixed form, not the compact profile.
+  if (v.layout === 'decoy') return false
   const known = v.bsc ? ['bsc', 'psc'] : ['birth_date', 'ssc', 'psc']
   const ids = v.items.map((i) => i.digestID).sort((a, b) => a - b)
   return (
@@ -174,7 +185,11 @@ export function loadCredentials(): Promise<CredentialView[]> {
     holders.map(async (h, index) => {
       if (!isMdoc(h)) return decodeBbs(h, index)
       const view = await decode(h, index, h.credential)
-      return h.v05 ? { ...view, v05: await decode(h, index, h.v05.credential, h.v05.birth_date) } : view
+      return {
+        ...view,
+        ...(h.v05 && { v05: await decode(h, index, h.v05.credential, h.v05.birth_date) }),
+        ...(h.v06 && { v06: await decode(h, index, h.v06.credential, h.v06.birth_date) }),
+      }
     }),
   )
   return cached
@@ -248,9 +263,14 @@ async function decodeBbs(holder: BbsMaterial, index: number): Promise<Credential
   }
 }
 
-/** An mdoc of the holder: its v0.4 credential, or its v0.5 one with the birth date held beside it. */
+/** An mdoc of the holder: its v0.4 credential, or its v0.5 or v0.6 one with the birth date held beside it. */
 async function decode(holder: MdocMaterial, index: number, credential: WalletCredential, heldBirthDate?: string): Promise<CredentialView> {
   const v = readIssuerSigned(credential.issuer_signed)
+  // The layout says the version; the file's `rulebook`, when present, must agree with it.
+  const rulebook = v.layout === 'decoy' ? '0.6' : v.bsc ? '0.5' : '0.4'
+  if (credential.rulebook !== undefined && credential.rulebook !== rulebook) {
+    throw new Error(`IssuerSigned: written for rulebook ${credential.rulebook}, but its layout is v${rulebook}'s`)
+  }
   const birthDate = v.birthDate ?? heldBirthDate
   if (!birthDate) throw new Error('IssuerSigned: no birth_date item, and none held beside it')
   // @peculiar/x509 needs the Reflect metadata polyfill loaded first.
@@ -260,7 +280,8 @@ async function decode(holder: MdocMaterial, index: number, credential: WalletCre
   const field = (name: string) => cert.subjectName.getField(name)[0]
   return {
     index,
-    rulebook: v.bsc ? '0.5' : '0.4',
+    rulebook,
+    layout: v.layout,
     format: 'mso_mdoc',
     docType: v.docType,
     namespace: v.namespace,
@@ -284,6 +305,12 @@ async function decode(holder: MdocMaterial, index: number, credential: WalletCre
     },
     sizes: { issuerSigned: v.bytes.issuerSigned },
   }
+}
+
+/** The attributes an mdoc signs, with their digestIDs: its IssuerSignedItems, or, in rulebook v0.6's
+ *  decoy-digest layout (no items), the commitments the MSO's valueDigests hold themselves. */
+export function signedAttributes(c: CredentialView): Array<{ id: string; digestID: number }> {
+  return c.layout === 'decoy' ? [{ id: 'bsc', digestID: 0 }, { id: 'psc', digestID: 1 }] : c.elements
 }
 
 /** validUntil 9999-12-31T23:59:59Z, the farthest a tdate holds: the credential does not expire. */

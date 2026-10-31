@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The nym_auth attestation in either encoding, in the demo profile's rulebook version (`rulebook`),
 // with the values of a demo credential: for mso_mdoc the phone on screen's mdoc (the teen's when
-// that phone holds the BBS credential; its v0.5 mdoc under v0.5), for bbs_cd the teen's BBS
+// that phone holds the BBS credential; its v0.5 mdoc under v0.5, its v0.6 mdoc under v0.6), for bbs_cd the teen's BBS
 // credential. Closes on a click outside or Esc.
 import { attestationFor } from '~/dev/attestation'
 import { PHONES, loadCredentials, type CredentialView } from '~/wallet/holder'

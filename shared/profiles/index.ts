@@ -8,6 +8,7 @@
 
 import v04 from '../../profiles/nym-auth-v0.4/profile.json'
 import v05 from '../../profiles/nym-auth-v0.5/profile.json'
+import v06 from '../../profiles/nym-auth-v0.6/profile.json'
 import type { PseudonymConfig, SourceFormat } from '../types/oid4vp'
 
 export interface ProfileAttribute {
@@ -69,7 +70,7 @@ export interface Profile {
 }
 
 /** Every profile, oldest first. */
-export const PROFILES: Profile[] = [v04 as unknown as Profile, v05 as unknown as Profile]
+export const PROFILES: Profile[] = [v04 as unknown as Profile, v05 as unknown as Profile, v06 as unknown as Profile]
 
 /** The profile the site runs at start (runtime config demoProfile overrides it). */
 export const DEFAULT_PROFILE_ID = 'nym-auth-v0.4'

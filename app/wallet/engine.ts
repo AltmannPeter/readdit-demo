@@ -7,7 +7,7 @@ import { derivePseudonym } from '#shared/utils/pseudonym'
 import { fromHex } from '#shared/utils/bytes'
 import { encryptionKeyOf, responseEncOf } from '#shared/utils/jwe'
 import type { CredentialView } from './holder'
-import { credentialLabel, mdocMaterial } from './holder'
+import { credentialLabel, mdocMaterial, signedAttributes } from './holder'
 import { PROFILES, configSpec, type Profile } from '#shared/profiles'
 import { readReqAnyProfile } from '#shared/protocol/request'
 import { ageOn } from '#shared/protocol/operators'
@@ -52,15 +52,21 @@ export interface RequestView {
   profile?: Profile
 }
 
-/** The profiles a credential fits: an mdoc whose data elements include every required attribute
- *  of the profile's mso_mdoc encoding (v0.4: birth_date, ssc; v0.5: bsc, psc), a BBS credential
- *  of the profile's schema. The demo wallet reads requests under these. */
+/** The profiles a credential fits: an mdoc of the profile's rulebook version whose signed
+ *  attributes include every required attribute of the profile's mso_mdoc encoding (v0.4:
+ *  birth_date, ssc; v0.5 and v0.6: bsc, psc; v0.6 signs them as valueDigests, not items), a BBS
+ *  credential of the profile's schema while the profile's BBS system is available. The demo wallet
+ *  reads requests under these. */
 export function credentialProfiles(cred: CredentialView): Profile[] {
   return PROFILES.filter((p) => {
-    if (cred.format === 'bbs_cd') return p.credential.encodings.bbs_cd?.schema_id === cred.docType
+    // A BBS credential fits every version of its schema whose BBS system is available (v0.6 keeps
+    // it pending until the rulebook text on bbs_cd).
+    if (cred.format === 'bbs_cd') return p.credential.encodings.bbs_cd?.schema_id === cred.docType && p.systems.some((s) => s.proof_system === 'bbs-cd-plugins-v0.1' && s.status === 'available')
     const enc = p.credential.encodings.mso_mdoc
     if (!enc || enc.doctype !== cred.docType) return false
-    const ids = new Set(cred.elements.map((e) => e.id))
+    // v0.5 and v0.6 hold the same attributes in different layouts: each reads its own version's.
+    if (cred.rulebook && cred.rulebook !== p.rulebook.version) return false
+    const ids = new Set(signedAttributes(cred).map((e) => e.id))
     return enc.attributes.filter((a) => a.presence !== 'optional').every((a) => ids.has(a.id))
   })
 }
@@ -182,13 +188,13 @@ export function analyzeRequest(req: RequestObject, cred: CredentialView, today: 
 }
 
 /**
- * The request against a card's credential in each version the holder has (the mdoc's v0.4 and
- * v0.5 credentials share a card): the one with a circuit the request offers, satisfiable or
+ * The request against a card's credential in each version the holder has (the mdoc's v0.4, v0.5
+ * and v0.6 credentials share a card): the one with a circuit the request offers, satisfiable or
  * failing only on the age. Each circuit reads one version's credential (its id names its archive),
  * so the offered ids decide. Else the first version's refusal.
  */
 export function analyzeVersions(req: RequestObject, cred: CredentialView, today: string, caps: WalletCaps): { view: RequestView; credential: CredentialView } {
-  const tried = [cred, ...(cred.v05 ? [cred.v05] : [])].map((c) => ({ credential: c, view: analyzeRequest(req, c, today, caps) }))
+  const tried = [cred, ...(cred.v05 ? [cred.v05] : []), ...(cred.v06 ? [cred.v06] : [])].map((c) => ({ credential: c, view: analyzeRequest(req, c, today, caps) }))
   return tried.find((t) => t.view.satisfiable || t.view.problem === 'age') ?? tried[0]!
 }
 
@@ -307,7 +313,7 @@ export async function consentFor(view: RequestView, cred: CredentialView, certif
     )
   }
 
-  for (const e of cred.elements) {
+  for (const e of signedAttributes(cred)) {
     const label = ELEMENT_LABELS[e.id] ?? (e.id === 'secret_seed' ? 'Pseudonym seed (secret_seed)' : e.id === 'device_key' ? 'Device key' : e.id)
     if (e.id === 'device_key') continue
     out.notShared.push(e.id === 'birth_date' ? { label, value: fmtDate(cred.attributes.birth_date) } : { label })

@@ -1,0 +1,43 @@
+[package]
+name = "nym-auth-zk-decoy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Longfellow zero-knowledge presentations of the nym_auth mdoc attestation (eu.europa.ec.eudi.nym_auth.1) in the decoy-digest layout with the precomputed prefix: age range check on the committed birth date and the known-offender-matching-ssc pseudonym, in one proof. Two Longfellow circuits (LFC2 in an LFA2 archive), their native witness generator, and Google's ZK prover and verifier with their independent work in parallel."
+
+[dependencies]
+# Google's Longfellow Rust implementation: circuits (LFC2/LFA2), fields, the ZK prover and
+# verifier (Ligero + sumcheck), the Fiat-Shamir transcript and the proof encoding.
+core-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+core-algebra = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-algebra = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-zk = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-random = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-ligero = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-proto = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-sumcheck = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+runtime-merkle = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92" }
+# The parallel prover and verifier's thread pool (feature `parallel`).
+rayon = { version = "1.10", optional = true }
+# The circuit archive is zstd-compressed, as Google's mdoc circuits are shipped.
+zstd = "0.13"
+# SHA-256 (the transcript-independent hashes: verifier_input, the session's handover, e2).
+sha2 = "0.10"
+# P-256 field and scalar arithmetic for the signature circuit's witness; ECDSA verification for
+# the prover's checks before proving.
+p256 = { version = "0.13", default-features = false, features = ["arithmetic", "expose-field", "ecdsa"] }
+
+[features]
+# Independent proving and verification work in parallel on the calling rayon pool. Without it,
+# the same work runs in order on the calling thread; the output is identical.
+default = ["parallel"]
+parallel = ["dep:rayon"]
+# Google's own ZkProver / ZkVerifier in place of the parallel copies (for comparison tests).
+reference = []
+
+[dev-dependencies]
+serde_json = "1"
+# Google's deterministic random engine, for the byte-identity example and tests only.
+runtime-random = { git = "https://github.com/google/longfellow-zk", rev = "61a8a735964d1b22bccf79bf14ef6767249cdf92", features = ["testonly"] }
+

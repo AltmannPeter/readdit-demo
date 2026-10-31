@@ -80,6 +80,8 @@ const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
 const VEGA = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
 const LONGFELLOW = 'urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'
 const LONGFELLOW_V05 = 'urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'
+// Longfellow under rulebook v0.6: the decoy-digest layout (nym-auth-zk-decoy).
+const LONGFELLOW_V06 = 'urn:circuits:sha256:5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac'
 const VEGA_V05 = 'urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'
 /** A circuit id of the same length that names no circuit: the last hex digit changed. */
 const otherId = (id) => id.slice(0, -1) + (id.endsWith('0') ? '1' : '0')
@@ -158,6 +160,18 @@ async function presentV05(ctx, request, wallet, circuit = LONGFELLOW_V05) {
   if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
   const p = await call(ctx, 'POST', '/api/wallet/prove', {
     data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v05.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v05.birth_date, device_signature: s.body.device_signature, rulebook: '0.5' },
+  })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
+/** mso_mdoc under rulebook v0.6: the holder's v0.6 mdoc (demo-wallet.json `v06`, the decoy-digest
+ *  layout) with the birth date that opens its bsc, `rulebook` "0.6". */
+async function presentV06(ctx, request, wallet, circuit = LONGFELLOW_V06) {
+  const q = queryOf(request, 'mso_mdoc')
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
+  if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
+  const p = await call(ctx, 'POST', '/api/wallet/prove', {
+    data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v06.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v06.birth_date, device_signature: s.body.device_signature, rulebook: '0.6' },
   })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
@@ -2769,7 +2783,7 @@ async function groupQ() {
 
   begin('Q1', '/tech: the demo profile, its version and the commit it is based on')
   let o = await overview()
-  eq('the profiles', o.profiles.map((p) => p.id), ['nym-auth-v0.4', 'nym-auth-v0.5'])
+  eq('the profiles', o.profiles.map((p) => p.id), ['nym-auth-v0.4', 'nym-auth-v0.5', 'nym-auth-v0.6'])
   eq('v0.4 runs', o.profile, 'nym-auth-v0.4')
   const v04 = o.profiles[0]
   check('v0.4: a GitHub commit', /^[0-9a-f]{40}$/.test(v04.commit) && v04.commitUrl === `https://github.com/AltmannPeter/readdit-demo/commit/${v04.commit}`, v04.commitUrl)
@@ -3146,6 +3160,157 @@ async function groupQ() {
   }
   await accept(LONGFELLOW_SYSTEM, true)
   eq('both circuits on: the offer, Vega first', (await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'login' }))).client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05, LONGFELLOW_V05])
+
+  begin('Q10', 'v0.6 over HTTP: Longfellow on the decoy circuits; Vega and BBS pending; a range, bounds from proof_time, the same pseudonym, threads')
+  eq('server: v0.6', (await setProfile('nym-auth-v0.6')).body.profile, 'nym-auth-v0.6')
+  o = await overview()
+  eq('the demo was reset', (await accounts()).length, 0)
+  const v06 = o.profiles.find((x) => x.id === 'nym-auth-v0.6')
+  eq('v0.6: version, rulebook, no commit yet', [v06?.version, v06?.commit ?? null, v06?.documentUrl?.endsWith('/docs/nym_auth_rulebook-v0.6.md')], ['0.6', null, true])
+  expectAnswer('server: Vega is pending under v0.6', await accept('vega-v1', true), 409, 'pending_system')
+  expectAnswer('server: BBS is pending under v0.6', await accept(BBS_SYSTEM, true), 409, 'pending_system')
+  eq('server: Longfellow can be switched on', (await accept(LONGFELLOW_SYSTEM, true)).body.acceptedProofSystems, [LONGFELLOW_SYSTEM])
+  {
+    const t10 = await ctxBrowser.newPage()
+    await t10.goto('/tech')
+    await t10.locator('[data-profile-version]', { hasText: 'Rulebook v0.6' }).waitFor({ timeout: 15_000 })
+    check('/tech: Vega and BBS pending, Longfellow available', (await t10.locator('[data-accept="vega-v1"]').isDisabled()) && (await t10.locator(`[data-accept="${BBS_SYSTEM}"]`).isDisabled()) && !(await t10.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+    check('/tech: the switch names Longfellow under v0.6', (await t10.locator('label', { has: t10.locator('[data-threads]') }).textContent()).includes('Vega, Longfellow and BBS'))
+    await t10.close()
+  }
+  o = await overview()
+  const lf6Info = o.services?.lfVerifier?.circuits ?? []
+  check('the verifier lists the decoy circuits under 0.6, beside the other two sets', lf6Info.some((c) => c.system_id === LONGFELLOW_V06 && c.rulebook === '0.6' && LONGFELLOW_V06.endsWith(c.artifact_sha256)) && lf6Info.some((c) => c.system_id === LONGFELLOW_V05 && c.rulebook === '0.5'), JSON.stringify(lf6Info.map((c) => [c.system_id, c.rulebook])))
+  const lf6Only = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V06] } } })
+  {
+    const c10 = await client()
+    s = await newSession(c10, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c10, s, lf6Only)
+    eq('the offer: the decoy circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW_V06])
+    eq('the mdoc _req: as v0.5, pseudonym, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
+      { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } },
+      { fn_id: 'age_check', params: { range: '13-17' } },
+    ])
+    let refused = ''
+    try {
+      await presentV06(c10, r, { ...teen, v06: { ...teen.v06, credential: teen.v05.credential } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.5 (compact) mdoc is refused by the decoy circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV06(c10, r, teen, LONGFELLOW_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the bsc circuits under 0.6 are refused', refused.includes('unsupported_circuit'), refused)
+    refused = ''
+    try {
+      await presentV06(c10, r, { ...teen, v06: { ...teen.v06, birth_date: '2011-03-15' } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    const lp = await presentV06(c10, r, teen)
+    eq('results: the pseudonym only', Object.keys(lp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 and v0.5 (one seed)', lp.results.nym, v04Nym)
+    const bytes6 = Buffer.from(lp.presentation, 'base64url').length
+    check('the presentation is about 289 kB (v0.5: about 322 kB)', bytes6 > 280_000 && bytes6 < 300_000, `${bytes6} B`)
+    await respond(c10, r, vpForm(r, lp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.6, the decoy public inputs (no doctype)', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.6', ['proof_time', 'pseudonym.verifier_input']])
+    check('the prebuild phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    const today = new Date().toISOString().slice(0, 10)
+    eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
+    eq('under v0.6', lv?.profile, 'nym-auth-v0.6')
+    eq('completed: the account, with the age', (await call(c10, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+    o = await overview()
+    const lf6Row = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.6' && JSON.stringify(x).includes(LONGFELLOW_SYSTEM))
+    check('Benchmark: a Longfellow run under v0.6, with its Prebuild (consent) step', !!lf6Row && JSON.stringify(lf6Row.steps?.prove ?? lf6Row).includes('Prebuild (consent)'), JSON.stringify(lf6Row?.steps ?? o.measurements.rows.map((x) => x.proof_system)))
+    await c10.dispose()
+    const c11 = await client()
+    const s11 = await newSession(c11, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r11 = await fetchRequest(c11, s11, lf6Only)
+    refused = ''
+    try {
+      await presentV06(c11, r11, teen)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV06(c11, r11, adult)
+    await respond(c11, r11, vpForm(r11, ap.presentation))
+    eq('the adult proves 18+', (await sessionView(s11.id)).status, 'verified')
+    await c11.dispose()
+    // /tech's multithreading switch reaches the decoy circuits, as the bsc ones (Q6).
+    const cores = (await overview()).measurements.machine.cores
+    const threadsOf = async (parallel) => {
+      expectAnswer(`server: multithreading ${parallel ? 'on' : 'off'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { parallel } }), 200)
+      const c12 = await client()
+      const s12 = await newSession(c12, { purpose: 'signin', intent: 'login' })
+      const r12 = await fetchRequest(c12, s12, lf6Only)
+      const p12 = await presentV06(c12, r12, teen)
+      await respond(c12, r12, vpForm(r12, p12.presentation))
+      const v12 = await sessionView(s12.id)
+      await c12.dispose()
+      const at = (step) => v12.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
+      return { status: v12.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
+    }
+    eq(`multithreading on: the decoy circuits on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    eq('multithreading off: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
+  }
+
+  begin('Q11', "v0.6 in the browser: the teen's phone answers with its v0.6 mdoc; /dev shows the decoy circuits and the v0.6 attestation")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('the phone answered with the decoy circuits and its v0.6 mdoc', [sv.circuit?.system_id, sv.trace.find((t) => t.step === 'witness')?.data?.rulebook], [LONGFELLOW_V06, '0.6'])
+  await closeFromPhone()
+  {
+    const t11 = await ctxBrowser.newPage()
+    const broken = []
+    t11.on('pageerror', (e) => broken.push(e.message))
+    await t11.goto('/tech')
+    await t11.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t11.getByText(/hash circuit [\d,]+ inputs/).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    check("/tech renders after a v0.6 presentation, with the decoy circuits' input counts", !broken.length && (await t11.getByText(/hash circuit [\d,]+ inputs \(269 public\)/).count()) > 0, broken.join('; '))
+    await t11.close()
+  }
+  {
+    const d11 = await ctxBrowser.newPage()
+    await d11.goto('/dev')
+    await d11.locator('[data-dev-profile]', { hasText: 'nym_auth v0.6' }).waitFor({ timeout: 15_000 })
+    check('/dev: Vega and BBS pending under v0.6', (await d11.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await d11.locator(`[data-accept="${BBS_SYSTEM}"]`).textContent()).includes('pending'))
+    const latest11 = (await call(d11.request, 'GET', '/api/dev/latest')).body
+    eq('/dev: the newest session presented with the decoy circuits', latest11.session?.response?.presentation?.decoded?.system_id, LONGFELLOW_V06)
+    await d11.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
+    await d11.keyboard.press('i')
+    await d11.getByRole('tab', { name: /Response/ }).click()
+    await d11.getByText(LONGFELLOW_V06).first().waitFor({ timeout: 10_000 }).catch(() => {})
+    check('/dev: the inspector shows the decoy system_id', (await d11.getByText(LONGFELLOW_V06).count()) > 0)
+    await d11.locator('button.att').click()
+    const att = d11.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.6: bsc and psc', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['bsc', 'psc'])
+    eq('/dev attestation, v0.6: held by the wallet', await att.locator('[data-att-secret]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-secret'))), ['secret_seed', 'birth_date', 'private_seed'])
+    const text = await att.textContent()
+    check('/dev attestation, v0.6: the title, and the MSO contains no claims', (await att.locator('h3').textContent()).includes('v0.6') && text.includes('The MSO contains no claims') && text.includes('bsc (digestID 0) and psc (digestID 1) themselves'))
+    await att.getByRole('button', { name: 'Show full structure' }).click()
+    const raw = await att.locator('.raw').textContent()
+    check('/dev attestation, v0.6: issuerAuth only, no nameSpaces; bsc and psc in valueDigests', !raw.includes('nameSpaces') && raw.includes('issuerAuth') && raw.includes('valueDigests') && raw.includes('(bsc)') && raw.includes('(psc)'), raw.slice(0, 300))
+    await d11.close()
+  }
 
   begin('Q5', 'back to v0.4: reset, Vega available again')
   eq('server: v0.4', (await setProfile('nym-auth-v0.4')).body.profile, 'nym-auth-v0.4')

@@ -5,8 +5,10 @@ the Vega addon (`native/vega`, a circuit over the nym_auth mdoc, `mso_mdoc`), de
 Longfellow addon (`native/longfellow`, a circuit over the same mdoc, with the same interface), in
 its own section; and the BBS addon (`native/bbs`, a scheme over the nym_auth BBS credential,
 `bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query with
-a `ZkpPresentation`, in the version the input names: `"rulebook": "0.4"` (the default when absent)
-or `"0.5"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove) and verify input.
+a `ZkpPresentation`, in the version the input names: `"rulebook": "0.4"` (the default when absent),
+`"0.5"` or `"0.6"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove) and verify
+input. `"0.6"` keeps v0.5's request and presentation rules (`Rulebook::years_range()`); only
+Longfellow serves it, with its decoy circuits (below).
 v0.5 changes one thing here: `age_check` is an assertion, `{ "fn_id": "age_check", "params": {
 "range": "13-17" } }` without `return` and with no output in `results`; the prover and the
 verifier compute E and C from the range and the UTC date of `proof_time` (the prover's clock; the
@@ -16,7 +18,8 @@ the verifier answers the bounds it used as `"bounds": { "ge", "le" }` (null for 
 when the request has an age check (refused otherwise: `proof_time`; under v0.4 a `proof_time` is
 refused as `presentation`). Each set of circuits reads one rulebook version: Vega and Longfellow
 prove v0.5 requests with their v0.5 circuits (`bsc`), and their v0.4 circuits refuse them (prover
-`unsupported_circuit`, verifier `circuit`). Only `server/utils/services.ts` calls them. Each loads on its own; the site
+`unsupported_circuit`, verifier `circuit`); Longfellow proves v0.6 requests with its decoy circuits
+only, and each of its three sets refuses the other two versions the same way. Only `server/utils/services.ts` calls them. Each loads on its own; the site
 starts when at least one loads and offers only the systems of those that did. The
 addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
 a presentation costs no network hop on the server side.
@@ -84,7 +87,7 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
-| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
 | `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Community can accept |
@@ -475,6 +478,32 @@ issuer key fails only `signature`. `bounds` are E and C from the range and the d
 **Fetch.** `nym-auth-zk` names google/longfellow-zk `61a8a73` by git; the workspace's `[patch]` builds it
 from the vendored copy, but Cargo still fetches the git repository once to resolve the patch
 (`cargo metadata --locked --offline` fails without it in the git cache). Nothing from it is built.
+
+### Longfellow under rulebook v0.6: the decoy circuits
+
+Circuit `urn:circuits:sha256:5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac` (the
+SHA-256 of `nym_auth_mdoc_decoy.lfa2.zst`, `nym_auth_zk_decoy::system_id()`) is `nym-auth-zk-decoy`
+0.1.0 (Peter's package `nym-auth-longfellow-decoy-v1`, rulebook v0.6 revision), in
+`native/longfellow/nym-auth-zk-decoy` as delivered and pinned in `VENDOR-SHA256SUMS`, with the
+package's adapter `nym-longfellow/src/decoy.rs`. It reads rulebook v0.6 requests and credentials
+only: both addon objects load it beside the v0.4 and bsc sets, `info.circuits` lists it with
+`rulebook: "0.6"`, and the decoy id under another version, or another set's id under `"0.6"`, is
+refused (`unsupported_circuit`, verifier `circuit`). The API, the two phases, the MAC, the refusals
+and the threads are the bsc circuits' (above); the statement is theirs without the docType, which
+the layout fixes.
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.6, the decoy-digest layout (package INTEGRATION.md §5): IssuerSigned is `{ "issuerAuth" }` only, no `nameSpaces`; the MSO (398 bytes, fixed key order) holds `bsc` and `psc` themselves as valueDigests 0 and 1; the Sig_structure is 423 bytes with every private field at a fixed offset. `nym_auth_zk_decoy::mdoc::parse` refuses anything else, so a v0.4 or v0.5 credential is `bad_credential` |
+| Artifact SHA-256 | `nym_auth_mdoc_decoy.lfa2.zst` `5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac` (227,925 bytes); hash circuit id `b52fc806…ff62` (269 public slots), signature circuit id `6a62a572…315f` (1,155, the bsc set's) |
+| MAC | as the bsc circuits; the transcript starts from `"nym_auth/v1/mdoc-decoy/longfellow"` ‖ e2 |
+| Proof | about 289 kB |
+
+Public inputs in circuit order: `proof_time` 1, `pseudonym.verifier_input` 256, `results.nym` 2,
+`age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 6 + 768, `issuer_key_set`
+2, `session_transcript` 256 (hash + signature): no `doctype`, and one `proof_time` element. Tests:
+`nym-longfellow/tests/decoy_crosscheck.rs`, `v06_flow.rs` (the package's) and `decoy_flow.rs` (the
+demo holders' `v06` credentials).
 
 **Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
 GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on

@@ -35,8 +35,9 @@ export interface CircuitEntry {
   label: string
   source_format: 'mso_mdoc'
   doctype: string
-  /** 'any' = accepts any ISO/IEC 18013-5 conformant encoding; 'compact' = compact profile only. */
-  profile: 'any' | 'compact'
+  /** 'any' = accepts any ISO/IEC 18013-5 conformant encoding; 'compact' = compact profile only;
+   *  'decoy' = the decoy-digest layout (rulebook v0.6) only. */
+  profile: 'any' | 'compact' | 'decoy'
   functions: {
     pseudonym?: PseudonymSupport
     age_check?: { params: Array<'ge' | 'le' | 'range'> }
@@ -96,6 +97,22 @@ const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c·m_k, the six 16-byte words at the head of the proof, in both circuits: they tie the signed message and the device key the hash circuit reads to those the signature circuit verifies' },
   { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (signature circuit)' },
   { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the transcript starts from "nym_auth/v1/mdoc-bsc/longfellow" ‖ e2' },
+]
+
+// Longfellow nym_auth under rulebook v0.6: the nym-auth-zk-decoy circuits over the decoy-digest
+// layout (Peter's package nym-auth-longfellow-decoy-v1, INTEGRATION.md §7), with their own id. Hash
+// circuit 268 + 1 = 269 public slots, signature circuit 1154 + 1 = 1155; values = elements in both,
+// circuit order (nym-longfellow/src/decoy.rs, PUBLIC_INPUTS). No doctype entry: the layout fixes it.
+const LONGFELLOW_DECOY_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'x^(T+533333333333328), T = YYYYMMDDhhmmss (UTC); tolerance checked outside the proof' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 256, derivation: 'SHA-256(verifier_id), bit j of byte d at 8d+j; verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: "the pseudonym's two 16-byte halves, LE" },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'x^(E+533333328); E = 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'x^(C+533333328); C = 99999999 when absent' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat-Shamir bytes after both commitments (1 in the hash circuit, 128 bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c m_k, the six words at the head of the proof (6 + 768 bits)' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: "Q's x and y" },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: "e2's 256 bits, least significant first" },
 ]
 
 // Vega nym_auth under rulebook v0.5: vega-age 0.2.0's bsc core (Peter's package nym-auth-vega v1,
@@ -163,6 +180,23 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     public_inputs: LONGFELLOW_V05_PUBLIC_INPUTS,
     artifact: { name: 'nym_auth_mdoc_bsc.lfa2.zst', sha256: 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52' },
     rulebook: '0.5',
+  },
+  {
+    system_id: circuitId('5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v0.6 (decoy digests)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'decoy',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_DECOY_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_decoy.lfa2.zst', sha256: '5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac' },
+    rulebook: '0.6',
   },
   {
     system_id: circuitId('6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'),

@@ -147,12 +147,14 @@ fn param_str<'a>(params: &'a serde_json::Map<String, Json>, key: &str) -> Result
 
 /// The rulebook version a request is read under (the demo profile; `rulebook` in the input, "0.4"
 /// when absent). v0.5: `age_check` is an assertion with a `range` in whole years, and both sides
-/// compute E and C from it and the UTC date of `proof_time` ([`dates::range_bounds`]).
+/// compute E and C from it and the UTC date of `proof_time` ([`dates::range_bounds`]). v0.6: the
+/// decoy-digest credential layout ([`crate::decoy`]), with v0.5's request and presentation rules.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Rulebook {
   #[default]
   V04,
   V05,
+  V06,
 }
 
 impl Rulebook {
@@ -160,8 +162,14 @@ impl Rulebook {
     match v {
       None | Some("0.4") => Ok(Rulebook::V04),
       Some("0.5") => Ok(Rulebook::V05),
-      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4 and 0.5"))),
+      Some("0.6") => Ok(Rulebook::V06),
+      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4, 0.5 and 0.6"))),
     }
+  }
+
+  /// Whether `age_check` is v0.5's assertion with a `range` (v0.5 and v0.6).
+  pub fn years_range(self) -> bool {
+    matches!(self, Rulebook::V05 | Rulebook::V06)
   }
 }
 
@@ -256,7 +264,7 @@ pub fn statement_for(
         }
         nym_handle = r.handle.clone();
       }
-      "age_check" if rulebook == Rulebook::V05 => {
+      "age_check" if rulebook.years_range() => {
         if age.is_some() {
           return Err(Refusal::unsupported_request("more than one age_check item"));
         }

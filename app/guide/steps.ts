@@ -271,8 +271,10 @@ function credentialSection(c: CredentialView | null): GuideSection | null {
     heading: 'Credential',
     rows: [
       { label: 'Document type', value: c.docType, mono: true },
-      { label: 'Encoding', value: `${c.encoding}${c.compactProfile ? ', compact profile' : ''}` },
-      { label: 'Data elements', value: c.elements.map((e) => e.id).join(', '), mono: true },
+      { label: 'Encoding', value: `${c.encoding}${c.compactProfile ? ', compact profile' : c.layout === 'decoy' ? ', decoy-digest layout' : ''}` },
+      c.layout === 'decoy'
+        ? { label: 'Data elements', value: 'None: the MSO holds bsc and psc as its valueDigests 0 and 1', mono: true }
+        : { label: 'Data elements', value: c.elements.map((e) => e.id).join(', '), mono: true },
       { label: 'Issuer', value: c.issuer.country ? `${c.issuer.name} (${c.issuer.country})` : c.issuer.name },
       { label: 'Issuer signature', value: `${c.mso.signatureAlgorithm}, ${c.issuer.documentSigner}` },
       { label: 'Attribute digests', value: c.mso.digestAlgorithm },
