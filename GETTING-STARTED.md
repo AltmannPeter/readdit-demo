@@ -442,6 +442,21 @@ cargo run --release -p bbs-issuer -- --wallet ../../app/wallet/demo-wallet.json 
   --birth-date 2011-03-14 --out ../../app/wallet/demo-wallet-bbs.json --issuer-params demo/issuer-params.bin
 ```
 
+## Benchmarks from the terminal
+
+`npm run bench` runs presentations against the running site (local or Docker) through the demo
+phone's own routes and prints `/tech`'s Benchmark figures for exactly those runs: prove and verify
+time with the time by step, proof and presentation size, and memory. The runs also appear in
+`/tech`. `npm run bench -- --help` lists the flags. For example, ten runs of Longfellow under v0.6
+with the 13–17 check, on one thread and on every core, written to a CSV:
+
+```sh
+npm run bench -- --runs 10 --profile nym-auth-v0.6 --system longfellow --threads 1,all --age 13-17 --out v06.csv
+```
+
+It sets `/tech`'s switches for each run and puts them back afterwards. A `--profile` other than the
+one the site runs resets the demo, as the dropdown does.
+
 ## Checks
 
 ```sh

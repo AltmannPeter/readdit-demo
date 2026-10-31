@@ -604,6 +604,7 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
 | `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |
 | `POST /api/tech/measurements/clear` | | Empties the measurements file and the profiles file |
+| `GET /api/tech/measurements` | 400 `bad_request` | `?since=<ISO time>`: the Benchmark's rows (as `/tech`'s) over the active profile's records made at or after it; without it, all of them. `&raw=1` adds the records. `newest` is the newest record's time. `scripts/bench.mjs` reads it. 400 for a `since` that is not a time |
 
 `{ purpose: 'dev', age: 'none' | 'over18' | 'range13to17' }` is the developer view's request: the
 pseudonym, and the age range 18+ or 13–17 if chosen; its completion creates the account or logs in

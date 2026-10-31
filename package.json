@@ -11,7 +11,8 @@
     "vega:check": "node scripts/vega-check.mjs",
     "start": "node .output/server/index.mjs",
     "vectors:check": "node scripts/vectors-check.mjs",
-    "cwt:check": "node scripts/cwt-check.mjs"
+    "cwt:check": "node scripts/cwt-check.mjs",
+    "bench": "node scripts/bench.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

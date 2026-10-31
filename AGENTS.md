@@ -204,6 +204,7 @@ server/
   api/tech/threads.post.ts       /tech's thread switch (Vega, BBS, Longfellow v0.5)
   api/tech/response-mode.post.ts /tech's Response switch (direct_post.cwt or direct_post.jwt)
   api/tech/measurements/clear.post.ts  /tech's Clear: empties the measurements file
+  api/tech/measurements/index.get.ts   the Benchmark over runs since a time (scripts/bench.mjs); raw=1 adds the records
   utils/measurements.ts          the measurements: one JSON line per verified presentation, the /tech summary
   utils/profiles.ts              Profiling's profiles (one JSON line per profiled presentation), the presentation's bytes by field
   api/tech/profiling.post.ts     /tech's Profiling switch
@@ -284,6 +285,8 @@ scripts/vega-check.mjs           npm run vega:check: real proofs, pseudonym, ref
 scripts/vectors-check.mjs        npm run vectors:check: the site's code against the rulebook v0.5 test vectors and
                                  v0.6's provisional ones
 scripts/cwt-check.mjs            npm run cwt:check: direct_post.cwt against pycose's messages, round trips, refusals, sizes
+scripts/bench.mjs                npm run bench: N presentations per proof system and thread count through the phone's
+                                 routes, then the Benchmark's figures for those runs (GET /api/tech/measurements?since=)
 scripts/demo-flow.mjs            headless run of the presentation order: guide steps, phone traffic, screenshots
 scripts/flows-check.mjs          every flow, happy and unhappy, in the browser and over HTTP (Longfellow: group L;
                                  BBS: group M; threads and measurements: group P; developer view: group V;

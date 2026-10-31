@@ -277,14 +277,15 @@ function stepsOf(lists: Array<StepTime[] | undefined>): StepTime[] {
   return ordered.map((name) => ({ name, ms: Math.round((median(lists.map((l) => l?.find((x) => x.name === name)?.ms)) ?? 0) * 1000) / 1000 }))
 }
 
-/** The records grouped by proof system, statement, prover threads and machine. */
-export async function measurementSummary() {
+/** The records grouped by proof system, statement, prover threads and machine. `since` (an ISO
+ *  time) keeps the records made at or after it: scripts/bench.mjs reads its own runs that way. */
+export async function measurementSummary(opts: { since?: string } = {}) {
   const list = measurements()
   const profiled = await profiledRuns()
   const groups = new Map<string, Measurement[]>()
   // The active profile's runs; the others are counted, not shown.
   const active = activeProfile().id
-  const mine = list.filter((m) => profileOfRecord(m) === active)
+  const mine = list.filter((m) => profileOfRecord(m) === active && (!opts.since || m.at >= opts.since))
   for (const m of mine) {
     const key = rowKey(m)
     groups.set(key, [...(groups.get(key) ?? []), m])
@@ -321,5 +322,7 @@ export async function measurementSummary() {
     }
   })
   rows.sort((a, b) => order(a.proof_system) - order(b.proof_system) || a.statement.localeCompare(b.statement) || (a.threads ?? 0) - (b.threads ?? 0))
-  return { runs: list.length, profileRuns: mine.length, profile: active, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
+  // The newest record of the profile (scripts/bench.mjs starts its window after it).
+  const newest = list.filter((m) => profileOfRecord(m) === active).at(-1)?.at ?? null
+  return { runs: list.length, profileRuns: mine.length, profile: active, newest, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
 }
