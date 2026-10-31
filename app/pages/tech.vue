@@ -96,6 +96,10 @@ interface Overview {
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   multithreading: boolean
+  /** The thread setting: 'all' (one per core) or a count; threadCount is what it gives. */
+  threads: 'all' | number
+  threadCount: number
+  maxThreads: number
   responseMode: 'direct_post.cwt' | 'direct_post.jwt'
   profiling: boolean
   trustNewIssuers: boolean
@@ -290,10 +294,10 @@ const ids = (f: Formats | undefined) => f?.zkp_req?.system_id_values?.join(', ')
 const formats = computed(() => (session.value?.offer.zkp_req ? (['zkp_req'] as const) : []))
 
 const threadError = ref('')
-async function setThreads(parallel: boolean) {
+async function setThreads(value: string) {
   threadError.value = ''
   try {
-    await $fetch('/api/tech/threads', { method: 'POST', body: { parallel } })
+    await $fetch('/api/tech/threads', { method: 'POST', body: { threads: value === 'all' ? 'all' : Number(value) } })
   } catch {
     threadError.value = 'Not changed.'
   }
@@ -330,12 +334,14 @@ async function issuers(body: { trust_new: boolean } | { forget: string }) {
   await load()
 }
 const day = (iso: string) => iso.slice(0, 10)
-/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 and v0.6 circuits follow the switch;
- *  Longfellow's v0.4 circuits run on one thread. */
-const threadsNow = computed(() => (data.value?.multithreading ? data.value.measurements.machine.cores : 1))
+/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 and v0.6 circuits follow the
+ *  setting; Longfellow's v0.4 circuits run on one thread. */
+const threadsNow = computed(() => data.value?.threadCount ?? 1)
+/** The setting's choices: 1 up to one fewer than the cores, then every core. */
+const threadChoices = computed(() => Array.from({ length: Math.max(0, (data.value?.maxThreads ?? 1) - 1) }, (_, i) => i + 1))
 const longfellowSingle = (svc: Service) => !!svc.implementation?.startsWith('Longfellow') && profile.value?.version === '0.4'
 const threadText = (svc: Service) => {
-  const n = svc.max_threads != null && !longfellowSingle(svc) ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
+  const n = svc.max_threads != null && !longfellowSingle(svc) ? Math.min(threadsNow.value, svc.max_threads) : (svc.threads ?? 1)
   return `${n} thread${n === 1 ? '' : 's'}`
 }
 
@@ -528,10 +534,12 @@ const statusTone = (s: string) =>
 
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3">
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" data-threads :checked="data.multithreading" @change="setThreads(($event.target as HTMLInputElement).checked)" />
-            Multithreading ({{ profile?.version !== '0.4' ? 'Vega, Longfellow and BBS' : 'Vega and BBS' }})
+            Threads ({{ profile?.version !== '0.4' ? 'Vega, Longfellow and BBS' : 'Vega and BBS' }})
+            <select data-threads class="rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums" :value="data.threads === 'all' || data.threads >= data.maxThreads ? 'all' : String(data.threads)" @change="setThreads(($event.target as HTMLSelectElement).value)">
+              <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
+              <option value="all">All ({{ data.maxThreads }})</option>
+            </select>
           </label>
-          <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
           <label class="flex items-center gap-2 text-sm">
             Response
             <select data-response-mode class="rounded-md border border-line bg-surface px-2 py-1 text-sm" :value="data.responseMode" @change="setResponseMode(($event.target as HTMLSelectElement).value)">

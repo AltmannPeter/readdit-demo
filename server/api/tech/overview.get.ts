@@ -11,7 +11,11 @@ export default defineEventHandler(async () => {
     profile: activeProfile().id,
     profiles: PROFILES.map(profileManifest),
     acceptedProofSystems: store().acceptedProofSystems,
-    multithreading: store().multithreading,
+    multithreading: multithreading(),
+    // The thread setting: 'all' or a count; threadCount is what it gives, maxThreads the most.
+    threads: store().threads,
+    threadCount: threadCount(),
+    maxThreads: maxThreads(),
     responseMode: store().responseMode,
     profiling: store().profiling,
     trustNewIssuers: store().trustNewIssuers,

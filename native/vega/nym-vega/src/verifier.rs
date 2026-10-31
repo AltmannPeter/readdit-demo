@@ -50,6 +50,9 @@ pub struct VerifyInput {
   /// One thread per core for the proof check; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count, 1 up to the cores (`/tech`'s thread setting); it overrides `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
   /// The rulebook version the site's request follows (the demo profile): "0.4" (absent) or "0.5".
   #[serde(default)]
   pub rulebook: Option<String>,
@@ -229,7 +232,7 @@ impl Verifier {
         .deserialize(&p.proof)
         .map_err(|e| refuse("proof_encoding", format!("the proof does not decode: {e}")))?
     };
-    let pool = threads::pool(input.parallel);
+    let pool = threads::pool_of(input.parallel, input.threads);
     if let Some(keys) = v05 {
       // v0.5 (bsc): the verifier's values from its statement; E and C as the request's range on
       // the UTC date of proof_time, a missing bound the widest.

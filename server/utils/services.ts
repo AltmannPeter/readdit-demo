@@ -86,7 +86,7 @@ export interface ServiceInfo {
   load_ms?: number
   /** Longfellow: always 1. */
   threads?: number
-  /** Vega: the threads the switch gives it when on (the machine's cores). */
+  /** Vega and Longfellow: the threads one per core gives (the machine's cores, as the addon counts them). */
   max_threads?: number
   trust_anchors?: Array<{ subject: string; not_after: number }>
   proof_time_tolerance_s?: number
@@ -374,11 +374,15 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
   }, 'circuits')
 }
 
-/** /tech's switches in the call's JSON: `parallel` (every addon; Longfellow's v0.4 circuits run on
- *  one thread whatever it says, its v0.5 circuits follow it), and `profile`. */
-function threading(): { parallel?: boolean; profile?: boolean } {
+/** /tech's settings in the call's JSON: `parallel` and `threads` (every addon; Longfellow's v0.4
+ *  circuits run on one thread whatever they say, its v0.5 and v0.6 circuits follow them), and
+ *  `profile`. 'all' sends `parallel` alone (one thread per core, as the addon counts them); a count
+ *  sends `threads` too, which the addon clamps to its cores. */
+function threading(): { parallel?: boolean; threads?: number; profile?: boolean } {
   const profile = store().profiling ? { profile: true } : {}
-  return { parallel: store().multithreading, ...profile }
+  const t = store().threads
+  const count = t === 'all' ? {} : { threads: t }
+  return { parallel: multithreading(t), ...count, ...profile }
 }
 
 const gp = globalThis as unknown as { __communityProfiled?: Promise<unknown> }

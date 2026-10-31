@@ -1,5 +1,6 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
 import type { DcqlQuery, EncryptedResponseMode, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import { availableParallelism } from 'node:os'
 import { systemStatus } from '#shared/profiles'
 import type { ResponseKey } from './response-key'
 import type { SizePart, StepProfile } from './services'
@@ -144,8 +145,9 @@ interface Store {
   /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
    *  configured ones, runtime config acceptedProofSystems). */
   acceptedProofSystems: string[]
-  /** Vega, BBS and Longfellow v0.5 on every core (/tech's switch; a demo reset restores runtime config multithreading). */
-  multithreading: boolean
+  /** The threads Vega, BBS and Longfellow v0.5/v0.6 run on (/tech's thread setting): 'all' (one
+   *  per core) or a count from 1 to maxThreads(). A demo reset restores runtime config multithreading. */
+  threads: ThreadSetting
   /** The encrypted Response Mode requests ask for (/tech's switch; a demo reset restores runtime config responseMode). */
   responseMode: EncryptedResponseMode
   /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
@@ -169,10 +171,28 @@ export function configuredResponseMode(): EncryptedResponseMode {
   return String(useRuntimeConfig().responseMode) === 'direct_post.jwt' ? 'direct_post.jwt' : 'direct_post.cwt'
 }
 
-/** Whether Vega, BBS and Longfellow v0.5 run on every core at start (runtime config multithreading). */
-export function configuredMultithreading(): boolean {
+/** /tech's thread setting: one per core, or a count. */
+export type ThreadSetting = 'all' | number
+
+/** The thread setting at start (runtime config multithreading): every core when true, else one. */
+export function configuredThreads(): ThreadSetting {
   const v = useRuntimeConfig().multithreading as unknown
-  return v === true || v === 'true' || v === '1'
+  return v === true || v === 'true' || v === '1' ? 'all' : 1
+}
+
+/** The most threads /tech offers: this machine's cores. The addons clamp to their own count. */
+export function maxThreads(): number {
+  return availableParallelism()
+}
+
+/** The threads the setting gives: a count, or every core. */
+export function threadCount(t: ThreadSetting = store().threads): number {
+  return t === 'all' ? maxThreads() : Math.min(t, maxThreads())
+}
+
+/** Whether the setting runs on more than one thread (the old multithreading switch). */
+export function multithreading(t: ThreadSetting = store().threads): boolean {
+  return threadCount(t) > 1
 }
 
 /** Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start
@@ -191,7 +211,7 @@ function fresh(): Store {
     bannedNotices: new Map(),
     // Only what the demo profile can use (a pending system stays off).
     acceptedProofSystems: configuredProofSystems().filter((x) => systemStatus(activeProfile(), x)?.status === 'available'),
-    multithreading: configuredMultithreading(),
+    threads: configuredThreads(),
     responseMode: configuredResponseMode(),
     profiling: false,
     trustNewIssuers: configuredTrustNewIssuers(),

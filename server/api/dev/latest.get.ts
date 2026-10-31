@@ -23,7 +23,8 @@ export default defineEventHandler(async (event) => {
       pending: p.systems.filter((x) => x.status !== 'available').map((x) => ({ proof_system: x.proof_system, note: x.note ?? '' })),
     },
     accepted: store().acceptedProofSystems,
-    multithreading: store().multithreading,
+    multithreading: multithreading(),
+    threadCount: threadCount(),
     session: latest ? await devSessionView(latest) : null,
   }
 })

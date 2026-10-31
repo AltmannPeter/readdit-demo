@@ -38,10 +38,12 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   randomized and no witness is kept between requests.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and memory are its own.
-- **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false), which
-  `services.ts` sets from `/tech`'s switch. False runs the step in a one-thread rayon pool, true in a
-  pool of one thread per core (`nym-vega/src/threads.rs`); the proof does not depend on it. The
-  witness carries the choice to the prove step. `metrics.threads` reports the threads used (the
+- **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false) and
+  `"threads": n` (absent: none), which `services.ts` sets from `/tech`'s thread setting. `threads`,
+  clamped to 1 up to the cores, wins: the step runs in a rayon pool of that many threads, built on
+  first use and kept. Without it, false runs the step on one thread and true on one per core
+  (`nym-vega/src/threads.rs`, `pool_of`). The proof does not depend on it. The witness carries the
+  choice to the prove step. `metrics.threads` reports the threads used (the
   witness summary's, the proof's and the verification's); `info.max_threads` the cores.
 - **Profiling.** Every step of the three addons (Vega, Longfellow, BBS: sign, witness, prove,
   verify) takes `"profile": true | false` (absent: false), which `services.ts` sets from `/tech`'s
@@ -384,7 +386,7 @@ these differences.
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
 | `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
 | Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
-| Threads | v0.4 circuits: 1 (Google's runtime at `61a8a73` directly, which has no parallel code; `parallel` is ignored and `metrics.threads` is 1). v0.5 circuits (`nym-auth-zk` 0.3.0, since 2026-10-28): the witness (prebuild), prove and verify inputs take `"parallel"` as Vega's do, and run in a rayon pool of one thread or one per core (`nym-longfellow/src/threads.rs`); `metrics.threads` reports the threads used, `info.max_threads` the cores. The proof bytes and verdicts do not depend on it |
+| Threads | v0.4 circuits: 1 (Google's runtime at `61a8a73` directly, which has no parallel code; `parallel` is ignored and `metrics.threads` is 1). v0.5 circuits (`nym-auth-zk` 0.3.0, since 2026-10-28): the witness (prebuild), prove and verify inputs take `"parallel"` and `"threads"` as Vega's do, and run in a rayon pool of that size (`nym-longfellow/src/threads.rs`); `metrics.threads` reports the threads used, `info.max_threads` the cores. The proof bytes and verdicts do not depend on it |
 
 `loadProver(circuits)` and `loadVerifier(circuits, trustAnchorsPem, toleranceS)` take the directory
 of `circuits.zst`, `params.tsv` and `hash-semantic.tsv`, read both circuits once and check them
@@ -524,8 +526,10 @@ a time.
 verifier reports the registry's proof system, schema and plugins (`server/utils/vp.ts`).
 
 **Threads.** The crates are built with bbs-cd-plugins' `parallel` feature. `prove` and `verify`
-take `"parallel": true | false` (absent: false): ecdsa-pop runs with `Parallelism::Max` (one thread
-per core) or `Off`. The library makes the output the same for both. `metrics.threads` reports it,
+take `"parallel": true | false` (absent: false) and `"threads": n`: ecdsa-pop runs with
+`Parallelism::Threads(n)` (n clamped to 1 up to the cores; 1 is `Off`, the core count `Max`), or
+without `threads` with `Max` (one thread per core) or `Off`. The library makes the output the same
+for all of them. `metrics.threads` reports it,
 `info.max_threads` the cores.
 
 **Prover: `prove`.** One call per presentation; there is no separate sign step, because the device
@@ -598,7 +602,7 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
 | `POST /api/tech/accept` | 400 `bad_request`, 409 `pending_system` | An unknown proof system; one the demo profile cannot use yet (a profile system with `status: pending`; none since 2026-10-28). Switching off the last accepted one is allowed |
 | `POST /api/tech/demo-profile` | 400 `bad_request` | `{ profile }`: `nym-auth-v0.4` or `nym-auth-v0.5`. Switches the profile and resets the demo; a later demo reset keeps it |
-| `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
+| `POST /api/tech/threads` | 400 `bad_request` | `{ threads }`: a whole number from 1 to the machine's cores, or `'all'` (the core count is stored as `'all'`); or `{ parallel }`, a boolean (true is `'all'`, false is 1). Anything else: 400. Answers `threads`, `threadCount`, `maxThreads`, `multithreading`. A demo reset restores `NUXT_MULTITHREADING`. `GET /api/tech/overview` returns the same four |
 | `POST /api/tech/response-mode` | 400 `bad_request` | `{ mode }`: `direct_post.cwt` or `direct_post.jwt`. Requests fetched from then on ask for it; a demo reset restores `NUXT_RESPONSE_MODE` |
 | `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
 | `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |

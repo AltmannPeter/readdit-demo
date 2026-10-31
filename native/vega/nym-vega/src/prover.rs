@@ -89,6 +89,9 @@ pub struct WitnessInput {
   /// One thread per core for the witness and the proof; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count, 1 up to the cores (`/tech`'s thread setting); it overrides `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
   /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
   #[serde(default)]
   pub rulebook: Option<String>,
@@ -124,6 +127,7 @@ pub struct WitnessData {
   heap_base: usize,
   witness_high: usize,
   parallel: bool,
+  threads: Option<usize>,
   /// What the witness step reports: its time, sizes and the public values it claims.
   pub summary: Json,
 }
@@ -331,7 +335,7 @@ impl Prover {
       presentation: Some(CorePresentation { public, device_signature }),
       nym: Some(NymPublic { verifier_input: s.verifier_input, pseudonym: nym }),
     };
-    let assignment = threads::pool(input.parallel)
+    let assignment = threads::pool_of(input.parallel, input.threads)
       .install(|| app::witness(&app::steps(&table), &core))
       .map_err(|e| bad(format!("witness: {e:?}")))?;
     let witness_ms = ms(t);
@@ -349,7 +353,7 @@ impl Prover {
       "results": results,
       "public_inputs": public_inputs(&PUBLIC_INPUTS, &assignment.core.public_values.iter().map(|v| hex(&to_be(v))).collect::<Vec<_>>()),
       "counts": { "shared": shared, "precommitted": precommitted, "rest": rest, "public": public_count },
-      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads::pool(input.parallel).current_num_threads() },
+      "metrics": { "witness_ms": witness_ms, "heap_mb": mb(heap.high() - heap.base()), "threads": threads::pool_of(input.parallel, input.threads).current_num_threads() },
     });
     Ok(WitnessData {
       body: Body::V04(assignment),
@@ -366,6 +370,7 @@ impl Prover {
       heap_base: heap.base(),
       witness_high: heap.high(),
       parallel: input.parallel,
+      threads: input.threads,
       summary,
     })
   }
@@ -375,7 +380,7 @@ impl Prover {
     let peak = Peak::start();
     let heap = Heap::start();
     let t = Instant::now();
-    let pool = threads::pool(w.parallel);
+    let pool = threads::pool_of(w.parallel, w.threads);
     let (proof, load_ms) = match w.body {
       Body::V04(assignment) => {
         let (steps, core) = (assignment.steps(), assignment.core());
@@ -496,7 +501,7 @@ impl Prover {
     }
 
     // Phase 1 (consent): the witness and the commitment to what depends only on the credential.
-    let pool = threads::pool(input.parallel);
+    let pool = threads::pool_of(input.parallel, input.threads);
     let tp = Instant::now();
     let w = Arc::new(bsc::witness(&m, issuer_key, &seed, &birth_bytes, s).map_err(bad)?);
     let steps = app::steps(&w.table);
@@ -539,6 +544,7 @@ impl Prover {
       heap_base: heap.base(),
       witness_high: heap.high(),
       parallel: input.parallel,
+      threads: input.threads,
       summary,
     })
   }

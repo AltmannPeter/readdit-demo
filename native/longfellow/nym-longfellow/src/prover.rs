@@ -92,6 +92,9 @@ pub struct WitnessInput {
   /// false or absent. The v0.4 circuits always run on one thread.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count, 1 up to the cores (`/tech`'s thread setting); it overrides `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
 }
 
 /// What the prove step proves from: v0.4's two input vectors, or v0.5's first phase
@@ -116,6 +119,7 @@ pub struct WitnessData {
   prebuild_ms: Option<f64>,
   /// v0.5: the switch the witness step ran under, which the prove step follows.
   parallel: bool,
+  threads: Option<usize>,
   /// The heap held before the witness step, and the most it held during it (measure::Heap).
   heap_base: usize,
   witness_high: usize,
@@ -419,6 +423,7 @@ impl Prover {
       body: Body::V04 { witness: w, transcript_seed: s.session_transcript.clone() },
       prebuild_ms: None,
       parallel: false,
+      threads: None,
       presentation: Presentation {
         system_id: CIRCUIT_ID.into(),
         proof: Vec::new(),
@@ -444,7 +449,7 @@ impl Prover {
       Body::V04 { witness, transcript_seed } => self.pair.prove(witness, &transcript_seed)?,
       Body::V05 { prebuilt, device_signature, .. } => {
         let device_signature = device_signature.ok_or("the device signature is missing (WitnessData::attach_signature)")?;
-        let pool = crate::threads::pool(w.parallel);
+        let pool = crate::threads::pool_of(w.parallel, w.threads);
         let (p, n) = pool.install(|| {
           let p = self.v5.side.prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new());
           (p, v5::threads())
@@ -460,7 +465,7 @@ impl Prover {
       }
       Body::V06 { prebuilt, device_signature, .. } => {
         let device_signature = device_signature.ok_or("the device signature is missing (WitnessData::attach_signature)")?;
-        let pool = crate::threads::pool(w.parallel);
+        let pool = crate::threads::pool_of(w.parallel, w.threads);
         let (p, n) = pool.install(|| {
           let p = self.v6.side.prove_prebuilt(prebuilt, &device_signature, &mut runtime_random::SecureRandomEngine::new());
           (p, v6::threads())
@@ -537,7 +542,7 @@ impl Prover {
     let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
     let holder = v5::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
     let tp = Instant::now();
-    let pool = crate::threads::pool(input.parallel);
+    let pool = crate::threads::pool_of(input.parallel, input.threads);
     let (prebuilt, threads) = pool.install(|| (self.v5.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()), v5::threads()));
     let prebuilt = prebuilt.map_err(|e| bsc::prover_refusal(&e))?;
     let prebuild_ms = ms(tp);
@@ -588,6 +593,7 @@ impl Prover {
       witness_ms,
       prebuild_ms: Some(prebuild_ms),
       parallel: input.parallel,
+      threads: input.threads,
       heap_base: heap.base(),
       witness_high: heap.high(),
       summary,
@@ -624,7 +630,7 @@ impl Prover {
     let statement = request.statement().map_err(|e| Refusal::bad_request(format!("{e:?}")))?;
     let holder = v6::Holder { credential: &issuer_signed, secret_seed: seed, birth_date };
     let tp = Instant::now();
-    let pool = crate::threads::pool(input.parallel);
+    let pool = crate::threads::pool_of(input.parallel, input.threads);
     let (prebuilt, threads) = pool.install(|| (self.v6.side.prebuild(&request, &holder, &mut runtime_random::SecureRandomEngine::new()), v6::threads()));
     let prebuilt = prebuilt.map_err(|e| crate::decoy::prover_refusal(&e))?;
     let prebuild_ms = ms(tp);
@@ -674,6 +680,7 @@ impl Prover {
       witness_ms,
       prebuild_ms: Some(prebuild_ms),
       parallel: input.parallel,
+      threads: input.threads,
       heap_base: heap.base(),
       witness_high: heap.high(),
       summary,

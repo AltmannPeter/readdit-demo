@@ -51,14 +51,26 @@ pub struct ProveInput {
   /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count for ecdsa-pop, 1 up to the cores (`/tech`'s thread setting); it overrides
+  /// `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
   /// The rulebook version the wallet read the request under: "0.4" (absent) or "0.5".
   #[serde(default)]
   pub rulebook: Option<String>,
 }
 
-/// The /tech switch as the plugins take it.
-pub fn parallelism(parallel: bool) -> Parallelism {
-  if parallel { Parallelism::Max } else { Parallelism::Off }
+/// `/tech`'s thread setting as the plugins take it: a count (clamped to 1..=cores), or one thread
+/// per core or one thread.
+pub fn parallelism(parallel: bool, threads: Option<usize>) -> Parallelism {
+  let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+  match threads.map(|n| n.clamp(1, cores)) {
+    Some(1) => Parallelism::Off,
+    Some(n) if n == cores => Parallelism::Max,
+    Some(n) => Parallelism::Threads(n),
+    None if parallel => Parallelism::Max,
+    None => Parallelism::Off,
+  }
 }
 
 pub struct Prover {
@@ -98,6 +110,7 @@ impl Prover {
       handover: &input.handover,
       credential: &input.credential,
       parallel: input.parallel,
+      threads: input.threads,
       rulebook: Rulebook::parse(input.rulebook.as_deref())?,
     };
     self.present(&present, || {
@@ -150,7 +163,7 @@ impl Prover {
     let committed = profile::committed(&s);
     let slot = prepare_credential(&cred, &committed, &mut OsRng).map_err(|e| Refusal::bad_credential(e.to_string()))?;
     let key_input = slot.committed_input(&cred, 0, DEVICE_KEY).map_err(|e| Refusal::bad_credential(e.to_string()))?;
-    let par = parallelism(input.parallel);
+    let par = parallelism(input.parallel, input.threads);
     let pop_slot = prepare(&key_input, &EcdsaParams::hashed(LIMB_BITS), 4, par, &mut OsRng)
       .map_err(|e| Refusal::bad_credential(e.to_string()))?;
     let offline_ms = ms(t);
@@ -246,6 +259,8 @@ pub struct PresentInput<'a> {
   pub credential: &'a CredentialJson,
   /// ecdsa-pop on one thread per core (Parallelism::Max); one thread when false.
   pub parallel: bool,
+  /// A thread count for ecdsa-pop; it overrides `parallel` ([`parallelism`]).
+  pub threads: Option<usize>,
   /// The rulebook version the request is read under ([`Rulebook::V04`] by default).
   pub rulebook: Rulebook,
 }
@@ -312,4 +327,22 @@ fn proof_parts(parsed: &bbs_cd_plugin::envelope::ParsedEnvelope, total: usize, p
   let counted: usize = parts.iter().filter_map(|p| p["bytes"].as_u64()).sum::<u64>() as usize;
   parts.push(leaf("Envelope framing".into(), total.saturating_sub(counted)));
   Json::Array(parts)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn the_thread_setting_as_parallelism() {
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    assert_eq!(parallelism(false, None), Parallelism::Off);
+    assert_eq!(parallelism(true, None), Parallelism::Max);
+    assert_eq!(parallelism(true, Some(1)), Parallelism::Off);
+    assert_eq!(parallelism(false, Some(0)), Parallelism::Off);
+    assert_eq!(parallelism(false, Some(cores + 3)), if cores == 1 { Parallelism::Off } else { Parallelism::Max });
+    if cores > 2 {
+      assert_eq!(parallelism(false, Some(2)), Parallelism::Threads(2));
+    }
+  }
 }

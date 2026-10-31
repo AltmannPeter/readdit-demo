@@ -49,6 +49,10 @@ pub struct VerifyInput {
   /// ecdsa-pop's check on one thread per core; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count for ecdsa-pop, 1 up to the cores (`/tech`'s thread setting); it overrides
+  /// `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
   /// BBS issuer public keys (base64 of the 96-byte G2 point) trusted besides the configured issuer,
   /// each with the profile's schema. A key that is not a valid point is ignored.
   #[serde(default)]
@@ -85,6 +89,13 @@ fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
   Refused { code, reason: reason.into(), issuer_key: None }
 }
 
+/// The plugin verifiers, with ecdsa-pop's check on `par`.
+fn with(par: Parallelism) -> BbsVerifier {
+  let mut pop = EcdsaPopVerifier::new();
+  pop.parallelism = par;
+  BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
+}
+
 impl Verifier {
   /// `issuer_params`: the trusted issuer's `IssuerParams::encode` (its public key and schema).
   pub fn load(issuer_params: &[u8]) -> Result<Self, String> {
@@ -96,11 +107,6 @@ impl Verifier {
       return Err("the trusted issuer's schema is not the profile's".into());
     }
     cd_date_range::precompute();
-    let with = |par: Parallelism| {
-      let mut pop = EcdsaPopVerifier::new();
-      pop.parallelism = par;
-      BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
-    };
     let (bbs, bbs_parallel) = (with(Parallelism::Off), with(Parallelism::Max));
     Ok(Verifier { issuer, bbs, bbs_parallel, load_ms: ms(t), keys_mb: mb(heap.held()) })
   }
@@ -233,11 +239,20 @@ impl Verifier {
     }
     let bytes = &p.proof;
 
-    let t = Instant::now();
     let mut vs = VerifyStats::default();
-    let par = crate::prover::parallelism(input.parallel);
+    let par = crate::prover::parallelism(input.parallel, input.threads);
     metrics.insert("threads".into(), json!(par.threads()));
-    let bbs = if input.parallel { &self.bbs_parallel } else { &self.bbs };
+    // A count between one and every core gets its verifiers here (registering is cheap).
+    let sized;
+    let bbs = match par {
+      Parallelism::Off => &self.bbs,
+      Parallelism::Max => &self.bbs_parallel,
+      Parallelism::Threads(_) => {
+        sized = with(par);
+        &sized
+      }
+    };
+    let t = Instant::now();
     let verified = bbs
       .verify(std::slice::from_ref(issuer), &s.request, bytes, None, Some(&mut vs))
       .map_err(|e| match e {

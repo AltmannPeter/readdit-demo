@@ -59,6 +59,9 @@ pub struct VerifyInput {
   /// absent. The v0.4 circuits always run on one thread.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count, 1 up to the cores (`/tech`'s thread setting); it overrides `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
 }
 
 /// Why a presentation is refused.
@@ -243,7 +246,7 @@ impl Verifier {
       let req = crate::decoy::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
         .map_err(|e| refuse("request", e))?;
       let presentation = v6::Presentation { pseudonym: *nym, proof: p.proof.clone() };
-      let (outcome, threads) = crate::threads::pool(input.parallel).install(|| (self.v6.side.verify(&req, &presentation), v6::threads()));
+      let (outcome, threads) = crate::threads::pool_of(input.parallel, input.threads).install(|| (self.v6.side.verify(&req, &presentation), v6::threads()));
       metrics.insert("verify_ms".into(), json!(ms(t)));
       metrics.insert("threads".into(), json!(threads));
       if let Err(e) = outcome {
@@ -261,7 +264,7 @@ impl Verifier {
       let req = bsc::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
         .map_err(|e| refuse("request", e))?;
       let presentation = v5::Presentation { pseudonym: *nym, proof: p.proof.clone() };
-      let (outcome, threads) = crate::threads::pool(input.parallel).install(|| (self.v5.side.verify(&req, &presentation), v5::threads()));
+      let (outcome, threads) = crate::threads::pool_of(input.parallel, input.threads).install(|| (self.v5.side.verify(&req, &presentation), v5::threads()));
       metrics.insert("verify_ms".into(), json!(ms(t)));
       metrics.insert("threads".into(), json!(threads));
       if let Err(e) = outcome {

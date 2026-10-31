@@ -2438,27 +2438,45 @@ async function groupP() {
     return { status: v.status, prove: trace('prove')?.metrics?.threads, verify: trace('verify')?.metrics?.threads }
   }
 
-  begin('P1', 'off by default: Vega and BBS on one thread; every verified presentation is measured')
-  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  begin('P1', 'one thread by default: Vega and BBS on one thread; thread counts from 1 to the cores; every verified presentation is measured')
   let o = await overview()
-  eq('multithreading off after a reset', o.multithreading, false)
-  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
+  eq('one thread after a reset', [o.multithreading, o.threads, o.threadCount], [false, 1, 1])
+  eq('the most threads: the cores', o.maxThreads, o.measurements.machine.cores)
   const cores = o.measurements.machine.cores
+  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
+  for (const bad of [0, cores + 1, 1.5, 'two', null]) expectAnswer(`server: threads ${JSON.stringify(bad)} refused`, await call(ctx, 'POST', '/api/tech/threads', { data: { threads: bad } }), 400, 'bad_request')
+  expectAnswer('server: an empty body refused', await call(ctx, 'POST', '/api/tech/threads', { data: {} }), 400, 'bad_request')
+  {
+    const r = await call(ctx, 'POST', '/api/tech/threads', { data: { threads: cores } })
+    eq('server: threads at the core count is all', [r.status, r.body.threads, r.body.threadCount], [200, 'all', cores])
+    const r1 = await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 1 } })
+    eq('server: threads 1', [r1.body.threads, r1.body.multithreading], [cores === 1 ? 'all' : 1, false])
+  }
+  if (cores >= 3) {
+    // A count in between: its own pool in every addon.
+    expectAnswer('server: threads 2', await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 2 } }), 200)
+    eq('Vega: 2 threads', await signUp(VEGA), { status: 'verified', prove: 2, verify: 2 })
+    eq('BBS: 2 threads', await signUp('bbs'), { status: 'verified', prove: 2, verify: 2 })
+    expectAnswer('server: threads 1', await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 1 } }), 200)
+  } else check(`a count in between needs 3 cores or more (this machine has ${cores}); the Rust unit tests cover the pools`, true)
+
+  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  o = await overview()
+  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
   check('the machine is described', cores >= 1 && !!o.measurements.machine.cpu, JSON.stringify(o.measurements.machine))
   eq('Vega: verified on 1 thread, proved on 1', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
   eq('BBS: verified on 1 thread, proved on 1', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
-  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
 
-  begin('P2', `switched on in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
+  begin('P2', `every core set in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.locator('[data-threads]').waitFor()
-  eq('/tech: off, 1 thread', (await tech.locator('[data-threads-text]').textContent()).trim(), '1 thread')
-  await tech.locator('[data-threads]').check()
+  eq('/tech: 1 thread', await tech.locator('[data-threads]').inputValue(), '1')
+  eq('/tech: the choices run from 1 to every core', (await tech.locator('[data-threads] option').allTextContents()).map((x) => x.trim()), [...Array.from({ length: cores - 1 }, (_, i) => String(i + 1)), `All (${cores})`])
+  await tech.locator('[data-threads]').selectOption('all')
   for (let k = 0; k < 30 && !(await overview()).multithreading; k++) await page.waitForTimeout(100)
-  eq('server: on', (await overview()).multithreading, true)
-  await tech.locator('[data-threads-text]', { hasText: cores === 1 ? '1 thread' : `${cores} threads` }).waitFor()
-  check('/tech: the switch says how many', true)
+  eq('server: every core', [(await overview()).threads, (await overview()).threadCount], ['all', cores])
+  check('/tech: the setting shows every core', (await tech.locator('[data-threads]').inputValue()) === 'all')
   eq(`Vega: ${cores} threads`, await signUp(VEGA), { status: 'verified', prove: cores, verify: cores })
   eq(`BBS: ${cores} threads`, await signUp('bbs'), { status: 'verified', prove: cores, verify: cores })
   await accept(LONGFELLOW_SYSTEM, true)
@@ -2485,7 +2503,7 @@ async function groupP() {
   for (const t of ['Prover', 'Verifier', 'Circuits and keys loaded at start', 'Witness, held into the proof', 'Proving', 'Verifying']) check(`memory breakdown: ${t}`, (await breakdown.getByText(t, { exact: false }).count()) > 0)
   if (o.measurements.file.startsWith('/')) eq('the file has a line per run', readFileSync(o.measurements.file, 'utf8').trim().split('\n').length, 5)
 
-  begin('P4', 'a demo reset switches multithreading off and keeps the measurements; Clear empties them')
+  begin('P4', 'a demo reset sets one thread and keeps the measurements; Clear empties them')
   await resetDemo([])
   o = await overview()
   eq('after a reset: off, measurements kept', [o.multithreading, o.measurements.runs], [false, 5])
@@ -3246,10 +3264,11 @@ async function groupQ() {
     await respond(c11, r11, vpForm(r11, ap.presentation))
     eq('the adult proves 18+', (await sessionView(s11.id)).status, 'verified')
     await c11.dispose()
-    // /tech's multithreading switch reaches the decoy circuits, as the bsc ones (Q6).
+    // /tech's thread setting reaches the decoy circuits, as the bsc ones (Q6, which sets it the old
+    // way, { parallel }).
     const cores = (await overview()).measurements.machine.cores
     const threadsOf = async (parallel) => {
-      expectAnswer(`server: multithreading ${parallel ? 'on' : 'off'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { parallel } }), 200)
+      expectAnswer(`server: threads ${parallel ? 'all' : '1'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { threads: parallel ? 'all' : 1 } }), 200)
       const c12 = await client()
       const s12 = await newSession(c12, { purpose: 'signin', intent: 'login' })
       const r12 = await fetchRequest(c12, s12, lf6Only)
@@ -3260,8 +3279,8 @@ async function groupQ() {
       const at = (step) => v12.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
       return { status: v12.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
     }
-    eq(`multithreading on: the decoy circuits on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
-    eq('multithreading off: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
+    eq(`all: the decoy circuits on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    eq('1: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
   }
 
   begin('Q11', "v0.6 in the browser: the teen's phone answers with its v0.6 mdoc; /dev shows the decoy circuits and the v0.6 attestation")

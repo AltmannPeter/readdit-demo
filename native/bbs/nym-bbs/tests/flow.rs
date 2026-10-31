@@ -284,6 +284,7 @@ fn prove_with_a_device_signer() {
     handover: &handover_value,
     credential: &credential,
     parallel: false,
+    threads: None,
     rulebook: nym_bbs::profile::Rulebook::V04,
   };
   let out = prover.prove_with(&input, &signer).expect("prove_with");

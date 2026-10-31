@@ -187,10 +187,10 @@ screen.
   circuits took to load once at start, the threads it runs on now and the circuit it runs (the
   verifier: also its trust anchor and the `proof_time` tolerance). The lock icon is **Request
   signing**, the certificate that signs Community's requests.
-- **Multithreading.** Off at start and after **Reset demo**: everything runs on one thread. On,
-  Vega, BBS and Longfellow's v0.5 and v0.6 circuits run on one thread per core, and the line next to the
-  switch says how many; the switch's label names them ("Vega, Longfellow and BBS" under v0.5 and v0.6,
-  "Vega and BBS" under v0.4). Longfellow's v0.4 circuits always run on one thread.
+- **Threads.** 1 at start and after **Reset demo**. Choose any count up to the machine's cores, or
+  **All**, and Vega, BBS and Longfellow's v0.5 and v0.6 circuits run on that many threads. The
+  label names them ("Vega, Longfellow and BBS" under v0.5 and v0.6, "Vega and BBS" under v0.4).
+  Longfellow's v0.4 circuits always run on one thread.
 - **Trust new issuers.** On at start and after **Reset demo**. Community's verifiers trust the
   demo issuers. With this on, a presentation from a wallet whose credential comes from another
   issuer is accepted, and that issuer is trusted from then on (kept in
@@ -365,7 +365,7 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
 | `NUXT_RESPONSE_MODE` | `direct_post.cwt` | How requests ask the wallet to encrypt its response at start and after a reset: `direct_post.cwt` (CBOR in a COSE_Encrypt, zkp_req.md §6.2) or `direct_post.jwt` (JSON in a JWE); the technical view switches it |
-| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 and v0.6 on every core at start and after a reset; the technical view switches it |
+| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 and v0.6 on every core at start and after a reset (else one thread); the technical view sets any count |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
 | `NUXT_TRUST_NEW_ISSUERS` | `true` | Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start and after a demo reset |
@@ -447,15 +447,19 @@ cargo run --release -p bbs-issuer -- --wallet ../../app/wallet/demo-wallet.json 
 `npm run bench` runs presentations against the running site (local or Docker) through the demo
 phone's own routes and prints `/tech`'s Benchmark figures for exactly those runs: prove and verify
 time with the time by step, proof and presentation size, and memory. The runs also appear in
-`/tech`. `npm run bench -- --help` lists the flags. For example, ten runs of Longfellow under v0.6
+`/tech`. `npm run bench help` lists the options. For example, ten runs of Longfellow under v0.6
 with the 13–17 check, on one thread and on every core, written to a CSV:
 
 ```sh
-npm run bench -- --runs 10 --profile nym-auth-v0.6 --system longfellow --threads 1,all --age 13-17 --out v06.csv
+npm run bench runs=10 profile=v0.6 system=longfellow threads=1,all age=13-17 out=v06.csv
 ```
 
-It sets `/tech`'s switches for each run and puts them back afterwards. A `--profile` other than the
-one the site runs resets the demo, as the dropdown does.
+`threads` takes any counts up to the site's cores, and ranges: `threads=1,2,4,all` or
+`threads=1-8`.
+
+Options are `name=value`, so npm passes them on without a `--`. It sets `/tech`'s settings for each
+run and puts them back afterwards. A `profile` other than the one the site runs resets the demo, as
+the dropdown does.
 
 ## Checks
 
@@ -488,7 +492,7 @@ node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log 
 Requests then expire after 40 s, so the expiry paths take a minute. `COMMUNITY_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
-`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch, the
+`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread setting, the
 measurements and Profiling, V the developer view; G needs a session from a group before it). The
 scratch measurements and profiles files keep the run's proofs out of the demo's own, which group P
 clears.
