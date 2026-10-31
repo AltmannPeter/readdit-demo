@@ -3166,7 +3166,7 @@ async function groupQ() {
   o = await overview()
   eq('the demo was reset', (await accounts()).length, 0)
   const v06 = o.profiles.find((x) => x.id === 'nym-auth-v0.6')
-  eq('v0.6: version, rulebook, no commit yet', [v06?.version, v06?.commit ?? null, v06?.documentUrl?.endsWith('/docs/nym_auth_rulebook-v0.6.md')], ['0.6', null, true])
+  eq('v0.6: version, rulebook, the commit it is based on', [v06?.version, v06?.commit, v06?.documentUrl?.endsWith('/docs/nym_auth_rulebook-v0.6.md')], ['0.6', '16bfeb8efb422ce789a13da24bbea0bc7438cf52', true])
   expectAnswer('server: Vega is pending under v0.6', await accept('vega-v1', true), 409, 'pending_system')
   expectAnswer('server: BBS is pending under v0.6', await accept(BBS_SYSTEM, true), 409, 'pending_system')
   eq('server: Longfellow can be switched on', (await accept(LONGFELLOW_SYSTEM, true)).body.acceptedProofSystems, [LONGFELLOW_SYSTEM])
