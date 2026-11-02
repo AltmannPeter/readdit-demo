@@ -16,10 +16,17 @@
 //! frame, `other` and `lost` samples included. It is for exports (`npm run bench profiling=full`),
 //! not for /tech's flame graphs.
 //!
+//! The profiler's own memory (pprof's sample table, the symbol caches it fills while resolving the
+//! samples) is not the step's: [`quiet`] is true on the thread while pprof starts, builds its
+//! report and stops, and the addons' counting allocators leave those allocations out. Counted,
+//! they moved the heap figures between steps by up to several MB (2026-11-02, macOS: the
+//! witness held into the prove step read 0 MB in most profiled runs).
+//!
 //! The sampler is process-wide: one runs at a time. The site calls one profiled step at a time
 //! (`server/utils/services.ts`), so the samples are that step's. A sampler that cannot start (one
 //! is already running) gives no profile; the step itself is unaffected.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -35,6 +42,30 @@ pub const HZ: i32 = 997;
 /// glibc's loader lock, the one lock a stack walk takes, is recursive, so a walk from inside the C
 /// library cannot deadlock its own thread.
 const BLOCKLIST: &[&str] = &["libgcc", "vdso", "ld-linux", "ld-musl", "libunwind", "dyld"];
+
+thread_local! {
+  static QUIET: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while this thread runs pprof's own bookkeeping (starting, building the report, stopping).
+/// The addons' counting allocators do not count what is allocated or freed meanwhile: pprof
+/// allocates and frees that memory only there.
+pub fn quiet() -> bool {
+  QUIET.with(Cell::get)
+}
+
+/// Runs `f` with [`quiet`] true on this thread, back to false afterwards, also on a panic.
+fn hushed<T>(f: impl FnOnce() -> T) -> T {
+  struct Reset;
+  impl Drop for Reset {
+    fn drop(&mut self) {
+      QUIET.with(|q| q.set(false));
+    }
+  }
+  QUIET.with(|q| q.set(true));
+  let _reset = Reset;
+  f()
+}
 
 /// What a step asked for: no profile, /tech's profile, or that and every stack in full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -74,7 +105,7 @@ impl Sampler {
   /// Starts sampling unless `mode` is off. `roots`: the path prefixes of the addon's own code
   /// (`["nym_vega::", "vega_age::", …]`).
   pub fn start(mode: Mode, roots: &'static [&'static str]) -> Self {
-    let guard = mode.on().then(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(BLOCKLIST).build().ok()).flatten();
+    let guard = mode.on().then(|| hushed(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(BLOCKLIST).build().ok())).flatten();
     Sampler { guard, started: Instant::now(), roots, full: mode == Mode::Full }
   }
 
@@ -85,8 +116,10 @@ impl Sampler {
   pub fn finish(self) -> Option<Json> {
     let guard = self.guard?;
     let ms = (self.started.elapsed().as_secs_f64() * 1e6).round() / 1e3;
-    let report = guard.report().build().ok()?;
-    drop(guard);
+    let Some(report) = hushed(|| guard.report().build().ok()) else {
+      hushed(|| drop(guard));
+      return None;
+    };
     let mut stacks: BTreeMap<String, u64> = BTreeMap::new();
     let mut threads: BTreeMap<String, u64> = BTreeMap::new();
     let mut full: BTreeMap<String, u64> = BTreeMap::new();
@@ -119,6 +152,12 @@ impl Sampler {
       *stacks.entry(path.join(";")).or_default() += count;
       kept += count;
     }
+    // The report's names and the sampler (whose stop allocates the next sample table) go as they
+    // came: quietly.
+    hushed(|| {
+      drop(report);
+      drop(guard);
+    });
     let mut out = json!({ "hz": HZ, "ms": ms, "samples": kept, "other": other, "lost": lost, "threads": threads, "stacks": stacks });
     if self.full {
       out["full"] = json!(full);
@@ -281,6 +320,15 @@ mod sampling {
     assert_eq!(total, p["threads"].as_object().unwrap().values().map(|v| v.as_u64().unwrap()).sum::<u64>());
     // The test harness's own frames sit above the test function: nothing is cut.
     assert!(full.keys().any(|k| k.contains("nym_profile::sampling::burn") && k.contains("test::")), "{full:?}");
+  }
+
+  #[test]
+  fn quiet_only_inside_and_back_after_a_panic() {
+    assert!(!super::quiet());
+    assert!(super::hushed(super::quiet));
+    assert!(!super::quiet());
+    let _ = std::panic::catch_unwind(|| super::hushed(|| panic!("inside")));
+    assert!(!super::quiet());
   }
 
   #[test]

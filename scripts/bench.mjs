@@ -6,7 +6,7 @@
 //   npm run bench runs=10 profile=v0.6 system=longfellow threads=1,all age=13-17
 //   npm run bench runs=10 profile=v0.7 system=longfellow threads=1,4 age=13-17 profiling=full out=lf-v07.json
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -32,9 +32,9 @@ presentation size, and memory. The runs also appear in /tech's Benchmark.
   profiling=full  as profiling, and keep every sample's whole stack: the thread, then every frame
                   from the thread's start (Node, libuv, rayon) to the leaf, idle and lost samples
                   included
-  out=FILE        also write every measured run to FILE (.json or .csv); with profiling, the
-                  JSON also holds each run's profiles, and next to FILE go folded call stacks
-                  per cell (see below)
+  out=FILE        also write every measured run to FILE (.json or .csv; its folder is made if
+                  needed); with profiling, the JSON also holds each run's profiles, and next to
+                  FILE go folded call stacks per cell (see below)
   help            this text
 
 Examples: npm run bench runs=10 profile=v0.6 age=13-17 out=v06.csv
@@ -98,6 +98,14 @@ for (const part of (flags.threads ?? '1,all').split(',').map((t) => t.trim())) {
   else fail(`threads=${flags.threads}: give thread counts (1, 2, …), ranges such as 1-4, or all`)
 }
 if (flags.out && !/\.(json|csv)$/i.test(flags.out)) fail('out must end in .json or .csv')
+// out's folder, made now: a run of many presentations should not end unable to write.
+if (flags.out) {
+  try {
+    mkdirSync(dirname(flags.out), { recursive: true })
+  } catch (e) {
+    fail(`out=${flags.out}: cannot make its folder (${e.code ?? e.message})`)
+  }
+}
 
 // ---- the site's own code and the demo wallet ----
 const root = fileURLToPath(new URL('../', import.meta.url))

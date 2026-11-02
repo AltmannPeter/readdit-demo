@@ -6,9 +6,15 @@ description = "The sampling profiler of /tech: which functions a proof spends it
 publish = false
 
 [dependencies]
-# The sampler (SIGPROF and a stack walk; its own unsafe code, none here).
-pprof = { version = "0.15", default-features = false }
+# The sampler (SIGPROF and a stack walk; its own unsafe code, none here): pprof 0.15.0 with one
+# change for macOS (pprof/NYM-PROFILE-CHANGES.md).
+pprof = { path = "pprof", default-features = false }
 serde_json = "1"
+
+# macOS: walk frame pointers instead of calling the system libunwind from the signal handler, which
+# crashed Node with SIGTRAP on macOS 26 (pprof/NYM-PROFILE-CHANGES.md).
+[target.'cfg(target_os = "macos")'.dependencies]
+pprof = { path = "pprof", default-features = false, features = ["frame-pointer"] }
 
 [lints.rust]
 unsafe_code = "forbid"
