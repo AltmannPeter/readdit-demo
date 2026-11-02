@@ -26,6 +26,7 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures",
+ "zeroize",
 ]
 
 [[package]]
@@ -863,6 +864,31 @@ dependencies = [
  "runtime-zk",
  "serde_json",
  "sha2",
+ "zstd",
+]
+
+[[package]]
+name = "nym-auth-zk-decoy-opt"
+version = "0.2.0"
+dependencies = [
+ "aes",
+ "core-algebra",
+ "core-proto",
+ "getrandom 0.3.4",
+ "libc",
+ "nym-auth-zk-decoy",
+ "p256",
+ "rayon",
+ "runtime-algebra",
+ "runtime-ligero",
+ "runtime-merkle",
+ "runtime-proto",
+ "runtime-random",
+ "runtime-sumcheck",
+ "runtime-zk",
+ "serde_json",
+ "sha2",
+ "zeroize",
  "zstd",
 ]
 
