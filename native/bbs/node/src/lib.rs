@@ -10,7 +10,8 @@
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
 //!
 //! With `"profile": true` in a step's JSON (`/tech`'s Profiling switch), the step's metrics also
-//! carry `profile`: the sampled stacks (`nym-profile`).
+//! carry `profile`: the sampled stacks (`nym-profile`). `"profile": "full"` adds every stack whole
+//! (`full`), for `npm run bench profiling=full`.
 
 mod alloc;
 
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
+use nym_profile::Mode;
 use nym_bbs::error::Refusal;
 use nym_bbs::{measure, prover, verifier};
 
@@ -41,14 +43,9 @@ fn guarded<T>(f: impl FnOnce() -> std::result::Result<T, String>) -> Result<T> {
 /// The addon's own code and bbs-cd-plugins, where a sampled stack begins.
 const ROOTS: &[&str] = &["nym_bbs::", "bbs_cd::", "bbs_cd_plugin::", "cd_"];
 
-/// A boolean field of a step's JSON input (false when absent or not JSON).
-fn flag(input: &str, key: &str) -> bool {
-  serde_json::from_str::<serde_json::Value>(input).ok().and_then(|v| v.get(key)?.as_bool()).unwrap_or(false)
-}
-
 /// Runs a step under the sampler.
-fn profiled<T>(on: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
-  let sampler = nym_profile::Sampler::start(on, ROOTS);
+fn profiled<T>(mode: Mode, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
+  let sampler = nym_profile::Sampler::start(mode, ROOTS);
   let out = f();
   (out, sampler.finish())
 }
@@ -131,7 +128,7 @@ impl Task for Prove {
       let input: std::result::Result<prover::ProveInput, Refusal> =
         serde_json::from_str(&self.input).map_err(|e| Refusal::bad_request(format!("prove: {e}")));
       let guard = measure::exclusive()?;
-      let (out, profile) = profiled(flag(&self.input, "profile"), || input.and_then(|i| self.prover.prove(&i)));
+      let (out, profile) = profiled(Mode::of(&self.input), || input.and_then(|i| self.prover.prove(&i)));
       drop(guard);
       Ok(match out {
         Ok(mut json) => {
@@ -185,7 +182,7 @@ impl Task for Verify {
     guarded(|| {
       let input: verifier::VerifyInput = serde_json::from_str(&self.input).map_err(|e| format!("verify: {e}"))?;
       let guard = measure::exclusive()?;
-      let (mut out, profile) = profiled(flag(&self.input, "profile"), || self.verifier.verify(&input));
+      let (mut out, profile) = profiled(Mode::of(&self.input), || self.verifier.verify(&input));
       drop(guard);
       attach(&mut out, profile);
       Ok(out.to_string())

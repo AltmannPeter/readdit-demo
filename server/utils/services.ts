@@ -33,15 +33,18 @@ export interface PhaseNode {
 }
 
 /** A step's profile (/tech's Profiling switch): folded stacks from the sampler (`entry;…;leaf` →
- *  samples), the samples outside the addon's code (`other`), the step's sampled wall time, and for
- *  Vega the library's phases. */
+ *  samples), the samples outside the addon's code (`other`), every sample by thread name
+ *  (`threads`), the step's sampled wall time, and for Vega the library's phases. With Profiling
+ *  'full', `full`: every sample's whole stack, `thread;outermost;…;leaf` → samples. */
 export interface StepProfile {
   hz?: number
   ms?: number
   samples?: number
   other?: number
   lost?: number
+  threads?: Record<string, number>
   stacks?: Record<string, number>
+  full?: Record<string, number>
   phases?: PhaseNode[] | null
 }
 
@@ -378,8 +381,8 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
  *  circuits run on one thread whatever they say, its v0.5 to v0.7 circuits follow them), and
  *  `profile`. 'all' sends `parallel` alone (one thread per core, as the addon counts them); a count
  *  sends `threads` too, which the addon clamps to its cores. */
-function threading(): { parallel?: boolean; threads?: number; profile?: boolean } {
-  const profile = store().profiling ? { profile: true } : {}
+function threading(): { parallel?: boolean; threads?: number; profile?: boolean | 'full' } {
+  const profile = store().profiling ? { profile: store().profiling } : {}
   const t = store().threads
   const count = t === 'all' ? {} : { threads: t }
   return { parallel: multithreading(t), ...count, ...profile }

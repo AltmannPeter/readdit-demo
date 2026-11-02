@@ -101,7 +101,7 @@ interface Overview {
   threadCount: number
   maxThreads: number
   responseMode: 'direct_post.cwt' | 'direct_post.jwt'
-  profiling: boolean
+  profiling: boolean | 'full'
   trustNewIssuers: boolean
   learnedIssuers: Array<{ format: 'mso_mdoc' | 'bbs_cd'; fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
   measurements: { runs: number; profileRuns: number; profile: string; file: string; machine: Machine; rows: MeasurementRow[] }
@@ -548,7 +548,7 @@ const statusTone = (s: string) =>
             </select>
           </label>
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" data-profiling :checked="data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
+            <input type="checkbox" data-profiling :checked="!!data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
             Profiling
           </label>
           <label class="flex items-center gap-2 text-sm">

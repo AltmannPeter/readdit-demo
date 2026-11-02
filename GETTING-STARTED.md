@@ -465,6 +465,20 @@ npm run bench runs=10 profile=v0.6 system=longfellow threads=1,all age=13-17 out
 `threads` takes any counts up to the site's cores, and ranges: `threads=1,2,4,all` or
 `threads=1-8`.
 
+For the call trees, add `profiling` (as `/tech`'s switch) or `profiling=full` (every sample's whole
+stack, with its thread: Node, libuv, rayon's scheduling and idle time included) and a JSON `out`:
+
+```sh
+npm run bench runs=30 profile=v0.7 system=longfellow threads=1,4 age=13-17 profiling=full out=lf-v07.json
+```
+
+The JSON then holds each run's profiles, and next to it go folded stacks per cell, summed over its
+runs: `lf-v07.longfellow-1t.prove.folded`, `.verify.folded`, and with `full`
+`.prove.full.folded`, `.verify.full.folded`. They open in speedscope (speedscope.app),
+`inferno-flamegraph` or `flamegraph.pl`. Each run gives a few hundred samples at most (the kernel
+delivers about 250 a second), so use 20 runs or more for a stable picture. The terminal also prints
+each cell's samples by thread.
+
 Options are `name=value`, so npm passes them on without a `--`. It sets `/tech`'s settings for each
 run and puts them back afterwards. A `profile` other than the one the site runs resets the demo, as
 the dropdown does.

@@ -49,12 +49,15 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   choice to the prove step. `metrics.threads` reports the threads used (the
   witness summary's, the proof's and the verification's); `info.max_threads` the cores.
 - **Profiling.** Every step of the three addons (Vega, Longfellow, BBS: sign, witness, prove,
-  verify) takes `"profile": true | false` (absent: false), which `services.ts` sets from `/tech`'s
-  Profiling switch; the witness carries it to the prove step. On, the step's `metrics` also has
-  `profile`: `{ hz, ms, samples, other, lost, stacks }` from the sampling profiler
+  verify) takes `"profile": true | "full" | false` (absent: false), which `services.ts` sets from
+  `/tech`'s Profiling switch; the witness carries it to the prove step. On, the step's `metrics`
+  also has `profile`: `{ hz, ms, samples, other, lost, threads, stacks }` from the sampling profiler
   (`native/nym-profile`, pprof): `stacks` maps folded stacks (`entry;…;leaf`, the step's own code
   down to the function that was running, Rust names without generics) to samples; `other` counts
-  samples of other threads, `lost` samples whose stack could not be walked. Vega's witness, prove and verify add `phases`, vega-prover's own tracing
+  samples of other threads, `lost` samples whose stack could not be walked; `threads` every sample
+  by thread name (the pools name theirs `longfellow-<n>-<i>`, `vega-…`). `"full"` adds `full`:
+  every sample's whole stack, `thread;outermost;…;leaf`, nothing cut or dropped (Node's C++ frames
+  stay mangled; `c++filt` reads them). Vega's witness, prove and verify add `phases`, vega-prover's own tracing
   spans as a tree (`{ name, n, ms, mb, children }`, siblings of one name merged; `mb` on one thread
   only), each phase ending at the library's own `elapsed_ms` event for it. `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
   one addon step at a time while Profiling is on (the sampler is process-wide).
@@ -632,10 +635,10 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `POST /api/tech/threads` | 400 `bad_request` | `{ threads }`: a whole number from 1 to the machine's cores, or `'all'` (the core count is stored as `'all'`); or `{ parallel }`, a boolean (true is `'all'`, false is 1). Anything else: 400. Answers `threads`, `threadCount`, `maxThreads`, `multithreading`. A demo reset restores `NUXT_MULTITHREADING`. `GET /api/tech/overview` returns the same four |
 | `POST /api/tech/response-mode` | 400 `bad_request` | `{ mode }`: `direct_post.cwt` or `direct_post.jwt`. Requests fetched from then on ask for it; a demo reset restores `NUXT_RESPONSE_MODE` |
 | `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
-| `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
+| `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean or `"full"` (on, and whole stacks kept; for `npm run bench profiling=full`). Off at start and after a demo reset |
 | `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |
 | `POST /api/tech/measurements/clear` | | Empties the measurements file and the profiles file |
-| `GET /api/tech/measurements` | 400 `bad_request` | `?since=<ISO time>`: the Benchmark's rows (as `/tech`'s) over the active profile's records made at or after it; without it, all of them. `&raw=1` adds the records. `newest` is the newest record's time. `scripts/bench.mjs` reads it. 400 for a `since` that is not a time |
+| `GET /api/tech/measurements` | 400 `bad_request` | `?since=<ISO time>`: the Benchmark's rows (as `/tech`'s) over the active profile's records made at or after it; without it, all of them. `&raw=1` adds the records; `&profiles=1` adds them and their profiles (`profiles`: one per profiled run, the `.data/profiles.jsonl` record). `newest` is the newest record's time. `scripts/bench.mjs` reads it. 400 for a `since` that is not a time |
 
 `{ purpose: 'dev', age: 'none' | 'over18' | 'range13to17' }` is the developer view's request: the
 pseudonym, and the age range 18+ or 13–17 if chosen; its completion creates the account or logs in

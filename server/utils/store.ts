@@ -150,8 +150,9 @@ interface Store {
   threads: ThreadSetting
   /** The encrypted Response Mode requests ask for (/tech's switch; a demo reset restores runtime config responseMode). */
   responseMode: EncryptedResponseMode
-  /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
-  profiling: boolean
+  /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset).
+   *  'full' also keeps every stack whole (`npm run bench profiling=full`; /tech shows it as on). */
+  profiling: boolean | 'full'
   /** /tech's "Trust new issuers" (server/utils/issuers.ts; a demo reset restores runtime config trustNewIssuers). */
   trustNewIssuers: boolean
 }

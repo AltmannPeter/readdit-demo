@@ -4,8 +4,10 @@
 // are recorded like any other, so /tech's Benchmark shows them too. `help` lists the options.
 //
 //   npm run bench runs=10 profile=v0.6 system=longfellow threads=1,all age=13-17
+//   npm run bench runs=10 profile=v0.7 system=longfellow threads=1,4 age=13-17 profiling=full out=lf-v07.json
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createJiti } from 'jiti'
@@ -27,11 +29,24 @@ presentation size, and memory. The runs also appear in /tech's Benchmark.
   age=VALUE       none, 13-17 or 18+ (default none: the pseudonym only)
   phone=NAME      teen or adult (default teen; bbs is the teen's BBS credential)
   profiling       run with /tech's Profiling on (a few percent slower; adds flame graphs)
-  out=FILE        also write every measured run to FILE (.json or .csv)
+  profiling=full  as profiling, and keep every sample's whole stack: the thread, then every frame
+                  from the thread's start (Node, libuv, rayon) to the leaf, idle and lost samples
+                  included
+  out=FILE        also write every measured run to FILE (.json or .csv); with profiling, the
+                  JSON also holds each run's profiles, and next to FILE go folded call stacks
+                  per cell (see below)
   help            this text
 
 Examples: npm run bench runs=10 profile=v0.6 age=13-17 out=v06.csv
           npm run bench system=longfellow threads=1,2,4,all
+          npm run bench profile=v0.7 system=longfellow threads=1,4 age=13-17 profiling=full out=lf-v07.json
+
+Folded stacks (profiling with out=FILE): per cell, FILE's name with .<system>-<n>t.prove.folded
+and .verify.folded, the samples of all the cell's measured runs summed, one "frame;frame;… count"
+line per stack, each step its own root (Device signature, Witness, Proof, Verification), as /tech's
+flame graphs. With profiling=full, also .prove.full.folded and .verify.full.folded: the step, then
+the thread, then the whole stack. Open them in speedscope (speedscope.app), inferno-flamegraph or
+flamegraph.pl.
 
 A cell is one system at one thread count. The script sets /tech's settings for each cell and puts
 them back at the end. The --name=value form works too (node scripts/bench.mjs --runs 10).
@@ -44,6 +59,7 @@ for (let i = 0; i < argv.length; i++) {
   const a = argv[i].replace(/^--?/, '')
   if (a === 'h' || a === 'help') flags.help = true
   else if (a === 'profiling') flags.profiling = true
+  else if (a === 'profiling=full') flags.profiling = 'full'
   else if (a.includes('=')) flags[a.slice(0, a.indexOf('='))] = a.slice(a.indexOf('=') + 1)
   else if (argv[i].startsWith('--') && argv[i + 1] !== undefined) flags[a] = argv[++i]
   else fail(`unknown option ${argv[i]}`)
@@ -56,6 +72,7 @@ function fail(m) {
   console.error(`bench: ${m}\n\n${HELP}`)
   process.exit(2)
 }
+if (flags.profiling !== undefined && flags.profiling !== true && flags.profiling !== 'full') fail('profiling is on its own, or profiling=full')
 const known = new Set(['base', 'runs', 'warmup', 'profile', 'system', 'threads', 'age', 'phone', 'out', 'help', 'profiling'])
 for (const k of Object.keys(flags)) if (!known.has(k)) fail(`unknown option ${k}`)
 // profile=v0.6, 0.6 or nym-auth-v0.6.
@@ -199,6 +216,36 @@ function printRow(r) {
   console.log(line('Prover memory', mb(sum(m.prove.keys_mb, m.prove.witness_mb, m.prove.work_mb))) + dim(`   keys ${mb(m.prove.keys_mb)} · witness ${mb(m.prove.witness_mb)} · work ${mb(m.prove.work_mb)}`))
   console.log(line('Verifier memory', mb(sum(m.verify.keys_mb, m.verify.work_mb))) + dim(`   keys ${mb(m.verify.keys_mb)} · work ${mb(m.verify.work_mb)}`))
 }
+// ---- profiles: samples by thread, and folded stacks ----
+const STEPS = { sign: 'Device signature', witness: 'Witness', prove: 'Proof', verify: 'Verification' }
+const stepsOf = (r) => ({ prove: Object.entries(r.prove ?? {}), verify: r.verify ? [['verify', r.verify]] : [] })
+/** Each side's samples by thread over a cell's runs, as shares. */
+function printThreads(runs) {
+  for (const side of ['prove', 'verify']) {
+    const by = {}
+    for (const r of runs) for (const [, p] of stepsOf(r)[side]) for (const [t, n] of Object.entries(p.threads ?? {})) by[t] = (by[t] ?? 0) + n
+    const total = Object.values(by).reduce((t, n) => t + n, 0)
+    if (!total) continue
+    const list = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${Math.round((100 * n) / total)} %`)
+    console.log(dim(line(`${side === 'prove' ? 'Prover' : 'Verifier'} samples`, String(total)) + `   ${list.join(' · ')}`))
+  }
+}
+/** A cell's folded stacks, summed over its runs, each step a root: prove, verify and, with whole
+ *  stacks, prove.full and verify.full. */
+function foldCell(runs) {
+  const out = { prove: {}, verify: {}, 'prove.full': {}, 'verify.full': {} }
+  for (const r of runs) {
+    for (const [side, steps] of Object.entries(stepsOf(r))) {
+      for (const [step, p] of steps) {
+        const root = STEPS[step] ?? step
+        for (const [stack, n] of Object.entries(p.stacks ?? {})) out[side][`${root};${stack}`] = (out[side][`${root};${stack}`] ?? 0) + n
+        for (const [stack, n] of Object.entries(p.full ?? {})) out[`${side}.full`][`${root};${stack}`] = (out[`${side}.full`][`${root};${stack}`] ?? 0) + n
+      }
+    }
+  }
+  return out
+}
+
 const NAMES = { vega: 'Vega', longfellow: 'Longfellow', bbs: 'BBS' }
 /** The progress of a cell, on one line that updates in place on a terminal. */
 function progress(label, text, done = false) {
@@ -252,14 +299,17 @@ field('site', BASE)
 field('profile', `${manifest.label}${profileId !== before.profile ? dim(`  (switched for the run: this resets the demo; it switches back at the end)`) : ''}`)
 if (machine) field('machine', `${machine.cpu} · ${machine.cores} cores · ${machine.platform}`)
 field('statement', `${age === 'none' ? 'pseudonym' : `pseudonym and age ${age}`} · ${phone}'s ${wanted.length === 1 && wanted[0] === 'bbs' ? 'BBS ' : ''}phone`)
-field('runs', `${RUNS} per cell, after ${WARMUP} warm-up${WARMUP === 1 ? '' : 's'}${flags.profiling ? ' · Profiling on' : ''}`)
+field('runs', `${RUNS} per cell, after ${WARMUP} warm-up${WARMUP === 1 ? '' : 's'}${flags.profiling === 'full' ? ' · Profiling on, whole stacks' : flags.profiling ? ' · Profiling on' : ''}`)
 
 const results = []
 const records = []
+const profiles = []
+/** Per cell, the folded stacks of its measured runs, summed: `${system}-${n}t` → file suffix → stacks. */
+const folded = new Map()
 let failed = null
 try {
   if (profileId !== before.profile) await must('demo profile', call('POST', '/api/tech/demo-profile', { json: { profile: profileId } }))
-  await must('profiling', call('POST', '/api/tech/profiling', { json: { on: !!flags.profiling } }))
+  await must('profiling', call('POST', '/api/tech/profiling', { json: { on: flags.profiling ?? false } }))
   for (const sys of wanted) {
     const proofSystem = SYSTEMS[sys]
     for (const ps of Object.values(SYSTEMS)) await must('accept', call('POST', '/api/tech/accept', { json: { proof_system: ps, accept: ps === proofSystem } }))
@@ -281,14 +331,21 @@ try {
         await present(cell)
       }
       progress(label, `${RUNS} runs in ${((Date.now() - t0) / 1000).toFixed(1)} s`, true)
-      const m = (await must('measurements', call('GET', `/api/tech/measurements?since=${encodeURIComponent(since)}${flags.out ? '&raw=1' : ''}`))).data
+      const extra = flags.out ? `&raw=1${flags.profiling ? '&profiles=1' : ''}` : flags.profiling ? '&profiles=1' : ''
+      const m = (await must('measurements', call('GET', `/api/tech/measurements?since=${encodeURIComponent(since)}${extra}`))).data
       const rows = m.rows.filter((r) => r.proof_system === proofSystem)
       if (!rows.length) throw new Error(`no measurement recorded for ${label}`)
+      const cellProfiles = (m.profiles ?? []).filter((x) => x.proof_system === proofSystem)
       for (const r of rows) {
         printRow(r)
+        if (flags.profiling) printThreads(cellProfiles)
         results.push({ system: sys, ...r })
       }
-      if (flags.out) records.push(...(m.records ?? []).filter((x) => x.proof_system === proofSystem))
+      if (flags.out) {
+        records.push(...(m.records ?? []).filter((x) => x.proof_system === proofSystem))
+        profiles.push(...cellProfiles.map((x) => ({ system: sys, ...x })))
+        if (flags.profiling) folded.set(`${sys}-${n}t`, foldCell(cellProfiles))
+      }
     }
   }
 } catch (e) {
@@ -311,12 +368,22 @@ if (results.length > 1) {
   for (const r of results) console.log(cols(NAMES[r.system], String(r.threads), String(r.runs), ms(r.prove?.median), ms(r.verify?.median), bytes(r.proof_bytes?.median)))
 }
 if (flags.out) {
-  if (/\.json$/i.test(flags.out)) writeFileSync(flags.out, `${JSON.stringify({ profile: profileId, machine, rows: results, records }, null, 1)}\n`)
+  if (/\.json$/i.test(flags.out)) writeFileSync(flags.out, `${JSON.stringify({ profile: profileId, machine, profiling: flags.profiling ?? false, rows: results, records, ...(flags.profiling && { profiles }) }, null, 1)}\n`)
   else {
     const cols = ['at', 'profile', 'proof_system', 'statement', 'prove.threads', 'prove.total_ms', 'prove.sign_ms', 'prove.witness_ms', 'prove.prebuild_ms', 'prove.prove_ms', 'verify.total_ms', 'verify.verify_ms', 'prove.proof_bytes', 'prove.presentation_bytes', 'prove.heap_mb', 'prove.keys_mb', 'prove.witness_mb', 'verify.heap_mb', 'verify.keys_mb', 'profiled']
     const get = (o, path) => path.split('.').reduce((x, k) => x?.[k], o)
     const csv = [cols.join(','), ...records.map((r) => cols.map((c) => JSON.stringify(get(r, c) ?? '')).join(','))].join('\n')
     writeFileSync(flags.out, `${csv}\n`)
   }
-  console.log(`\n${green('✓')} wrote ${records.length} runs to ${flags.out}`)
+  console.log(`\n${green('✓')} wrote ${records.length} runs${flags.profiling && /\.json$/i.test(flags.out) ? ` and ${profiles.length} profiles` : ''} to ${flags.out}`)
+  const stem = join(dirname(flags.out), basename(flags.out).replace(/\.(json|csv)$/i, ''))
+  for (const [cell, sides] of folded) {
+    for (const [side, stacks] of Object.entries(sides)) {
+      const lines = Object.entries(stacks).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, n]) => `${k} ${n}`)
+      if (!lines.length) continue
+      const f = `${stem}.${cell}.${side}.folded`
+      writeFileSync(f, `${lines.join('\n')}\n`)
+      console.log(`${green('✓')} wrote ${f}`)
+    }
+  }
 }

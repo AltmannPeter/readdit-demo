@@ -16,7 +16,8 @@
 //! runs as an async task off Node's event loop, and one heavy step runs at a time.
 //!
 //! With `"profile": true` in a step's JSON (`/tech`'s Profiling switch), the step's metrics also
-//! carry `profile`: the sampled stacks (`nym-profile`).
+//! carry `profile`: the sampled stacks (`nym-profile`). `"profile": "full"` adds every stack whole
+//! (`full`), for `npm run bench profiling=full`.
 
 mod alloc;
 
@@ -26,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use napi::bindgen_prelude::{AsyncTask, Either};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
+use nym_profile::Mode;
 use nym_longfellow::error::Refusal;
 use nym_longfellow::{measure, prover, verifier};
 
@@ -52,14 +54,9 @@ fn parse<T: serde::de::DeserializeOwned>(what: &str, input: &str) -> std::result
 /// The addon's own code and Google's runtime, where a sampled stack begins.
 const ROOTS: &[&str] = &["nym_longfellow::", "runtime_", "core_algebra::", "core_proto::"];
 
-/// A boolean field of a step's JSON input (false when absent or not JSON).
-fn flag(input: &str, key: &str) -> bool {
-  serde_json::from_str::<serde_json::Value>(input).ok().and_then(|v| v.get(key)?.as_bool()).unwrap_or(false)
-}
-
 /// Runs a step under the sampler.
-fn profiled<T>(on: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
-  let sampler = nym_profile::Sampler::start(on, ROOTS);
+fn profiled<T>(mode: Mode, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
+  let sampler = nym_profile::Sampler::start(mode, ROOTS);
   let out = f();
   (out, sampler.finish())
 }
@@ -143,7 +140,7 @@ pub struct Witness {
   data: Arc<Mutex<Option<prover::WitnessData>>>,
   summary: String,
   /// The witness step's input asked for a profile; prove follows it.
-  profile: bool,
+  profile: Mode,
 }
 
 #[napi]
@@ -166,7 +163,7 @@ impl Task for Sign {
 
   fn compute(&mut self) -> Result<Self::Output> {
     guarded(|| {
-      let (out, profile) = profiled(flag(&self.input, "profile"), || parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i)));
+      let (out, profile) = profiled(Mode::of(&self.input), || parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i)));
       Ok(match out {
         Ok(o) => {
           let mut json = serde_json::to_value(o).map_err(|e| e.to_string())?;
@@ -187,7 +184,7 @@ impl Task for Sign {
 pub struct MakeWitness {
   prover: Arc<prover::Prover>,
   input: String,
-  profile: bool,
+  profile: Mode,
 }
 
 impl Task for MakeWitness {
@@ -220,7 +217,7 @@ impl Task for MakeWitness {
 pub struct Prove {
   prover: Arc<prover::Prover>,
   data: Option<prover::WitnessData>,
-  profile: bool,
+  profile: Mode,
 }
 
 impl Task for Prove {
@@ -263,7 +260,7 @@ impl Prover {
   /// Step 2, the witness. JSON in; a Witness, or the refusal as JSON text.
   #[napi]
   pub fn witness(&self, input: String) -> AsyncTask<MakeWitness> {
-    let profile = flag(&input, "profile");
+    let profile = Mode::of(&input);
     AsyncTask::new(MakeWitness { prover: self.inner.clone(), input, profile })
   }
 
@@ -297,7 +294,7 @@ impl Task for Verify {
     guarded(|| {
       let input: verifier::VerifyInput = serde_json::from_str(&self.input).map_err(|e| format!("verify: {e}"))?;
       let guard = measure::exclusive()?;
-      let (mut out, profile) = profiled(flag(&self.input, "profile"), || self.verifier.verify(&input));
+      let (mut out, profile) = profiled(Mode::of(&self.input), || self.verifier.verify(&input));
       drop(guard);
       attach(&mut out, profile);
       Ok(out.to_string())
