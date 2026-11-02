@@ -167,6 +167,6 @@ fn rulebook_versions_parse() {
   assert_eq!(Rulebook::parse(None).unwrap(), Rulebook::V04);
   assert_eq!(Rulebook::parse(Some("0.5")).unwrap(), Rulebook::V05);
   assert_eq!(Rulebook::parse(Some("0.6")).unwrap(), Rulebook::V06);
-  assert!(Rulebook::parse(Some("0.7")).is_err());
+  assert!(Rulebook::parse(Some("0.8")).is_err());
   assert!(!Rulebook::V04.years_range() && Rulebook::V05.years_range() && Rulebook::V06.years_range());
 }

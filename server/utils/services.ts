@@ -375,7 +375,7 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
 }
 
 /** /tech's settings in the call's JSON: `parallel` and `threads` (every addon; Longfellow's v0.4
- *  circuits run on one thread whatever they say, its v0.5 and v0.6 circuits follow them), and
+ *  circuits run on one thread whatever they say, its v0.5 to v0.7 circuits follow them), and
  *  `profile`. 'all' sends `parallel` alone (one thread per core, as the addon counts them); a count
  *  sends `threads` too, which the addon clamps to its cores. */
 function threading(): { parallel?: boolean; threads?: number; profile?: boolean } {

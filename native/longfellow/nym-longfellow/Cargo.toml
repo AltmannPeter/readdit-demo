@@ -17,6 +17,8 @@ runtime-zk = { workspace = true }
 nym-auth-zk = { path = "../nym-auth-zk" }
 # The rulebook v0.6 circuits: the decoy-digest layout (src/decoy.rs).
 nym-auth-zk-decoy = { path = "../nym-auth-zk-decoy" }
+# The rulebook v0.7 circuits: the v0.7 decoy layout with AES-128 commitments (src/v07.rs).
+nym-auth-zk-v07 = { path = "../nym-auth-zk-v07" }
 # /tech's multithreading switch: the pools the v0.5 circuits prove and verify on (src/threads.rs).
 rayon = "1.10"
 # circuits/mdoc/circuits.zst.

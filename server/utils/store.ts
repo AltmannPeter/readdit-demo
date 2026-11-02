@@ -145,7 +145,7 @@ interface Store {
   /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
    *  configured ones, runtime config acceptedProofSystems). */
   acceptedProofSystems: string[]
-  /** The threads Vega, BBS and Longfellow v0.5/v0.6 run on (/tech's thread setting): 'all' (one
+  /** The threads Vega, BBS and Longfellow v0.5 to v0.7 run on (/tech's thread setting): 'all' (one
    *  per core) or a count from 1 to maxThreads(). A demo reset restores runtime config multithreading. */
   threads: ThreadSetting
   /** The encrypted Response Mode requests ask for (/tech's switch; a demo reset restores runtime config responseMode). */

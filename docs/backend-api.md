@@ -6,9 +6,11 @@ Longfellow addon (`native/longfellow`, a circuit over the same mdoc, with the sa
 its own section; and the BBS addon (`native/bbs`, a scheme over the nym_auth BBS credential,
 `bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query with
 a `ZkpPresentation`, in the version the input names: `"rulebook": "0.4"` (the default when absent),
-`"0.5"` or `"0.6"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove) and verify
-input. `"0.6"` keeps v0.5's request and presentation rules (`Rulebook::years_range()`); only
-Longfellow serves it, with its decoy circuits (below).
+`"0.5"`, `"0.6"` or `"0.7"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove)
+and verify input. `"0.6"` and `"0.7"` keep v0.5's request and presentation rules
+(`Rulebook::years_range()`); `"0.7"` takes the pseudonym with `prf` `aes-128` only
+(`Rulebook::prf()`; `sha-256` there, and `aes-128` under the others, is `unsupported_config`). Only
+Longfellow serves them, with its decoy circuits (`"0.6"`) and its v0.7 circuits (`"0.7"`), below.
 v0.5 changes one thing here: `age_check` is an assertion, `{ "fn_id": "age_check", "params": {
 "range": "13-17" } }` without `return` and with no output in `results`; the prover and the
 verifier compute E and C from the range and the UTC date of `proof_time` (the prover's clock; the
@@ -19,7 +21,8 @@ when the request has an age check (refused otherwise: `proof_time`; under v0.4 a
 refused as `presentation`). Each set of circuits reads one rulebook version: Vega and Longfellow
 prove v0.5 requests with their v0.5 circuits (`bsc`), and their v0.4 circuits refuse them (prover
 `unsupported_circuit`, verifier `circuit`); Longfellow proves v0.6 requests with its decoy circuits
-only, and each of its three sets refuses the other two versions the same way. Only `server/utils/services.ts` calls them. Each loads on its own; the site
+only, and v0.7 requests with its v0.7 circuits only; each of its four sets refuses the other
+versions the same way. Only `server/utils/services.ts` calls them. Each loads on its own; the site
 starts when at least one loads and offers only the systems of those that did. The
 addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
 a presentation costs no network hop on the server side.
@@ -89,7 +92,7 @@ Configuration (Nuxt runtime config, environment variables):
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
-| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.7, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
 | `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Community can accept |
@@ -506,6 +509,30 @@ Public inputs in circuit order: `proof_time` 1, `pseudonym.verifier_input` 256, 
 2, `session_transcript` 256 (hash + signature): no `doctype`, and one `proof_time` element. Tests:
 `nym-longfellow/tests/decoy_crosscheck.rs`, `v06_flow.rs` (the package's) and `decoy_flow.rs` (the
 demo holders' `v06` credentials).
+
+### Longfellow under rulebook v0.7: the AES circuits
+
+Circuit `urn:circuits:sha256:218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd` (the
+SHA-256 of `nym_auth_mdoc_v07.lfa2.zst`, `nym_auth_zk_v07::system_id()`) is `nym-auth-zk-v07` 0.1.0
+(Peter's package `nym-auth-longfellow-v07-v1`), in `native/longfellow/nym-auth-zk-v07` as delivered
+and pinned in `VENDOR-SHA256SUMS`, with the package's adapter `nym-longfellow/src/v07.rs`. It reads
+rulebook v0.7 requests and credentials only: both addon objects load it beside the other three
+sets, `info.circuits` lists it with `rulebook: "0.7"`, and the v0.7 id under another version, or
+another set's id under `"0.7"`, is refused (`unsupported_circuit`, verifier `circuit`). The API, the
+two phases, the refusals and the threads are the decoy circuits'.
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.7 (package INTEGRATION.md §5): the decoy-digest layout with the valueDigests namespace `eu.nym_auth.v1`, `bsc` = AES-128(secret_seed, "nym/b" ‖ 01 ‖ birth_date) ‖ AES-128(secret_seed, "nym/b" ‖ 02 ‖ 0^10) and `psc` likewise under private_seed (or 32 zero bytes), and the device key compressed (`-3` the sign of y); MSO 350 bytes, Sig_structure 375 (6 SHA-256 blocks). `nym_auth_zk_v07::mdoc::parse` refuses anything else (`bad_credential`) and recovers y |
+| Pseudonym | `known-offender-matching-ssc`, `prf` `aes-128`: AES-128(secret_seed, H[0..16]) ‖ AES-128(secret_seed, H[16..32]), H = SHA-256("nym_auth/v1/aes-128/known-offender-matching-ssc" ‖ 0^32 ‖ SHA-256(verifier_id)), which the crate computes from `verifier_id`. Another value than v0.4–v0.6's for the same seed |
+| Artifact SHA-256 | `nym_auth_mdoc_v07.lfa2.zst` `218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd` (152,142 bytes); hash circuit id `18d504fe…b073` (267 public slots), signature circuit id `55cd9b6e…a344` (899) |
+| MAC | 4 words over e and the device key's x (v0.6: 6); the transcript starts from `"nym_auth/v1/mdoc-v07/longfellow"` ‖ e2 |
+| Proof | about 273 kB |
+
+Public inputs in circuit order: `proof_time` 1, `pseudonym.nym_block` 256 (H), `results.nym` 2,
+`age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 4 + 512, `issuer_key_set`
+2, `session_transcript` 256 (hash + signature). Tests: `nym-longfellow/tests/v07_crosscheck.rs`,
+`v07_flow.rs` (the package's) and `v07_holders_flow.rs` (the demo holders' `v07` credentials).
 
 **Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
 GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on

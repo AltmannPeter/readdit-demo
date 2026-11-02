@@ -74,6 +74,9 @@ pub const CONFIG: &str = "known-offender-matching-ssc";
 /// The pseudonym function version and PRF the circuit implements.
 pub const VERSION: u64 = 1;
 pub const PRF: &str = "sha-256";
+/// The PRF of the rulebook v0.7 circuits' pseudonym: AES-128 under secret_seed over
+/// H = SHA-256(DST ‖ 0^32 ‖ verifier_input) (the package's INTEGRATION.md §0).
+pub const PRF_V07: &str = "aes-128";
 /// The source format and the format of the credential query.
 pub const SOURCE_FORMAT: &str = "mso_mdoc";
 pub const FORMAT: &str = "zkp_req";
@@ -149,12 +152,15 @@ fn param_str<'a>(params: &'a serde_json::Map<String, Json>, key: &str) -> Result
 /// when absent). v0.5: `age_check` is an assertion with a `range` in whole years, and both sides
 /// compute E and C from it and the UTC date of `proof_time` ([`dates::range_bounds`]). v0.6: the
 /// decoy-digest credential layout ([`crate::decoy`]), with v0.5's request and presentation rules.
+/// v0.7: the v0.7 decoy layout (short namespace, compressed device key, AES-128 commitments;
+/// [`crate::v07`]), with v0.5's request rules except the pseudonym's `prf`, `aes-128`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Rulebook {
   #[default]
   V04,
   V05,
   V06,
+  V07,
 }
 
 impl Rulebook {
@@ -163,13 +169,22 @@ impl Rulebook {
       None | Some("0.4") => Ok(Rulebook::V04),
       Some("0.5") => Ok(Rulebook::V05),
       Some("0.6") => Ok(Rulebook::V06),
-      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4, 0.5 and 0.6"))),
+      Some("0.7") => Ok(Rulebook::V07),
+      Some(other) => Err(Refusal::bad_request(format!("rulebook {other}: this build reads 0.4, 0.5, 0.6 and 0.7"))),
     }
   }
 
-  /// Whether `age_check` is v0.5's assertion with a `range` (v0.5 and v0.6).
+  /// Whether `age_check` is v0.5's assertion with a `range` (v0.5, v0.6 and v0.7).
   pub fn years_range(self) -> bool {
-    matches!(self, Rulebook::V05 | Rulebook::V06)
+    matches!(self, Rulebook::V05 | Rulebook::V06 | Rulebook::V07)
+  }
+
+  /// The pseudonym's `prf` the version's circuits implement: `sha-256`, or `aes-128` under v0.7.
+  pub fn prf(self) -> &'static str {
+    match self {
+      Rulebook::V07 => PRF_V07,
+      _ => PRF,
+    }
   }
 }
 
@@ -248,8 +263,8 @@ pub fn statement_for(
           return Err(Refusal::unsupported_request(format!("pseudonym ver {:?}: the rulebook defines {VERSION}", r.params.get("ver"))));
         }
         let prf = param_str(&r.params, "prf")?;
-        if prf != Some(PRF) {
-          return Err(Refusal::unsupported_config(format!("prf {prf:?}: these circuits implement {PRF}")));
+        if prf != Some(rulebook.prf()) {
+          return Err(Refusal::unsupported_config(format!("prf {prf:?}: these circuits implement {}", rulebook.prf())));
         }
         let config = param_str(&r.params, "config")?;
         if config != Some(CONFIG) {

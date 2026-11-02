@@ -9,6 +9,7 @@
 import v04 from '../../profiles/nym-auth-v0.4/profile.json'
 import v05 from '../../profiles/nym-auth-v0.5/profile.json'
 import v06 from '../../profiles/nym-auth-v0.6/profile.json'
+import v07 from '../../profiles/nym-auth-v0.7/profile.json'
 import type { PseudonymConfig, SourceFormat } from '../types/oid4vp'
 
 export interface ProfileAttribute {
@@ -36,7 +37,7 @@ export interface PseudonymConfigSpec {
   id: PseudonymConfig
   seed: 'secret_seed' | 'private_seed'
   seed_attribute?: Partial<Record<SourceFormat, string>>
-  prf: Partial<Record<SourceFormat, 'sha-256' | 'hashdh-bls12381g1'>>
+  prf: Partial<Record<SourceFormat, 'sha-256' | 'aes-128' | 'hashdh-bls12381g1'>>
   requested?: boolean
   properties: { distinctPerVerifier: boolean; sameAcrossVerifiers: boolean; issuerCanLink: boolean; knownOffenderMatching: boolean }
 }
@@ -59,7 +60,7 @@ export interface Profile {
     id: string
     label: string
     encodings: {
-      mso_mdoc?: { doctype: string; attributes: ProfileAttribute[] }
+      mso_mdoc?: { doctype: string; namespace?: string; attributes: ProfileAttribute[] }
       bbs_cd?: { schema_id: string; schema_digest: string; attributes: ProfileAttribute[] }
     }
     metadata?: Array<{ label: string; file: string }>
@@ -70,7 +71,7 @@ export interface Profile {
 }
 
 /** Every profile, oldest first. */
-export const PROFILES: Profile[] = [v04 as unknown as Profile, v05 as unknown as Profile, v06 as unknown as Profile]
+export const PROFILES: Profile[] = [v04 as unknown as Profile, v05 as unknown as Profile, v06 as unknown as Profile, v07 as unknown as Profile]
 
 /** The profile the site runs at start (runtime config demoProfile overrides it). */
 export const DEFAULT_PROFILE_ID = 'nym-auth-v0.4'

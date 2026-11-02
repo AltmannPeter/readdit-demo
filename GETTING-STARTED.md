@@ -164,7 +164,7 @@ session; the chips above the tiles select earlier ones, and name the phone that 
 screen.
 
 - **Demo profile.** Which version of the nym_auth rulebook the site runs: **nym_auth v0.4** (at
-  start; `NUXT_DEMO_PROFILE`), **nym_auth v0.5** or **nym_auth v0.6**. Switching resets the demo; **Reset demo** keeps
+  start; `NUXT_DEMO_PROFILE`), **nym_auth v0.5**, **nym_auth v0.6** or **nym_auth v0.7**. Switching resets the demo; **Reset demo** keeps
   the choice. Next to it: the rulebook's version and date, links to the rulebook and to the commit
   the profile is based on on GitHub ("not committed yet" until it is), and the commit the site is
   built from. **What this version defines** lists the credential, the functions (and how each side
@@ -173,7 +173,10 @@ screen.
   v0.5 circuits, and the mdoc phones answer with their v0.5 mdoc (same pseudonym as v0.4). v0.6
   asks the same way; only Longfellow proves it, with its decoy circuits, and the mdoc phones answer
   with their v0.6 mdoc (the decoy-digest layout; same pseudonym again). Vega and BBS show "pending"
-  under v0.6. `/dev` shows the profile in its header. More in `profiles/README.md`.
+  under v0.6. v0.7 asks for the pseudonym with `prf` `aes-128`; only Longfellow proves it, with its
+  v0.7 circuits, and the mdoc phones answer with their v0.7 mdoc (AES commitments). The pseudonym
+  differs from the earlier versions', so a person gets another account. Vega and BBS show "pending".
+  `/dev` shows the profile in its header. More in `profiles/README.md`.
 - **Proof systems.** A switch per proof system: Vega and Longfellow (circuits over the mdoc,
   `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**: tick one before
   the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the same
@@ -188,8 +191,8 @@ screen.
   verifier: also its trust anchor and the `proof_time` tolerance). The lock icon is **Request
   signing**, the certificate that signs Community's requests.
 - **Threads.** 1 at start and after **Reset demo**. Choose any count up to the machine's cores, or
-  **All**, and Vega, BBS and Longfellow's v0.5 and v0.6 circuits run on that many threads. The
-  label names them ("Vega, Longfellow and BBS" under v0.5 and v0.6, "Vega and BBS" under v0.4).
+  **All**, and Vega, BBS and Longfellow's v0.5 to v0.7 circuits run on that many threads. The
+  label names them ("Vega, Longfellow and BBS" under v0.5 to v0.7, "Vega and BBS" under v0.4).
   Longfellow's v0.4 circuits always run on one thread.
 - **Trust new issuers.** On at start and after **Reset demo**. Community's verifiers trust the
   demo issuers. With this on, a presentation from a wallet whose credential comes from another
@@ -360,12 +363,12 @@ site, tick the proof system you will show in the technical view, and run the who
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
-| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.7, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
 | `NUXT_RESPONSE_MODE` | `direct_post.cwt` | How requests ask the wallet to encrypt its response at start and after a reset: `direct_post.cwt` (CBOR in a COSE_Encrypt, zkp_req.md §6.2) or `direct_post.jwt` (JSON in a JWE); the technical view switches it |
-| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 and v0.6 on every core at start and after a reset (else one thread); the technical view sets any count |
+| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 to v0.7 on every core at start and after a reset (else one thread); the technical view sets any count |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
 | `NUXT_TRUST_NEW_ISSUERS` | `true` | Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start and after a demo reset |
@@ -407,7 +410,7 @@ them before writing:
 cd native/vega
 cargo run --release -p nym-issuer -- --holder 2011-03-14 --holder 1990-05-20 \
   --valid-from 2026-10-13 --valid-until 9999-12-31T23:59:59Z --keep ../../app/wallet/demo-wallet.json \
-  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem --v05 --v06
+  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem --v05 --v06 --v07
 ```
 
 `--v05` also issues each holder's rulebook v0.5 mdoc (`bsc`, `psc`, the compact profile the v0.5
@@ -422,6 +425,11 @@ the MSO's valueDigests, no data elements; the layout the v0.6 Longfellow circuit
 byte by byte and checked against the circuits' template before writing, under the same Document
 Signer, device key, seeds, birth date and validity, into the holder's `v06`. Re-issuing gives a new
 Document Signer, so the v0.4 and v0.5 credentials change bytes too (their contents do not).
+
+`--v07` also issues each holder's rulebook v0.7 mdoc: the same layout with the namespace
+`eu.nym_auth.v1`, `bsc` and `psc` as AES-128 commitments and the device key compressed (the layout
+the v0.7 Longfellow circuits read), written byte by byte and checked against their template, into
+the holder's `v07`.
 
 The credentials do not expire: `validUntil` is `9999-12-31T23:59:59Z`, the farthest an mdoc tdate
 holds, and the Document Signer certificate's `notAfter` is `99991231235959Z`, RFC 5280's value for
@@ -465,7 +473,7 @@ the dropdown does.
 
 ```sh
 npm run vega:check                              # real proofs of both credentials, v0.4 and v0.5: pseudonyms, refusals, any PIN, 18+ (needs build:native)
-npm run vectors:check                           # the site's pseudonyms and age ranges against the rulebook v0.5 test vectors and v0.6's provisional ones
+npm run vectors:check                           # the site's pseudonyms and age ranges against the rulebook v0.5 test vectors and v0.6's and v0.7's provisional ones
 (cd native/vega && cargo test --release -p nym-vega)  # the handover against the spec's example, age_check mapping, v0.5 end to end
 (cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
 (cd native/bbs && cargo test --release -p nym-bbs)  # BBS: prove, verify, the same pseudonym, refusals

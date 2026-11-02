@@ -20,7 +20,7 @@ presentation size, and memory. The runs also appear in /tech's Benchmark.
   base=URL        the site (default http://localhost:3000)
   runs=N          measured runs per cell (default 10)
   warmup=N        unmeasured runs first, per cell (default 1)
-  profile=V       v0.4, v0.5 or v0.6 (default: the one the site runs; another resets the demo)
+  profile=V       v0.4, v0.5, v0.6 or v0.7 (default: the one the site runs; another resets the demo)
   system=LIST     vega, longfellow, bbs, comma-separated (default: all the profile can use)
   threads=LIST    thread counts, comma-separated: 1 up to the site's cores, a range such as
                   1-4, or all (default 1,all)
@@ -127,7 +127,7 @@ const must = async (what, p) => {
 }
 
 // ---- one presentation, as the demo phone makes it ----
-const credentialFor = (version, holder) => (version === '0.5' ? holder.v05 : version === '0.6' ? holder.v06 : { credential: holder.credential })
+const credentialFor = (version, holder) => (version === '0.5' ? holder.v05 : version === '0.6' ? holder.v06 : version === '0.7' ? holder.v07 : { credential: holder.credential })
 
 async function present(cell) {
   const { version, proofSystem, ids } = cell

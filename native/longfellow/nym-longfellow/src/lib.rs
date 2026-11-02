@@ -46,6 +46,7 @@ pub mod request;
 pub mod sha;
 pub mod threads;
 pub mod v05;
+pub mod v07;
 pub mod verifier;
 pub mod witness;
 pub mod x509;

@@ -11,6 +11,7 @@ fit stops the built server.
 | `nym-auth-v0.4` | [v0.4](../docs/nym_auth_rulebook.md), 2026-10-20 | Vega, Longfellow, BBS |
 | `nym-auth-v0.5` | [v0.5](../docs/nym_auth_rulebook-v0.5.md), 2026-10-27 | Vega and Longfellow (their bsc circuits), BBS |
 | `nym-auth-v0.6` | [v0.6](../docs/nym_auth_rulebook-v0.6.md), 2026-10-30 (provisional date; the document is Peter's, to come) | Longfellow (the decoy circuits); Vega and BBS pending |
+| `nym-auth-v0.7` | [v0.7](../docs/nym_auth_rulebook-v0.7.md), 2026-11-02 | Longfellow (the v0.7 circuits: AES commitments, `prf` `aes-128`); Vega and BBS pending |
 
 ## What a profile holds
 
@@ -32,7 +33,7 @@ fit stops the built server.
 
 The request interpreter (`shared/protocol/request.ts`) knows no version: it reads `_req` with the
 profile's function specs and the operators they name (`shared/protocol/operators.ts`:
-`age.birth-date-bounds@1` for v0.4, `age.years-range@1` for v0.5 and v0.6). The site writes requests with it
+`age.birth-date-bounds@1` for v0.4, `age.years-range@1` for v0.5 to v0.7). The site writes requests with it
 (`shared/utils/dcql.ts`), the demo wallet reads them with it under the profiles its credential fits
 (`app/wallet/engine.ts`), and the response route reads the profile for what a verified presentation
 shows (`server/api/vp/response/[id].post.ts`).
@@ -41,6 +42,13 @@ v0.6 keeps v0.5's request and presentation rules; what changes is the mdoc's lay
 decoy-digest layout: `bsc` and `psc` as the MSO's valueDigests, no IssuerSignedItems), which
 `shared/utils/mdoc.ts` reads as `layout: 'decoy'`. An mdoc fits only the profile of its own
 version, and the BBS credential only the profiles whose BBS system is available.
+
+v0.7 keeps them too, except the pseudonym's `prf` for `mso_mdoc`: `aes-128` for the configurations
+whose prover_input is public, `sha-256` for `user-managed-pseudonym-xsite-ssc` (the profile's
+`pseudonym_configs`). Its layout is v0.6's with the namespace `eu.nym_auth.v1`, `bsc` and `psc` as
+AES-128 commitments and the device key compressed, read as `layout: 'v07'`
+(`shared/utils/aes.ts` holds the site's AES-128; `shared/utils/pseudonym.ts` the `aes-128`
+pseudonym). The schema allows `namespace` on the mdoc encoding and `aes-128` as an mdoc PRF.
 
 The native addons take the version as `rulebook` ("0.4" when absent) in the prove and verify input:
 `native/bbs/nym-bbs` (`profile::Rulebook`, `dates`), `native/vega/nym-vega` and
@@ -59,6 +67,7 @@ The native addons take the version as `rulebook` ("0.4" when absent) in the prov
 4. Copy the rulebook's test vectors to `profiles/<id>/test-vectors/` and point `scripts/vectors-check.mjs`
    and the addons' `tests/rulebook_vectors.rs` at them (v0.5: `npm run vectors:check`, see
    [`nym-auth-v0.5/test-vectors`](nym-auth-v0.5/test-vectors/README.md); v0.6 runs the circuit
-   package's provisional set, [`nym-auth-v0.6/test-vectors`](nym-auth-v0.6/test-vectors/README.md)).
-5. flows-check group Q covers the switch, and v0.5 (Q3 to Q9) and v0.6 (Q10, Q11) over HTTP and in
+   package's provisional set, [`nym-auth-v0.6/test-vectors`](nym-auth-v0.6/test-vectors/README.md); v0.7
+   its circuit package's, [`nym-auth-v0.7/test-vectors`](nym-auth-v0.7/test-vectors/README.md)).
+5. flows-check group Q covers the switch, and v0.5 (Q3 to Q9), v0.6 (Q10, Q11) and v0.7 (Q12, Q13) over HTTP and in
    the browser; add the new version's flows there.

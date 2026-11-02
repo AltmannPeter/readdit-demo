@@ -18,7 +18,7 @@ export type PseudonymConfig =
   | 'user-managed-pseudonym-xsite-ssc'
 
 /** The pseudonym's PRF: `sha-256` (mso_mdoc), `hashdh-bls12381g1` (bbs_cd, a 48-byte G1 point). */
-export type PseudonymPrf = 'sha-256' | 'hashdh-bls12381g1'
+export type PseudonymPrf = 'sha-256' | 'aes-128' | 'hashdh-bls12381g1'
 
 export interface PseudonymReq {
   fn_id: 'pseudonym'

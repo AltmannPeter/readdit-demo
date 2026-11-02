@@ -36,8 +36,8 @@ export interface CircuitEntry {
   source_format: 'mso_mdoc'
   doctype: string
   /** 'any' = accepts any ISO/IEC 18013-5 conformant encoding; 'compact' = compact profile only;
-   *  'decoy' = the decoy-digest layout (rulebook v0.6) only. */
-  profile: 'any' | 'compact' | 'decoy'
+   *  'decoy' = the decoy-digest layout (rulebook v0.6) only; 'v07' = the v0.7 layout (rulebook v0.7) only. */
+  profile: 'any' | 'compact' | 'decoy' | 'v07'
   functions: {
     pseudonym?: PseudonymSupport
     age_check?: { params: Array<'ge' | 'le' | 'range'> }
@@ -48,7 +48,7 @@ export interface CircuitEntry {
   /** The circuit as data, pinned by hash: the services must report the same. */
   artifact?: { name: string; sha256: string }
   /** The rulebook version whose credential and requests the circuit reads (a demo profile's
-   *  `rulebook.version`): v0.4 (birth_date, ssc) or v0.5 (bsc). */
+   *  `rulebook.version`): v0.4 (birth_date, ssc), v0.5 (bsc), v0.6 (decoy digests) or v0.7 (AES commitments). */
   rulebook: string
 }
 
@@ -111,6 +111,22 @@ const LONGFELLOW_DECOY_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'x^(C+533333328); C = 99999999 when absent' },
   { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat-Shamir bytes after both commitments (1 in the hash circuit, 128 bits in the signature circuit)' },
   { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c m_k, the six words at the head of the proof (6 + 768 bits)' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: "Q's x and y" },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: "e2's 256 bits, least significant first" },
+]
+
+// Longfellow nym_auth under rulebook v0.7: the nym-auth-zk-v07 circuits over the v0.7 layout
+// (Peter's package nym-auth-longfellow-v07-v1, INTEGRATION.md §7), with their own id. Hash circuit
+// 266 + 1 = 267 public slots, signature circuit 898 + 1 = 899; values = elements in both, circuit
+// order (nym-longfellow/src/v07.rs, PUBLIC_INPUTS).
+const LONGFELLOW_V07_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'x^(T+533333333333328), T = YYYYMMDDhhmmss (UTC); tolerance checked outside the proof' },
+  { name: 'pseudonym.nym_block', source: 'verifier', values: 256, derivation: 'H = SHA-256("nym_auth/v1/aes-128/known-offender-matching-ssc" || 0^32 || SHA-256(verifier_id)), bit j of byte d at 8d+j; verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: "the pseudonym's two 16-byte halves, LE" },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'x^(E+533333328); E = 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'x^(C+533333328); C = 99999999 when absent' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat-Shamir bytes after both commitments (1 in the hash circuit, 128 bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 516, derivation: "t_k = a_k + c m_k over e and the device key's x, the four words at the head of the proof (4 + 512 bits)" },
   { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: "Q's x and y" },
   { name: 'session_transcript', source: 'verifier', values: 256, derivation: "e2's 256 bits, least significant first" },
 ]
@@ -197,6 +213,23 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     public_inputs: LONGFELLOW_DECOY_PUBLIC_INPUTS,
     artifact: { name: 'nym_auth_mdoc_decoy.lfa2.zst', sha256: '5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac' },
     rulebook: '0.6',
+  },
+  {
+    system_id: circuitId('218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v0.7 (AES commitments)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'v07',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['aes-128'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_V07_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_v07.lfa2.zst', sha256: '218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd' },
+    rulebook: '0.7',
   },
   {
     system_id: circuitId('6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'),

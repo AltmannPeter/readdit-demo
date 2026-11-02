@@ -1,5 +1,6 @@
 import type { PseudonymConfig } from '../types/oid4vp'
 import { concatBytes, sha256, toHex, utf8 } from './bytes'
+import { aes128 } from './aes'
 
 const ZERO32 = new Uint8Array(32)
 
@@ -42,6 +43,20 @@ export async function derivePseudonym(i: PseudonymInputs): Promise<string> {
   const dst = utf8(`nym_auth/v1/${i.config}`)
   const out = await sha256(concatBytes(dst, i.seed, await proverInput(i), await verifierInput(i)))
   return toHex(out)
+}
+
+/** prf aes-128 (rulebook v0.7): H = SHA-256("nym_auth/v1/aes-128/" ‖ config ‖ prover_input ‖
+ *  verifier_input), which the verifier computes itself. Defined for the configurations whose
+ *  prover_input is public (not user-managed-pseudonym-xsite-ssc). */
+export async function nymBlock(i: Omit<PseudonymInputs, 'seed'>): Promise<Uint8Array> {
+  if (i.config === 'user-managed-pseudonym-xsite-ssc') throw new Error('pseudonym: prf aes-128 is not defined for user-managed-pseudonym-xsite-ssc')
+  return sha256(concatBytes(utf8(`nym_auth/v1/aes-128/${i.config}`), await proverInput(i), await verifierInput(i)))
+}
+
+/** prf aes-128: pseudonym = AES-128(seed, H[0..16]) ‖ AES-128(seed, H[16..32]). Hex. */
+export async function derivePseudonymAes128(i: PseudonymInputs): Promise<string> {
+  const h = await nymBlock(i)
+  return toHex(concatBytes(await aes128(i.seed, h.slice(0, 16)), await aes128(i.seed, h.slice(16))))
 }
 
 function required<T>(v: T | undefined, name: string): T {

@@ -334,7 +334,7 @@ async function issuers(body: { trust_new: boolean } | { forget: string }) {
   await load()
 }
 const day = (iso: string) => iso.slice(0, 10)
-/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 and v0.6 circuits follow the
+/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 to v0.7 circuits follow the
  *  setting; Longfellow's v0.4 circuits run on one thread. */
 const threadsNow = computed(() => data.value?.threadCount ?? 1)
 /** The setting's choices: 1 up to one fewer than the cores, then every core. */

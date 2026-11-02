@@ -3,7 +3,7 @@ import type { ThreadSetting } from '../../utils/store'
 /**
  * /tech's thread setting. Body { threads }: a count from 1 to the machine's cores (maxThreads), or
  * 'all' (one per core); or { parallel }, the old switch (true is 'all', false is 1). Vega, BBS and
- * Longfellow's v0.5 and v0.6 circuits take it on the next prove and verify calls
+ * Longfellow's v0.5 to v0.7 circuits take it on the next prove and verify calls
  * (server/utils/services.ts); Longfellow's v0.4 circuits always run on one thread (Google's runtime
  * directly). A demo reset restores runtime config multithreading. Demo only: no authentication, as
  * /mod. 400 bad_request for anything else.

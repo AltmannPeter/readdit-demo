@@ -6,6 +6,9 @@
 // (profiles/nym-auth-v0.6/test-vectors/nym_auth_mdoc_decoy, the circuit package's: the v0.5
 // vectors' keys, openings and sessions, the credential in the decoy-digest layout), where the
 // fixture is read with shared/utils/mdoc.ts (bsc and psc from the MSO's valueDigests).
+// Then the v0.7 profile's provisional vectors (profiles/nym-auth-v0.7/test-vectors/nym_auth_mdoc_v07,
+// the circuit package's: the same keys, openings and sessions, the credential in the v0.7 layout),
+// with the site's AES-128 (shared/utils/aes.ts): bsc and psc, H and the aes-128 pseudonym.
 // The addons have their own tests on the same files (rulebook_vectors.rs in nym-vega,
 // nym-longfellow and nym-bbs: the bounds, and the SessionTranscript and device message). The
 // fixture itself is checked by the rulebook's verify_nym_auth_mdoc.py.
@@ -21,7 +24,8 @@ import { createJiti } from 'jiti'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const jiti = createJiti(import.meta.url)
 const { ageOperator, parseRange, rangeBounds, rangeOf } = await jiti.import(`${root}shared/protocol/operators.ts`)
-const { derivePseudonym } = await jiti.import(`${root}shared/utils/pseudonym.ts`)
+const { derivePseudonym, derivePseudonymAes128, nymBlock } = await jiti.import(`${root}shared/utils/pseudonym.ts`)
+const { bscV07, pscV07 } = await jiti.import(`${root}shared/utils/aes.ts`)
 const { findProfile } = await jiti.import(`${root}shared/profiles/index.ts`)
 const { readIssuerSigned, toBase64url } = await jiti.import(`${root}shared/utils/mdoc.ts`)
 
@@ -33,20 +37,47 @@ const ok = (c, m) => {
 const sha = (b) => createHash('sha256').update(b).digest('hex')
 const bytes = (hex) => Buffer.from(hex, 'hex')
 
-for (const version of ['0.5', '0.6']) {
+const DIRS = { '0.5': 'nym_auth_mdoc', '0.6': 'nym_auth_mdoc_decoy', '0.7': 'nym_auth_mdoc_v07' }
+const FILES = { '0.5': (v) => `nym_auth_test_vectors${v}.json`, '0.6': (v) => `decoy_test_vectors${v}.json`, '0.7': (v) => (v ? `v07_test_vectors${v}.json` : 'nym_auth_v07_test_vectors.json') }
+const hex = (b) => Buffer.from(b).toString('hex')
+
+for (const version of ['0.5', '0.6', '0.7']) {
   const profile = findProfile(`nym-auth-v${version}`)
   const mdoc = profile.credential.encodings.mso_mdoc
   const age = profile.functions.age_check
-  const dir = `${root}profiles/nym-auth-v${version}/test-vectors/${version === '0.5' ? 'nym_auth_mdoc' : 'nym_auth_mdoc_decoy'}/`
+  const dir = `${root}profiles/nym-auth-v${version}/test-vectors/${DIRS[version]}/`
   console.log(`\n== v${version}: ${dir.slice(root.length)}`)
 
   for (const variant of ['', '_zero_psc']) {
-    const V = JSON.parse(readFileSync(`${dir}${version === '0.5' ? 'nym_auth' : 'decoy'}_test_vectors${variant}.json`, 'utf8'))
+    const V = JSON.parse(readFileSync(`${dir}${FILES[version](variant)}`, 'utf8'))
     const p = `[v${version}, ${variant ? 'zero psc' : 'psc'}]`
     const h = V.holder_openings
     const required = mdoc.attributes.filter((a) => a.presence === 'required').map((a) => a.id)
 
-    if (version === '0.6') {
+    if (version === '0.7') {
+      // The v0.7 layout, read by the site's own reader: the namespace eu.nym_auth.v1, bsc and psc
+      // as valueDigests 0 and 1, the device key as x and the sign of y.
+      const v = readIssuerSigned(toBase64url(bytes(V.issuer_signed_cbor)))
+      ok(v.layout === 'v07' && v.items.length === 0 && v.birthDate === null, `${p} readIssuerSigned: the v0.7 layout, no items, no birth_date`)
+      ok(v.docType === mdoc.doctype && v.namespace === 'eu.nym_auth.v1' && mdoc.namespace === 'eu.nym_auth.v1', `${p} docType ${v.docType}, namespace ${v.namespace} (the profile's)`)
+      ok(JSON.stringify(required) === JSON.stringify(['bsc', 'psc']), `${p} the profile's required attributes are bsc, psc (valueDigests 0, 1)`)
+      ok(hex(v.bsc) === V.v07.bsc && hex(v.psc) === V.v07.psc, `${p} bsc and psc from the valueDigests are the vectors'`)
+      ok('odd' in v.deviceKey && v.deviceKey.odd === V.v07.device_sign && hex(v.deviceKey.x) === Buffer.from(V.keys.device.x, 'hex').toString('hex'), `${p} the device key: x, and the sign of y (${V.v07.device_sign ? 'odd' : 'even'})`)
+      ok(v.validity.validFrom === V.v07.valid_from && v.validity.validUntil === V.v07.valid_until, `${p} validity ${v.validity.validFrom} to ${v.validity.validUntil}`)
+      ok(sha(bytes(V.v07.sig_structure)) === V.v07.e && bytes(V.v07.sig_structure).length === 375, `${p} e = SHA-256(Sig_structure), 375 bytes`)
+      // Commitments with the site's AES-128.
+      ok(hex(await bscV07(bytes(h.secret_seed), h.birth_date)) === V.v07.bsc, `${p} bsc = AES-128(secret_seed, "nym/b" || 01 || birth_date) || AES-128(secret_seed, "nym/b" || 02 || 0^10)`)
+      ok((h.private_seed ? hex(await pscV07(bytes(h.private_seed))) : '00'.repeat(32)) === V.v07.psc, `${p} psc = ${h.private_seed ? 'AES-128(private_seed, "nym/p" || 01 || 0^10) || AES-128(private_seed, "nym/p" || 02 || 0^10)' : '32 zero bytes'}`)
+      // H and the aes-128 pseudonym (shared/utils/pseudonym.ts).
+      const inputs = V.expected.pseudonym_inputs
+      ok(hex(await nymBlock({ config: 'known-offender-matching-ssc', verifierId: inputs.verifier_id })) === V.expected.nym_block, `${p} H = SHA-256("nym_auth/v1/aes-128/known-offender-matching-ssc" || 0^32 || verifier_input)`)
+      for (const [config, want] of Object.entries(V.expected.pseudonyms_aes128)) {
+        ok((await derivePseudonymAes128({ config, seed: bytes(h.secret_seed), verifierId: inputs.verifier_id, verifierContext: inputs.verifier_context })) === want, `${p} pseudonym ${config}, prf aes-128`)
+      }
+      // The profile: aes-128 for the configurations with a public prover_input, sha-256 for xsite.
+      const prfs = Object.fromEntries(profile.pseudonym_configs.map((c) => [c.id, c.prf.mso_mdoc]))
+      ok(prfs['known-offender-matching-ssc'] === 'aes-128' && prfs['known-offender-matching-psc'] === 'aes-128' && prfs['account-recovery-ssc'] === 'aes-128' && prfs['user-managed-pseudonym-xsite-ssc'] === 'sha-256', `${p} the profile's prf per configuration (D1)`)
+    } else if (version === '0.6') {
       // The decoy-digest layout, read by the site's own reader: no nameSpaces, bsc and psc as the
       // MSO's valueDigests 0 and 1, which are the profile's required attributes in that order.
       const v = readIssuerSigned(toBase64url(bytes(V.issuer_signed_cbor)))
@@ -68,13 +99,15 @@ for (const version of ['0.5', '0.6']) {
       ok(V.issuer_signed_items.every((it, n) => it.digestID === n && sha(bytes(it.item_bytes_tag24)) === it.digest), `${p} item digests`)
     }
 
-    // Commitments.
-    ok(sha(Buffer.concat([bytes(h.secret_seed), Buffer.from(h.birth_date, 'utf8')])) === V.commitments.bsc, `${p} bsc = SHA-256(secret_seed || birth_date), ${h.birth_date.length}-byte birth_date`)
-    ok(V.commitments.psc === (h.private_seed ? sha(bytes(h.private_seed)) : '00'.repeat(32)), `${p} psc = ${h.private_seed ? 'SHA-256(private_seed)' : '32 zero bytes'}`)
+    // Commitments (v0.5, v0.6: SHA-256).
+    if (version !== '0.7') {
+      ok(sha(Buffer.concat([bytes(h.secret_seed), Buffer.from(h.birth_date, 'utf8')])) === V.commitments.bsc, `${p} bsc = SHA-256(secret_seed || birth_date), ${h.birth_date.length}-byte birth_date`)
+      ok(V.commitments.psc === (h.private_seed ? sha(bytes(h.private_seed)) : '00'.repeat(32)), `${p} psc = ${h.private_seed ? 'SHA-256(private_seed)' : '32 zero bytes'}`)
+    }
 
-    // Pseudonyms (shared/utils/pseudonym.ts).
+    // Pseudonyms (shared/utils/pseudonym.ts), prf sha-256 (v0.5, v0.6).
     const inputs = V.expected.pseudonym_inputs
-    for (const [config, want] of Object.entries(V.expected.pseudonyms_sha256)) {
+    for (const [config, want] of Object.entries(V.expected.pseudonyms_sha256 ?? {})) {
       const seed = config.endsWith('-psc') ? h.private_seed : h.secret_seed
       if (seed == null) {
         ok(!/^[0-9a-f]{64}$/.test(String(want)), `${p} ${config}: no private_seed, the vectors expect no pseudonym`)

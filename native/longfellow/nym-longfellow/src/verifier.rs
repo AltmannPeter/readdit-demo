@@ -35,6 +35,7 @@ use crate::zk::{Circuits, Rejection, ZkVerifierPair};
 use crate::{bsc, dates, hex, v05};
 use nym_auth_zk as v5;
 use nym_auth_zk_decoy as v6;
+use nym_auth_zk_v07 as v7;
 
 /// The largest proof the verifier reads. A proof of these circuits is about 344 kB.
 const MAX_PROOF_BYTES: usize = 1 << 20;
@@ -90,6 +91,8 @@ pub struct Verifier {
   v5: v05::Loaded<v5::Verifier>,
   /// The v0.6 circuits (`nym-auth-zk-decoy`, the decoy-digest layout), loaded with the others.
   v6: v05::Loaded<v6::Verifier>,
+  /// The v0.7 circuits (`nym-auth-zk-v07`, the v0.7 decoy layout with AES-128), loaded with the others.
+  v7: v05::Loaded<v7::Verifier>,
   pub circuits_sha256: [u8; 32],
   pub load_ms: f64,
   /// The heap the loaded keys or circuits hold (measure::Heap; one load at a time).
@@ -112,17 +115,18 @@ impl Verifier {
     let pair = ZkVerifierPair::new(c);
     let v5 = v05::load_verifier()?;
     let v6 = crate::decoy::load_verifier()?;
-    let load_ms = load_ms + v5.load_ms + v6.load_ms;
-    Ok(Verifier { pair, circuits_sha256, load_ms, v5, v6, keys_mb: mb(heap.held()), anchors, tolerance_s })
+    let v7 = crate::v07::load_verifier()?;
+    let load_ms = load_ms + v5.load_ms + v6.load_ms + v7.load_ms;
+    Ok(Verifier { pair, circuits_sha256, load_ms, v5, v6, v7, keys_mb: mb(heap.held()), anchors, tolerance_s })
   }
 
   pub fn info(&self) -> Json {
     json!({
       "service": "verifier",
-      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5) and nym-auth-zk-decoy circuits (v0.6); Node addon"),
+      "implementation": format!("Longfellow: {RUNTIME}, nym-auth-circuits LFC2 mdoc circuits (v0.4) and nym-auth-zk bsc circuits (v0.5) and nym-auth-zk-decoy circuits (v0.6) and nym-auth-zk-v07 circuits (v0.7); Node addon"),
       "version": env!("CARGO_PKG_VERSION"),
       "stub": false,
-      "circuits": crate::prover::circuit_info(&self.circuits_sha256, &self.v5.sha256, &self.v6.sha256),
+      "circuits": crate::prover::circuit_info(&self.circuits_sha256, &self.v5.sha256, &self.v6.sha256, &self.v7.sha256),
       "trust_anchors": self.anchors.0.iter().map(|a| json!({ "subject": a.subject, "not_after": a.not_after })).collect::<Vec<_>>(),
       "proof_time_tolerance_s": self.tolerance_s,
       "load_ms": self.load_ms,
@@ -167,6 +171,8 @@ impl Verifier {
       Rulebook::V05
     } else if p.system_id == crate::decoy::system_id() {
       Rulebook::V06
+    } else if p.system_id == crate::v07::system_id() {
+      Rulebook::V07
     } else {
       return Err(refuse("circuit", format!("unknown circuit {}", p.system_id)));
     };
@@ -183,7 +189,7 @@ impl Verifier {
     }
     let date = match rulebook {
       Rulebook::V04 => None,
-      Rulebook::V05 | Rulebook::V06 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),
+      Rulebook::V05 | Rulebook::V06 | Rulebook::V07 => Some(dates::date_time(&p.proof_time).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?.date),
     };
     let s = statement_for(&input.request, &input.credential_query_id, &input.handover, rulebook, date)
       .map_err(|e| refuse("request", format!("{}: {}", e.error, e.detail)))?;
@@ -251,6 +257,24 @@ impl Verifier {
       metrics.insert("threads".into(), json!(threads));
       if let Err(e) = outcome {
         return Err(match crate::decoy::failing_circuit(&e) {
+          Some(c) => Refused {
+            code: "proof_invalid",
+            input: Some(c),
+            certificate: None,
+            reason: format!("the {c} circuit's proof does not verify with the verifier's public inputs"),
+          },
+          None => refuse("proof_encoding", format!("the proof does not decode: {e:?}")),
+        });
+      }
+    } else if rulebook == Rulebook::V07 {
+      let req = crate::v07::request(&signer.key, &p.proof_time, &input.request, &input.credential_query_id, &input.handover)
+        .map_err(|e| refuse("request", e))?;
+      let presentation = v7::Presentation { pseudonym: *nym, proof: p.proof.clone() };
+      let (outcome, threads) = crate::threads::pool_of(input.parallel, input.threads).install(|| (self.v7.side.verify(&req, &presentation), v7::threads()));
+      metrics.insert("verify_ms".into(), json!(ms(t)));
+      metrics.insert("threads".into(), json!(threads));
+      if let Err(e) = outcome {
+        return Err(match crate::v07::failing_circuit(&e) {
           Some(c) => Refused {
             code: "proof_invalid",
             input: Some(c),

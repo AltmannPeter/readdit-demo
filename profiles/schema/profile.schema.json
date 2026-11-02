@@ -117,6 +117,7 @@
       "required": ["doctype", "attributes"],
       "properties": {
         "doctype": { "type": "string" },
+        "namespace": { "type": "string", "description": "The valueDigests namespace, when it is not the docType (v0.7: eu.nym_auth.v1)." },
         "attributes": { "type": "array", "items": { "$ref": "#/$defs/attribute" } }
       }
     },
@@ -176,7 +177,7 @@
           "description": "The PRF per encoding; an encoding not listed does not define the configuration.",
           "additionalProperties": false,
           "properties": {
-            "mso_mdoc": { "const": "sha-256" },
+            "mso_mdoc": { "enum": ["sha-256", "aes-128"] },
             "bbs_cd": { "const": "hashdh-bls12381g1" }
           }
         },
