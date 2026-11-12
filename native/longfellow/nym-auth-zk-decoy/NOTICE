@@ -1,0 +1,8 @@
+nym-auth-zk-decoy
+
+src/rt/ligero.rs, src/rt/sumcheck.rs, src/rt/zk.rs and src/rt/par.rs are derived from
+google/longfellow-zk (https://github.com/google/longfellow-zk) at commit 61a8a735964d1b22bccf79bf14ef6767249cdf92,
+Copyright 2026 Google LLC, licensed under the Apache License, Version 2.0. They are modified so that
+independent work runs in parallel; every output is identical to the original.
+
+The crate depends on Google's longfellow-zk runtime crates (Apache-2.0), unchanged.

@@ -1,4 +1,4 @@
-import type { AgeGate } from '#shared/types'
+import type { AgeGate, BirthDateRange } from '#shared/types'
 import type { AccountRecord } from './store'
 import { gateLabel, gateRange, intersectRanges, todayISO } from '#shared/utils/age'
 import { handleFromPseudonym } from '#shared/utils/handle'
@@ -64,9 +64,12 @@ export function getOrCreateAccount(pseudonym: string, community?: string, format
   return { account, created: true }
 }
 
-export function recordAgeProof(a: AccountRecord, gate: AgeGate) {
+/** Records an age proof for the account: `proven`, the birth-date bounds the verified presentation
+ *  established (from the request in v0.4, from the date of proof_time in v0.5); without them, the
+ *  gate's bounds today. */
+export function recordAgeProof(a: AccountRecord, gate: AgeGate, proven?: BirthDateRange) {
   const today = todayISO()
-  const range = gateRange(gate, today)
+  const range = proven ?? gateRange(gate, today)
   a.birthDateRange = intersectRanges(a.birthDateRange, range)
   a.ageProofs.push({ label: gateLabel(gate), range, at: today })
 }

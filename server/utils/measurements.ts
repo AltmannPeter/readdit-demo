@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { availableParallelism, cpus, arch, platform, totalmem } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
+import { DEFAULT_PROFILE_ID } from '#shared/profiles'
 import type { SourceFormat } from '#shared/types/oid4vp'
 import type { VpSessionRecord } from './store'
 import type { SizePart } from './services'
@@ -39,6 +40,8 @@ export interface Measurement {
     total_ms: number | null
     sign_ms: number | null
     witness_ms: number | null
+    /** Longfellow v0.5: the prebuild phase (part of witness_ms); absent before 2026-10-28. */
+    prebuild_ms?: number | null
     prove_ms: number | null
     proof_bytes: number | null
     presentation_bytes: number | null
@@ -60,11 +63,18 @@ export interface Measurement {
   /** Run with Profiling on: the sampler costs a little time, so the Benchmark leaves these runs
    *  out of its figures when the row has others. */
   profiled?: boolean
+  /** The demo profile the run was made under (absent in records made before profiles: v0.4). */
+  profile?: string
 }
 
+/** The profile of a record: records made before profiles are nym_auth v0.4. */
+export const profileOfRecord = (m: { profile?: string }) => m.profile ?? DEFAULT_PROFILE_ID
+
 /** The Benchmark row of a record: proof system, statement, prover threads, machine. */
-export function rowKey(m: Pick<Measurement, 'proof_system' | 'statement' | 'machine'> & { prove: { threads: number | null } }): string {
-  return [m.proof_system, m.statement, m.prove.threads, m.machine.cpu, m.machine.cores, m.machine.platform].join('|')
+export function rowKey(m: Pick<Measurement, 'proof_system' | 'statement' | 'machine' | 'profile'> & { prove: { threads: number | null } }): string {
+  // The default profile's rows keep the key they had before profiles (Profiling's records use it).
+  const profile = profileOfRecord(m) === DEFAULT_PROFILE_ID ? [] : [profileOfRecord(m)]
+  return [m.proof_system, m.statement, m.prove.threads, m.machine.cpu, m.machine.cores, m.machine.platform, ...profile].join('|')
 }
 
 /** `named` steps with their times, and "Other" for the rest of `total`. */
@@ -132,7 +142,12 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
   const v = verify ?? {}
   const proveSteps =
     format === 'mso_mdoc'
-      ? steps([['Device signature', sign], ['Witness', pm.witness_ms], ['Proof', pm.prove_ms]], total)
+      ? // Longfellow v0.5: the crate's first phase (prebuild: checks, statement, the hash circuit's
+        // witness and commitment), which a wallet can run during the consent screen, before the
+        // device signs; the rest of the witness step (the device signature's check) is Other.
+        num(pm.prebuild_ms) != null
+        ? steps([['Prebuild (consent)', pm.prebuild_ms], ['Device signature', sign], ['Proof', pm.prove_ms]], total)
+        : steps([['Device signature', sign], ['Witness', pm.witness_ms], ['Proof', pm.prove_ms]], total)
       : steps([['Commitments and ecdsa-pop setup', pm.offline_ms], ['BBS proof', pm.bbs_ms], ['ecdsa-pop', pm.ecdsa_pop_ms], ['Pseudonym', pm.pseudonym_ms], ['Date range', pm.date_range_ms]], total)
   const verifySteps =
     format === 'mso_mdoc'
@@ -149,6 +164,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
       total_ms: total,
       sign_ms: sign,
       witness_ms: num(pm.witness_ms),
+      prebuild_ms: num(pm.prebuild_ms),
       prove_ms: num(pm.prove_ms),
       proof_bytes: num(pm.proof_bytes),
       presentation_bytes: num(pm.presentation_bytes),
@@ -171,6 +187,7 @@ export async function recordMeasurement(s: VpSessionRecord, format: SourceFormat
     },
     machine: machine(),
     ...(s.detail && Object.keys(s.detail.profiles).length && { profiled: true }),
+    profile: sessionProfile(s).id,
   }
   measurements().push(m)
   try {
@@ -205,6 +222,8 @@ function spread(values: Array<number | null>): Spread | null {
 }
 
 export interface MeasurementRow {
+  /** The demo profile of the row's runs. */
+  profile: string
   proof_system: string
   label: string
   statement: Measurement['statement']
@@ -258,12 +277,16 @@ function stepsOf(lists: Array<StepTime[] | undefined>): StepTime[] {
   return ordered.map((name) => ({ name, ms: Math.round((median(lists.map((l) => l?.find((x) => x.name === name)?.ms)) ?? 0) * 1000) / 1000 }))
 }
 
-/** The records grouped by proof system, statement, prover threads and machine. */
-export async function measurementSummary() {
+/** The records grouped by proof system, statement, prover threads and machine. `since` (an ISO
+ *  time) keeps the records made at or after it: scripts/bench.mjs reads its own runs that way. */
+export async function measurementSummary(opts: { since?: string } = {}) {
   const list = measurements()
   const profiled = await profiledRuns()
   const groups = new Map<string, Measurement[]>()
-  for (const m of list) {
+  // The active profile's runs; the others are counted, not shown.
+  const active = activeProfile().id
+  const mine = list.filter((m) => profileOfRecord(m) === active && (!opts.since || m.at >= opts.since))
+  for (const m of mine) {
     const key = rowKey(m)
     groups.set(key, [...(groups.get(key) ?? []), m])
   }
@@ -276,6 +299,7 @@ export async function measurementSummary() {
     const latest = <T>(f: (x: Measurement) => T | null | undefined) => [...ms].reverse().map(f).find((x) => x != null) ?? null
     const peaks = ms.flatMap((x) => [x.prove.peak_memory_mb, x.verify.peak_memory_mb]).filter((x): x is number => x != null)
     return {
+      profile: profileOfRecord(m),
       proof_system: m.proof_system,
       label: PROOF_SYSTEMS.find((p) => p.id === m.proof_system)?.label ?? m.proof_system,
       statement: m.statement,
@@ -298,5 +322,7 @@ export async function measurementSummary() {
     }
   })
   rows.sort((a, b) => order(a.proof_system) - order(b.proof_system) || a.statement.localeCompare(b.statement) || (a.threads ?? 0) - (b.threads ?? 0))
-  return { runs: list.length, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
+  // The newest record of the profile (scripts/bench.mjs starts its window after it).
+  const newest = list.filter((m) => profileOfRecord(m) === active).at(-1)?.at ?? null
+  return { runs: list.length, profileRuns: mine.length, profile: active, newest, file: String(useRuntimeConfig().measurementsFile), machine: machine(), rows }
 }

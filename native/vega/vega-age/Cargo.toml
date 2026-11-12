@@ -1,8 +1,8 @@
 [package]
 name = "vega-age"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Age verification circuits for mdoc and SD-JWT credentials such as the PID, proved with Vega"
+description = "Age verification circuits for mdoc and SD-JWT credentials such as the PID, and the nym_auth rulebook v0.5 attestation (bsc), proved with Vega"
 publish = false
 
 [dependencies]
@@ -25,3 +25,9 @@ bincode = "1.3"
 # `unsafe_code` is forbidden for every target of this package.
 [lints.rust]
 unsafe_code = "forbid"
+
+[dev-dependencies]
+# The rulebook's test vectors and the synthetic holders (tests/data).
+serde_json = "1"
+# examples/bsc_shapes.rs writes the circuits as data, as shipped.
+zstd = "0.13"

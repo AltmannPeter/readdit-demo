@@ -33,7 +33,7 @@
 // --startup     also starts the built server without the addons and checks that it refuses to run,
 //               and that it starts with any one of them
 // --shots       saves the screenshots of this run (19-33) there
-// --only        runs only the named self-contained groups, for example --only M
+// --only        runs only the named self-contained groups, for example --only M (X: the Response Mode)
 // (needs: npm i --no-save playwright && npx playwright install chromium)
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -42,6 +42,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, request as httpRequest } from 'playwright'
 import { CompactEncrypt, importJWK } from 'jose'
+import { createJiti } from 'jiti'
 
 const argv = process.argv.slice(2)
 const opt = (name) => {
@@ -58,6 +59,9 @@ const BASE = argv[0] ?? 'http://localhost:3000'
 // Any 6 digits unlock the wallet: every PIN entry is a different one.
 const anyPin = () => String(Math.floor(Math.random() * 1e6)).padStart(6, '0')
 const root = fileURLToPath(new URL('../', import.meta.url))
+// direct_post.cwt as the wallet makes it (zkp_req.md §6.2): the site's own encoder.
+const { encryptCwt, encodeAuthorizationResponse, CWT_CONTENT_TYPE, COSE_A256GCM } = await createJiti(import.meta.url).import(`${root}shared/utils/cwt.ts`)
+const { derivePseudonymAes128 } = await createJiti(import.meta.url).import(`${root}shared/utils/pseudonym.ts`)
 const [teen, adult] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet.json'), 'utf8')).holders
 // The teen's BBS credential (bbs_cd, docs/bbs_cd.md), with the teen's device key and seed.
 const [teenBbs] = JSON.parse(readFileSync(join(root, 'app/wallet/demo-wallet-bbs.json'), 'utf8')).holders
@@ -73,8 +77,17 @@ const otherFingerprint = createHash('sha256')
   .digest('hex')
 const BBS_SCHEME = 'urn:mms:bbs-cd:nym_auth:v1'
 const BBS_SYSTEM = 'bbs-cd-plugins-v0.1'
-const VEGA = 'urn:circuits:vega:nym_auth:v1'
-const LONGFELLOW = 'urn:circuits:longfellow:nym_auth:v1'
+// Circuit ids: urn:circuits:sha256:<the archive's SHA-256> (Vega v0.4, Longfellow v0.4 and v0.5).
+const VEGA = 'urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'
+const LONGFELLOW = 'urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'
+const LONGFELLOW_V05 = 'urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'
+// Longfellow under rulebook v0.6: the decoy-digest layout (nym-auth-zk-decoy).
+const LONGFELLOW_V06 = 'urn:circuits:sha256:5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac'
+// Longfellow under rulebook v0.7: AES-128 commitments, the device key compressed (nym-auth-zk-v07).
+const LONGFELLOW_V07 = 'urn:circuits:sha256:218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd'
+const VEGA_V05 = 'urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'
+/** A circuit id of the same length that names no circuit: the last hex digit changed. */
+const otherId = (id) => id.slice(0, -1) + (id.endsWith('0') ? '1' : '0')
 const LONGFELLOW_SYSTEM = 'longfellow-libzk-v1'
 const WALLET_METADATA = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA] } } })
 /** The zkp_req query over `source` (mso_mdoc or bbs_cd) in a request. */
@@ -142,10 +155,46 @@ async function present(ctx, request, wallet, circuit = VEGA) {
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
+/** mso_mdoc under rulebook v0.5: the holder's v0.5 mdoc (demo-wallet.json `v05`) with the birth
+ *  date that opens its bsc, `rulebook` "0.5". */
+async function presentV05(ctx, request, wallet, circuit = LONGFELLOW_V05) {
+  const q = queryOf(request, 'mso_mdoc')
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
+  if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
+  const p = await call(ctx, 'POST', '/api/wallet/prove', {
+    data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v05.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v05.birth_date, device_signature: s.body.device_signature, rulebook: '0.5' },
+  })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
+/** mso_mdoc under rulebook v0.6: the holder's v0.6 mdoc (demo-wallet.json `v06`, the decoy-digest
+ *  layout) with the birth date that opens its bsc, `rulebook` "0.6". */
+async function presentV06(ctx, request, wallet, circuit = LONGFELLOW_V06) {
+  const q = queryOf(request, 'mso_mdoc')
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
+  if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
+  const p = await call(ctx, 'POST', '/api/wallet/prove', {
+    data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v06.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v06.birth_date, device_signature: s.body.device_signature, rulebook: '0.6' },
+  })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
+/** mso_mdoc under rulebook v0.7: the holder's v0.7 mdoc (demo-wallet.json `v07`, AES commitments,
+ *  the device key compressed) with the birth date that opens its bsc, `rulebook` "0.7". */
+async function presentV07(ctx, request, wallet, circuit = LONGFELLOW_V07, rulebook = '0.7') {
+  const q = queryOf(request, 'mso_mdoc')
+  const s = await call(ctx, 'POST', '/api/wallet/sign', { data: { request, system_id: circuit, device_key: wallet.device_key } })
+  if (s.status !== 200) throw new Error(`sign ${answer(s)}`)
+  const p = await call(ctx, 'POST', '/api/wallet/prove', {
+    data: { request, credential_query_id: q.id, system_id: circuit, credential: wallet.v07.credential, secret_seed: wallet.secret_seed, birth_date: wallet.v07.birth_date, device_signature: s.body.device_signature, rulebook },
+  })
+  if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
+  return p.body
+}
 /** bbs_cd: one prove call with the BBS credential and its device key. */
-async function presentBbs(ctx, request, wallet = teenBbs) {
+async function presentBbs(ctx, request, wallet = teenBbs, rulebook) {
   const q = queryOf(request, 'bbs_cd')
-  const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key } })
+  const p = await call(ctx, 'POST', '/api/wallet/prove', { data: { request, credential_query_id: q.id, credential: wallet.credential, device_key: wallet.device_key, ...(rulebook && { rulebook }) } })
   if (p.status !== 200) throw new Error(`prove ${answer(p)}`)
   return p.body
 }
@@ -157,10 +206,8 @@ const accept = async (proofSystem, yes) => {
   await ctx.dispose()
   return r
 }
-/** direct_post.jwt, as the wallet does it: the form's parameters as the payload of a JWE to the
- *  request's key (vp_token as a JSON object, when it parses). `to`: the request whose key to use. */
-async function encryptForm(request, form, to = request) {
-  const jwk = to.client_metadata.jwks.keys[0]
+/** The form's parameters as the Authorization Response object (vp_token as a JSON object, when it parses). */
+function responseObject(form) {
   const payload = { state: form.state }
   if (form.error !== undefined) payload.error = form.error
   if (form.vp_token !== undefined) {
@@ -170,11 +217,25 @@ async function encryptForm(request, form, to = request) {
       payload.vp_token = form.vp_token
     }
   }
-  const key = await importJWK(jwk, jwk.alg)
-  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(payload))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
-  return { response: jwe }
+  return payload
 }
-const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, form) })
+/** direct_post.jwt, as the wallet does it: the response object as the payload of a JWE to the
+ *  request's key. `to`: the request whose key to use. Returns the call's options. */
+async function encryptJwt(request, form, to = request) {
+  const jwk = to.client_metadata.jwks.keys[0]
+  const key = await importJWK(jwk, jwk.alg)
+  const jwe = await new CompactEncrypt(Buffer.from(JSON.stringify(responseObject(form)))).setProtectedHeader({ alg: jwk.alg, enc: 'A128GCM', kid: jwk.kid }).encrypt(key)
+  return { form: { response: jwe } }
+}
+/** direct_post.cwt, as the wallet does it: the response object as CBOR in a COSE_Encrypt to the
+ *  request's key, posted as application/cwt. Returns the call's options. */
+async function encryptCwtBody(request, form, to = request, enc) {
+  const { bytes } = await encryptCwt(encodeAuthorizationResponse(responseObject(form)), to.client_metadata.jwks.keys[0], enc)
+  return { headers: { 'content-type': CWT_CONTENT_TYPE }, data: Buffer.from(bytes) }
+}
+/** The response in the Response Mode `mode` (the request's, unless said otherwise). */
+const encrypted = (request, form, { to = request, mode = request.response_mode } = {}) => (mode === 'direct_post.cwt' ? encryptCwtBody(request, form, to) : encryptJwt(request, form, to))
+const respond = async (ctx, request, form) => call(ctx, 'POST', request.response_uri, await encrypted(request, form))
 /** Unencrypted direct_post form fields. */
 const respondPlain = (ctx, request, form) => call(ctx, 'POST', request.response_uri, { form })
 const vpForm = (request, presentation) => ({ state: request.state, vp_token: JSON.stringify({ [request.dcql_query.credentials[0].id]: [presentation] }) })
@@ -243,7 +304,7 @@ const TAMPER = {
     out[at] = out[at] === 0x30 ? 0x31 : out[at] - 1
     return out
   },
-  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(VEGA.replace(':v1', ':v2'))),
+  'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA), Buffer.from(otherId(VEGA))),
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -299,8 +360,8 @@ async function openPage({ demoPhone = true } = {}) {
     else consoleErrors.push(`[${flow}] ${m.text()} at ${path || m.location().url}`)
   })
   page.on('pageerror', (e) => consoleErrors.push(`[${flow}] page error: ${e.message}`))
-  // The response is a JWE; the phone's "Response encrypted" report, sent just before it, says
-  // whether it holds a vp_token or an error.
+  // The response is encrypted (a COSE_Encrypt or a JWE); the phone's "Response encrypted" report,
+  // sent just before it, says whether it holds a vp_token or an error.
   page.on('request', (r) => {
     if (!r.url().includes('/api/wallet/trace')) return
     try {
@@ -316,9 +377,11 @@ async function openPage({ demoPhone = true } = {}) {
     const entry = { flow, method: r.request().method(), path: u.pathname.replace(/[0-9a-f]{32}/g, ':id'), status: r.status() }
     if (entry.path === '/api/wallet/sign' && entry.status === 401) signRefused++
     if (u.pathname.startsWith('/api/vp/response/')) {
-      const form = new URLSearchParams(r.request().postData() ?? '')
-      entry.sent = form.get('response') ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
-      entry.encrypted = !!form.get('response')
+      const cwt = (r.request().headers()['content-type'] ?? '').startsWith('application/cwt')
+      const form = cwt ? new URLSearchParams() : new URLSearchParams(r.request().postData() ?? '')
+      entry.mode = cwt ? 'direct_post.cwt' : form.get('response') ? 'direct_post.jwt' : 'direct_post'
+      entry.sent = entry.mode !== 'direct_post' ? lastEncrypted : form.get('error') ? `error=${form.get('error')}` : 'vp_token'
+      entry.encrypted = entry.mode !== 'direct_post'
     }
     net.push(entry)
     if (entry.method === 'POST' && entry.path === '/api/vp/session' && entry.status === 200) {
@@ -1259,14 +1322,21 @@ async function groupF() {
   expectAnswer('response_uri: no body', await call(ctx, 'POST', request.response_uri), 400, 'state_mismatch')
   expectAnswer('response_uri: JSON instead of a form', await call(ctx, 'POST', request.response_uri, { data: { state: request.state } }), 400, 'state_mismatch')
   expectAnswer('complete before an answer', await complete(ctx, s.id), 409, 'not_verified')
-  begin('S21', 'an unencrypted or undecryptable response (direct_post.jwt)')
-  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.jwt', 1, 'ECDH-ES'])
+  begin('S21', 'an unencrypted or undecryptable response (direct_post.cwt)')
+  eq('the request asks for an encrypted response to its own key', [request.response_mode, request.client_metadata.jwks?.keys?.length, request.client_metadata.jwks?.keys?.[0]?.alg], ['direct_post.cwt', 1, 'ECDH-ES'])
   {
     const p0 = await present(ctx, request, teen)
     expectAnswer('response_uri: an unencrypted vp_token', await respondPlain(ctx, request, vpForm(request, p0.presentation)), 400, 'unencrypted')
     expectAnswer('response_uri: response is not a JWE', await respondPlain(ctx, request, { response: 'not.a.jwe' }), 400, 'invalid_response')
     const o = await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'signup' }))
-    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, { form: await encryptForm(request, vpForm(request, p0.presentation), o) }), 400, 'invalid_response')
+    expectAnswer("response_uri: a COSE_Encrypt to another session's key", await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { to: o })), 400, 'invalid_response')
+    expectAnswer("response_uri: a JWE to another session's key", await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { to: o, mode: 'direct_post.jwt' })), 400, 'invalid_response')
+    expectAnswer('response_uri: application/cwt that is not a COSE_Encrypt', await call(ctx, 'POST', request.response_uri, { headers: { 'content-type': 'application/cwt' }, data: Buffer.from([0xa1, 0x61, 0x61, 0x01]) }), 400, 'invalid_response')
+    expectAnswer('response_uri: application/cwt, empty', await call(ctx, 'POST', request.response_uri, { headers: { 'content-type': 'application/cwt' }, data: Buffer.alloc(0) }), 400, 'invalid_response')
+    const flipped = await encrypted(request, vpForm(request, p0.presentation))
+    flipped.data[flipped.data.length >> 1] ^= 1
+    expectAnswer('response_uri: a COSE_Encrypt with a flipped ciphertext byte', await call(ctx, 'POST', request.response_uri, flipped), 400, 'invalid_response')
+    expectAnswer('response_uri: a JWE to a request that asked for direct_post.cwt', await call(ctx, 'POST', request.response_uri, await encrypted(request, vpForm(request, p0.presentation), { mode: 'direct_post.jwt' })), 400, 'response_mode')
     eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
     check('the server log names the unencrypted response', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused an unencrypted response`))
     const d = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
@@ -2312,7 +2382,7 @@ async function groupL() {
   begin('L7', 'over HTTP: the Longfellow verifier refuses tampering and a presentation for another request')
   const tampers = {
     ...TAMPER,
-    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(LONGFELLOW.replace(':v1', ':v2'))),
+    'another system_id': (b) => replaceOnce(b, Buffer.from(LONGFELLOW), Buffer.from(otherId(LONGFELLOW))),
   }
   const expected = {
     'a flipped proof byte': ['proof_invalid:hash', 'proof_invalid:signature', 'proof_encoding'],
@@ -2383,27 +2453,45 @@ async function groupP() {
     return { status: v.status, prove: trace('prove')?.metrics?.threads, verify: trace('verify')?.metrics?.threads }
   }
 
-  begin('P1', 'off by default: Vega and BBS on one thread; every verified presentation is measured')
-  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  begin('P1', 'one thread by default: Vega and BBS on one thread; thread counts from 1 to the cores; every verified presentation is measured')
   let o = await overview()
-  eq('multithreading off after a reset', o.multithreading, false)
-  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
+  eq('one thread after a reset', [o.multithreading, o.threads, o.threadCount], [false, 1, 1])
+  eq('the most threads: the cores', o.maxThreads, o.measurements.machine.cores)
   const cores = o.measurements.machine.cores
+  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
+  for (const bad of [0, cores + 1, 1.5, 'two', null]) expectAnswer(`server: threads ${JSON.stringify(bad)} refused`, await call(ctx, 'POST', '/api/tech/threads', { data: { threads: bad } }), 400, 'bad_request')
+  expectAnswer('server: an empty body refused', await call(ctx, 'POST', '/api/tech/threads', { data: {} }), 400, 'bad_request')
+  {
+    const r = await call(ctx, 'POST', '/api/tech/threads', { data: { threads: cores } })
+    eq('server: threads at the core count is all', [r.status, r.body.threads, r.body.threadCount], [200, 'all', cores])
+    const r1 = await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 1 } })
+    eq('server: threads 1', [r1.body.threads, r1.body.multithreading], [cores === 1 ? 'all' : 1, false])
+  }
+  if (cores >= 3) {
+    // A count in between: its own pool in every addon.
+    expectAnswer('server: threads 2', await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 2 } }), 200)
+    eq('Vega: 2 threads', await signUp(VEGA), { status: 'verified', prove: 2, verify: 2 })
+    eq('BBS: 2 threads', await signUp('bbs'), { status: 'verified', prove: 2, verify: 2 })
+    expectAnswer('server: threads 1', await call(ctx, 'POST', '/api/tech/threads', { data: { threads: 1 } }), 200)
+  } else check(`a count in between needs 3 cores or more (this machine has ${cores}); the Rust unit tests cover the pools`, true)
+
+  expectAnswer('server: clear the measurements', await call(ctx, 'POST', '/api/tech/measurements/clear'), 200)
+  o = await overview()
+  eq('no measurements', [o.measurements.runs, o.measurements.rows.length], [0, 0])
   check('the machine is described', cores >= 1 && !!o.measurements.machine.cpu, JSON.stringify(o.measurements.machine))
   eq('Vega: verified on 1 thread, proved on 1', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
   eq('BBS: verified on 1 thread, proved on 1', await signUp('bbs'), { status: 'verified', prove: 1, verify: 1 })
-  expectAnswer('server: a thread switch without a boolean', await call(ctx, 'POST', '/api/tech/threads', { data: { parallel: 'yes' } }), 400, 'bad_request')
 
-  begin('P2', `switched on in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
+  begin('P2', `every core set in /tech: Vega and BBS on ${cores} threads, Longfellow on 1`)
   const tech = await ctxBrowser.newPage()
   await tech.goto('/tech')
   await tech.locator('[data-threads]').waitFor()
-  eq('/tech: off, 1 thread', (await tech.locator('[data-threads-text]').textContent()).trim(), '1 thread')
-  await tech.locator('[data-threads]').check()
+  eq('/tech: 1 thread', await tech.locator('[data-threads]').inputValue(), '1')
+  eq('/tech: the choices run from 1 to every core', (await tech.locator('[data-threads] option').allTextContents()).map((x) => x.trim()), [...Array.from({ length: cores - 1 }, (_, i) => String(i + 1)), `All (${cores})`])
+  await tech.locator('[data-threads]').selectOption('all')
   for (let k = 0; k < 30 && !(await overview()).multithreading; k++) await page.waitForTimeout(100)
-  eq('server: on', (await overview()).multithreading, true)
-  await tech.locator('[data-threads-text]', { hasText: cores === 1 ? '1 thread' : `${cores} threads` }).waitFor()
-  check('/tech: the switch says how many', true)
+  eq('server: every core', [(await overview()).threads, (await overview()).threadCount], ['all', cores])
+  check('/tech: the setting shows every core', (await tech.locator('[data-threads]').inputValue()) === 'all')
   eq(`Vega: ${cores} threads`, await signUp(VEGA), { status: 'verified', prove: cores, verify: cores })
   eq(`BBS: ${cores} threads`, await signUp('bbs'), { status: 'verified', prove: cores, verify: cores })
   await accept(LONGFELLOW_SYSTEM, true)
@@ -2430,7 +2518,7 @@ async function groupP() {
   for (const t of ['Prover', 'Verifier', 'Circuits and keys loaded at start', 'Witness, held into the proof', 'Proving', 'Verifying']) check(`memory breakdown: ${t}`, (await breakdown.getByText(t, { exact: false }).count()) > 0)
   if (o.measurements.file.startsWith('/')) eq('the file has a line per run', readFileSync(o.measurements.file, 'utf8').trim().split('\n').length, 5)
 
-  begin('P4', 'a demo reset switches multithreading off and keeps the measurements; Clear empties them')
+  begin('P4', 'a demo reset sets one thread and keeps the measurements; Clear empties them')
   await resetDemo([])
   o = await overview()
   eq('after a reset: off, measurements kept', [o.multithreading, o.measurements.runs], [false, 5])
@@ -2445,7 +2533,7 @@ async function groupP() {
   await resetDemo(['vega-v1', LONGFELLOW_SYSTEM, BBS_SYSTEM])
   o = await overview()
   eq('Profiling off after a reset', o.profiling, false)
-  expectAnswer('server: a profiling switch without a boolean', await call(ctx, 'POST', '/api/tech/profiling', { data: { on: 'yes' } }), 400, 'bad_request')
+  expectAnswer('server: a profiling switch neither a boolean nor "full"', await call(ctx, 'POST', '/api/tech/profiling', { data: { on: 'yes' } }), 400, 'bad_request')
   eq('Vega without profiling', await signUp(VEGA), { status: 'verified', prove: 1, verify: 1 })
   await tech.reload()
   const vegaRow = tech.locator('[data-measured-row="vega-v1"]')
@@ -2522,6 +2610,16 @@ async function groupP() {
   for (let k = 0; k < 30 && (await overview()).profiling; k++) await page.waitForTimeout(100)
   o = await overview()
   eq('switched off: the profiles stay', [o.profiling, row('vega-v1')?.profiled_runs], [false, 1])
+  const fullSince = new Date().toISOString()
+  eq('server: Profiling full', (await call(ctx, 'POST', '/api/tech/profiling', { data: { on: 'full' } })).body, { ok: true, profiling: 'full' })
+  eq('Longfellow profiled with whole stacks', await signUp(LONGFELLOW), { status: 'verified', prove: 1, verify: 1 })
+  const ex = (await call(ctx, 'GET', `/api/tech/measurements?since=${encodeURIComponent(fullSince)}&profiles=1`)).body
+  const fp = ex.profiles?.find((x) => x.proof_system === LONGFELLOW_SYSTEM)
+  const total = (m) => Object.values(m ?? {}).reduce((t, n) => t + n, 0)
+  check("measurements?profiles=1: the run's profile, whole stacks and samples by thread", ex.records?.length === 1 && !!fp && total(fp.prove.prove?.full) > 0 && total(fp.prove.prove?.full) === total(fp.prove.prove?.threads) && total(fp.verify?.full) === total(fp.verify?.threads), JSON.stringify({ records: ex.records?.length, profiles: ex.profiles?.length }))
+  check('whole stacks start at the thread, named by its pool', Object.keys(fp?.prove.prove?.full ?? {}).some((k) => /^longfellow-\d+-\d+;/.test(k)))
+  await tech.reload()
+  check('/tech: full shows as on', await tech.locator('[data-profiling]').isChecked())
   await tech.locator('[data-profiling]').check()
   for (let k = 0; k < 30 && !(await overview()).profiling; k++) await page.waitForTimeout(100)
   await resetDemo([])
@@ -2701,6 +2799,712 @@ async function groupR() {
   await closeDialog()
 }
 
+/** The birth-date bounds of an age gate on a UTC date (rulebook v0.5: C on or before D minus A
+ *  years, E after D minus (B + 1) years; 29 February clamps), computed here independently. */
+function boundsOn(gate, date) {
+  const [y, m, d] = date.split('-').map(Number)
+  const pad = (n) => String(n).padStart(2, '0')
+  const back = (n) => {
+    const ty = y - n
+    const last = new Date(Date.UTC(ty, m, 0)).getUTCDate()
+    return `${ty}-${pad(m)}-${pad(Math.min(d, last))}`
+  }
+  const next = (iso) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+  return { ...(gate.maxAge != null && { ge: next(back(gate.maxAge + 1)) }), ...(gate.minAge != null && { le: back(gate.minAge) }) }
+}
+
+/** Demo profiles: /tech's dropdown switches the rulebook version (and resets the demo); v0.5 asks
+ *  for age_check as an assertion with a range in years, the BBS presentation carries proof_time,
+ *  and both sides compute the bounds from its date; the mdoc circuits are pending in v0.5. */
+async function groupQ() {
+  let v04Nym = ''
+  const ctx = await client()
+  const setProfile = (id) => call(ctx, 'POST', '/api/tech/demo-profile', { data: { profile: id } })
+  await setProfile('nym-auth-v0.4')
+  await resetDemo(['vega-v1'])
+  await openPage()
+
+  begin('Q1', '/tech: the demo profile, its version and the commit it is based on')
+  let o = await overview()
+  eq('the profiles', o.profiles.map((p) => p.id), ['nym-auth-v0.4', 'nym-auth-v0.5', 'nym-auth-v0.6', 'nym-auth-v0.7'])
+  eq('v0.4 runs', o.profile, 'nym-auth-v0.4')
+  const v04 = o.profiles[0]
+  check('v0.4: a GitHub commit', /^[0-9a-f]{40}$/.test(v04.commit) && v04.commitUrl === `https://github.com/AltmannPeter/readdit-demo/commit/${v04.commit}`, v04.commitUrl)
+  eq('v0.4: version and rulebook', [v04.version, v04.documentUrl], ['0.4', `https://github.com/AltmannPeter/readdit-demo/blob/${v04.commit}/docs/nym_auth_rulebook.md`])
+  eq('v0.4 age_check: a value function from the request', [v04.functions.find((f) => f.id === 'age_check').kind, v04.functions.find((f) => f.id === 'age_check').boundsDate], ['value', 'request'])
+  eq('v0.5 age_check: an assertion from proof_time', [o.profiles[1].functions.find((f) => f.id === 'age_check').kind, o.profiles[1].functions.find((f) => f.id === 'age_check').boundsDate], ['assertion', 'proof_time'])
+  expectAnswer('server: an unknown profile', await setProfile('nym-auth-v9'), 400, 'bad_request')
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  await tech.locator('[data-demo-profile]').waitFor()
+  eq('/tech: the dropdown', await tech.locator('[data-demo-profile]').inputValue(), 'nym-auth-v0.4')
+  check('/tech: version, rulebook and commit', (await tech.locator('[data-profile-version]').textContent()).includes('Rulebook v0.4') && (await tech.locator('[data-profile-commit]').getAttribute('href')) === v04.commitUrl)
+  // An account under v0.4, so the switch's reset shows.
+  {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    const r = await fetchRequest(ctx, s)
+    const p = await present(ctx, r, teen)
+    v04Nym = p.results.nym
+    await respond(ctx, r, vpForm(r, p.presentation))
+    eq('a v0.4 sign-up verifies', (await sessionView(s.id)).status, 'verified')
+    await call(ctx, 'POST', `/api/vp/session/${s.id}/complete`)
+  }
+  check('an account exists', (await accounts()).length > 0)
+
+  begin('Q2', '/tech: switching to v0.5 resets the demo; Vega and Longfellow have their v0.5 circuits')
+  await tech.locator('[data-demo-profile]').selectOption('nym-auth-v0.5')
+  for (let k = 0; k < 30 && (await overview()).profile !== 'nym-auth-v0.5'; k++) await page.waitForTimeout(100)
+  o = await overview()
+  eq('server: v0.5', o.profile, 'nym-auth-v0.5')
+  eq('the demo was reset', (await accounts()).length, 0)
+  eq('the reset accepts what the configuration names (none)', o.acceptedProofSystems, [])
+  await tech.locator('[data-profile-version]', { hasText: 'Rulebook v0.5' }).waitFor()
+  check('/tech: nothing pending; Vega and Longfellow available', (await tech.locator('[data-pending]').count()) === 0 && !(await tech.locator('[data-accept="vega-v1"]').isDisabled()) && !(await tech.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+  const v05 = o.profiles[1]
+  check('/tech: the commit v0.5 is based on', (await tech.locator('[data-profile-commit]').getAttribute('href')) === v05.commitUrl && /^[0-9a-f]{40}$/.test(v05.commit ?? ''), v05.commitUrl)
+  eq('server: Vega can be switched on under v0.5', (await accept('vega-v1', true)).body.acceptedProofSystems, ['vega-v1'])
+  eq('server: BBS too (Vega off again)', [(await accept('vega-v1', false)).status, (await accept(BBS_SYSTEM, true)).body.acceptedProofSystems], [200, [BBS_SYSTEM]])
+  await tech.close()
+  const dev = await ctxBrowser.newPage()
+  await dev.goto('/dev')
+  await dev.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
+  check('/dev: the profile in the header', true)
+  check('/dev: Vega and Longfellow not pending', !(await dev.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && !(await dev.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).textContent()).includes('pending'))
+  await dev.close()
+
+  begin('Q3', 'v0.5 over HTTP: age_check as a range, proof_time in the BBS presentation, bounds from its date')
+  const bbsOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [BBS_SYSTEM], system_id_values: [BBS_SCHEME] } } })
+  let s = await newSession(ctx, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+  let r = await fetchRequest(ctx, s, bbsOnly)
+  eq('the _req: pseudonym, then age_check without return', r.dcql_query.credentials[0]._req, [
+    { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'hashdh-bls12381g1' } },
+    { fn_id: 'age_check', params: { range: '13-17' } },
+  ])
+  let failed = ''
+  try {
+    await presentBbs(ctx, r, teenBbs, '0.4')
+  } catch (e) {
+    failed = e.message
+  }
+  check('read as v0.4, the request is refused', failed.includes('400 unsupported_request'), failed)
+  const p = await presentBbs(ctx, r, teenBbs, '0.5')
+  check('proof_time: UTC, to the second', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(p.proof_time ?? ''), p.proof_time)
+  eq('results: the pseudonym only', Object.keys(p.results), ['nym'])
+  const expected = boundsOn({ minAge: 13, maxAge: 17 }, p.proof_time.slice(0, 10))
+  eq("the prover's bounds", p.statement.age_bounds, expected)
+  await respond(ctx, r, bbsForm(r, p.presentation))
+  let sv = await sessionView(s.id)
+  eq('verified', sv.status, 'verified')
+  const vt = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+  eq("the verifier's bounds, from proof_time", vt?.age_bounds, expected)
+  eq('under v0.5', vt?.profile, 'nym-auth-v0.5')
+  eq('completed: the account, with the age', (await call(ctx, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+  eq('the proven range is the bounds', (await call(ctx, 'GET', '/api/me')).body.account?.birthDateRange, expected)
+  o = await overview()
+  check('Benchmark: the v0.5 run, under v0.5', o.measurements.profile === 'nym-auth-v0.5' && o.measurements.rows.length > 0 && o.measurements.rows.every((x) => x.profile === 'nym-auth-v0.5'), JSON.stringify(o.measurements.rows.map((x) => x.profile)))
+  expectAnswer('c/afterdark: refused by the site from the v0.5 bounds', await call(ctx, 'POST', '/api/vp/session', { data: { purpose: 'age', community: 'afterdark' } }), 403, 'age_refused')
+  {
+    const other = await client()
+    const s2 = await newSession(other, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r2 = await fetchRequest(other, s2, bbsOnly)
+    eq('18+ as a range', r2.dcql_query.credentials[0]._req[1], { fn_id: 'age_check', params: { range: '18+' } })
+    let refused = ''
+    try {
+      await presentBbs(other, r2, teenBbs, '0.5')
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    await other.dispose()
+  }
+
+  begin('Q4', "v0.5 in the browser: the teen's BBS phone at c/teenspace; with BBS only, the mdoc phone has nothing to answer")
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN_BBS)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await openDetails()
+  await guideSays('the date of proof_time')
+  await guideSays('a presentation exists only if the birth date lies within the bounds')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  const st = sv.trace.find((t) => t.step === 'prove')?.data?.statement
+  check('the wallet read the request as v0.5', st?.rulebook === '0.5' && !!st?.age_bounds?.le, JSON.stringify(st))
+  await closeFromPhone()
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await open(await siteButton('Log in'), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Unsupported Request')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+
+  begin('Q6', 'Longfellow under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym, threads')
+  eq('server: Longfellow on, BBS off', [(await accept(LONGFELLOW_SYSTEM, true)).status, (await accept(BBS_SYSTEM, false)).body.acceptedProofSystems], [200, [LONGFELLOW_SYSTEM]])
+  const lfOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V05] } } })
+  o = await overview()
+  const lfInfo = o.services?.lfVerifier?.circuits ?? []
+  check('the verifier lists both circuit sets, each under its own id', lfInfo.some((c) => c.system_id === LONGFELLOW_V05 && c.rulebook === '0.5' && LONGFELLOW_V05.endsWith(c.artifact_sha256)) && lfInfo.some((c) => c.system_id === LONGFELLOW && LONGFELLOW.endsWith(c.artifact_sha256)), JSON.stringify(lfInfo))
+  {
+    const c6 = await client()
+    s = await newSession(c6, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c6, s, lfOnly)
+    eq('the offer: the v0.5 Longfellow circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW_V05])
+    eq('the mdoc _req: pseudonym, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
+      { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } },
+      { fn_id: 'age_check', params: { range: '13-17' } },
+    ])
+    let refused = ''
+    try {
+      await presentV05(c6, r, { ...teen, v05: { ...teen.v05, credential: teen.credential } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 mdoc is refused by the v0.5 circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c6, r, { ...teen, v05: { ...teen.v05, birth_date: '2011-03-15' } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    const lp = await presentV05(c6, r, teen)
+    eq('results: the pseudonym only', Object.keys(lp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 (one seed opens ssc and bsc)', lp.results.nym, v04Nym)
+    await respond(c6, r, vpForm(r, lp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.5, the bsc public inputs', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.5', ['doctype', 'proof_time']])
+    check('the prebuild phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    const today = new Date().toISOString().slice(0, 10)
+    eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
+    eq('under v0.5', lv?.profile, 'nym-auth-v0.5')
+    eq('completed: the account, with the age', (await call(c6, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+    o = await overview()
+    const lfRow = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.5' && JSON.stringify(x).includes(LONGFELLOW_SYSTEM))
+    check('Benchmark: a Longfellow run under v0.5, with its Prebuild (consent) step', !!lfRow && JSON.stringify(lfRow.steps?.prove ?? lfRow).includes('Prebuild (consent)'), JSON.stringify(lfRow?.steps ?? o.measurements.rows.map((x) => x.proof_system)))
+    await c6.dispose()
+    const c7 = await client()
+    const s7 = await newSession(c7, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r7 = await fetchRequest(c7, s7, lfOnly)
+    refused = ''
+    try {
+      await presentV05(c7, r7, teen)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV05(c7, r7, adult)
+    await respond(c7, r7, vpForm(r7, ap.presentation))
+    eq("the adult proves 18+", (await sessionView(s7.id)).status, 'verified')
+    await c7.dispose()
+    // /tech's multithreading switch reaches the v0.5 circuits (nym-auth-zk 0.3.0): every core with
+    // it on, one thread with it off, the same verdict.
+    const cores = (await overview()).measurements.machine.cores
+    const threadsOf = async (parallel) => {
+      expectAnswer(`server: multithreading ${parallel ? 'on' : 'off'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { parallel } }), 200)
+      const c8 = await client()
+      const s8 = await newSession(c8, { purpose: 'signin', intent: 'login' })
+      const r8 = await fetchRequest(c8, s8, lfOnly)
+      const p8 = await presentV05(c8, r8, teen)
+      await respond(c8, r8, vpForm(r8, p8.presentation))
+      const v8 = await sessionView(s8.id)
+      await c8.dispose()
+      const at = (step) => v8.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
+      return { status: v8.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
+    }
+    eq(`multithreading on: Longfellow v0.5 on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    const t6 = await ctxBrowser.newPage()
+    await t6.goto('/tech')
+    await t6.locator('[data-threads]').waitFor()
+    check('/tech: the switch names Longfellow under v0.5', (await t6.locator('label', { has: t6.locator('[data-threads]') }).textContent()).includes('Vega, Longfellow and BBS'))
+    await t6.close()
+    eq('multithreading off: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
+  }
+
+  begin('Q7', "Longfellow under v0.5 in the browser: the teen's phone answers with its v0.5 mdoc")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  check('the phone sent its v0.5 mdoc', sv.trace.find((t) => t.step === 'witness')?.data?.rulebook === '0.5', JSON.stringify(sv.trace.find((t) => t.step === 'witness')?.data?.rulebook))
+  await closeFromPhone()
+  {
+    // /tech after a v0.5 Longfellow presentation (Peter's report: it stayed white, the witness
+    // counts had no inputs).
+    const t7 = await ctxBrowser.newPage()
+    const broken = []
+    t7.on('pageerror', (e) => broken.push(e.message))
+    await t7.goto('/tech')
+    await t7.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t7.getByText(/hash circuit [\d,]+ inputs/).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    check('/tech renders after a v0.5 Longfellow presentation, with the circuits\' input counts', !broken.length && (await t7.getByText(/hash circuit [\d,]+ inputs \(278 public\)/).count()) > 0, broken.join('; '))
+    await t7.close()
+  }
+  await goto('/c/afterdark')
+  await pageShows("You can't enter c/afterdark")
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  await goto('/c/afterdark')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Requirement Not Met')
+  await phone().getByRole('button', { name: 'Close' }).click()
+  await dialogShows('Not completed', 15_000)
+  await closeDialog('escape')
+
+  begin('Q8', 'Vega under v0.5 over HTTP: the bsc circuits, a range, bounds from proof_time, the same pseudonym, refusals')
+  eq('server: Vega on, Longfellow off', [(await accept('vega-v1', true)).status, (await accept(LONGFELLOW_SYSTEM, false)).body.acceptedProofSystems], [200, ['vega-v1']])
+  const vegaOnly = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: ['vega-v1'], system_id_values: [VEGA_V05] } } })
+  o = await overview()
+  const vInfo = o.services?.verifier?.circuits ?? []
+  check('the verifier lists both Vega circuit sets, each under its own id', vInfo.some((c) => c.system_id === VEGA_V05 && c.rulebook === '0.5') && vInfo.some((c) => c.system_id === VEGA && c.rulebook === '0.4'), JSON.stringify(vInfo.map((c) => [c.system_id, c.rulebook])))
+  {
+    const c8 = await client()
+    s = await newSession(c8, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c8, s)
+    eq('the offer under v0.5 with Vega on: the v0.5 Vega circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05])
+    let refused = ''
+    try {
+      await presentV05(c8, r, { ...teen, v05: { ...teen.v05, credential: teen.credential } }, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 mdoc is refused by the v0.5 circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c8, r, { ...teen, v05: { ...teen.v05, birth_date: '2011-03-15' } }, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV05(c8, r, teen, VEGA)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.4 Vega circuits refuse a v0.5 request', refused.includes('unsupported_circuit'), refused)
+    const vp = await presentV05(c8, r, teen, VEGA_V05)
+    eq('prove: the v0.5 Vega circuits', vp.system_id, VEGA_V05)
+    eq('results: the pseudonym only', Object.keys(vp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 and with Longfellow', vp.results.nym, v04Nym)
+    await respond(c8, r, vpForm(r, vp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.5, the bsc public inputs', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name)], ['0.5', ['issuer_key_set', 'age_check.ge', 'age_check.le', 'proof_time', 'session_transcript', 'doctype', 'pseudonym.verifier_input', 'results.nym']])
+    check('the prepare phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const vv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    eq("the verifier's bounds, from proof_time", vv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, new Date().toISOString().slice(0, 10)))
+    eq('completed: logs in to the account Longfellow created in Q6 (one person, one account under either system)', (await call(c8, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'logged_in')
+    o = await overview()
+    const vRow = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.5' && x.proof_system === 'vega-v1')
+    check('Benchmark: a Vega run under v0.5, with its Prebuild (consent) step', !!vRow && JSON.stringify(vRow.steps?.prove ?? vRow).includes('Prebuild (consent)'), JSON.stringify(vRow ?? o.measurements.rows.map((x) => x.proof_system)))
+    const tampers = { ...TAMPER, 'another system_id': (b) => replaceOnce(b, Buffer.from(VEGA_V05), Buffer.from(otherId(VEGA_V05))) }
+    const expected = {
+      'a flipped proof byte': ['proof_invalid', 'proof_encoding'],
+      'a changed results.nym': ['public_input:results.nym'],
+      'a results key that is not the request handle': ['results'],
+      'proof_time changed by one second': ['public_input:proof_time'],
+      'another system_id': ['circuit'],
+    }
+    for (const [what, tamper] of Object.entries(tampers)) {
+      const t = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const rt = await fetchRequest(c8, t, vegaOnly)
+      const pt = await presentV05(c8, rt, teen, VEGA_V05)
+      const changed = tamper(Buffer.from(pt.presentation, 'base64url'), pt).toString('base64url')
+      await respond(c8, rt, vpForm(rt, changed))
+      const v = await sessionView(t.id)
+      const got = rejectedTrace(v)
+      const label = got ? (got.input ? `${got.code}:${got.input}` : got.code) : 'accepted'
+      check(`${what}: refused as ${expected[what].join(' or ')}`, v.status === 'failed' && expected[what].includes(label), `${v.status}, ${label}`)
+    }
+    {
+      const a = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const ra = await fetchRequest(c8, a, vegaOnly)
+      const pa = await presentV05(c8, ra, teen, VEGA_V05)
+      const b = await newSession(c8, { purpose: 'signin', intent: 'signup' })
+      const rb = await fetchRequest(c8, b, vegaOnly)
+      await respond(c8, rb, vpForm(rb, pa.presentation))
+      const got = rejectedTrace(await sessionView(b.id))
+      check("another session's presentation: refused, public_input session_transcript", got?.code === 'public_input' && got?.input === 'session_transcript', got ? `${got.code}:${got.input}` : 'accepted')
+    }
+    await c8.dispose()
+    const c9 = await client()
+    const s9 = await newSession(c9, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r9 = await fetchRequest(c9, s9, vegaOnly)
+    refused = ''
+    try {
+      await presentV05(c9, r9, teen, VEGA_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV05(c9, r9, adult, VEGA_V05)
+    await respond(c9, r9, vpForm(r9, ap.presentation))
+    eq('the adult proves 18+', (await sessionView(s9.id)).status, 'verified')
+    await c9.dispose()
+  }
+
+  begin('Q9', "Vega under v0.5 in the browser: the teen's phone answers with its v0.5 mdoc; /tech renders")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('the phone answered with the v0.5 Vega circuits and its v0.5 mdoc', [sv.circuit?.system_id, sv.trace.find((t) => t.step === 'witness')?.data?.rulebook], [VEGA_V05, '0.5'])
+  await closeFromPhone()
+  {
+    const t9 = await ctxBrowser.newPage()
+    const broken = []
+    t9.on('pageerror', (e) => broken.push(e.message))
+    await t9.goto('/tech')
+    await t9.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t9.waitForTimeout(1000)
+    check('/tech renders after a v0.5 Vega presentation', !broken.length, broken.join('; '))
+    await t9.close()
+  }
+  {
+    // The nym_auth attestation popup on /dev under v0.5: bsc and psc; birth_date held by the wallet.
+    const d9 = await ctxBrowser.newPage()
+    await d9.goto('/dev')
+    await d9.locator('[data-dev-profile]', { hasText: 'nym_auth v0.5' }).waitFor({ timeout: 15_000 })
+    await d9.locator('button.att').click()
+    const att = d9.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.5: the data elements', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['bsc', 'psc'])
+    eq('/dev attestation, v0.5: held by the wallet', await att.locator('[data-att-secret]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-secret'))), ['secret_seed', 'birth_date', 'private_seed'])
+    check('/dev attestation, v0.5: the title and the digestIDs', (await att.locator('h3').textContent()).includes('v0.5') && (await att.textContent()).includes('bsc (digestID 0) and psc (digestID 1)'))
+    await d9.close()
+  }
+  await accept(LONGFELLOW_SYSTEM, true)
+  eq('both circuits on: the offer, Vega first', (await fetchRequest(ctx, await newSession(ctx, { purpose: 'signin', intent: 'login' }))).client_metadata.vp_formats_supported.zkp_req.system_id_values, [VEGA_V05, LONGFELLOW_V05])
+
+  begin('Q10', 'v0.6 over HTTP: Longfellow on the decoy circuits; Vega and BBS pending; a range, bounds from proof_time, the same pseudonym, threads')
+  eq('server: v0.6', (await setProfile('nym-auth-v0.6')).body.profile, 'nym-auth-v0.6')
+  o = await overview()
+  eq('the demo was reset', (await accounts()).length, 0)
+  const v06 = o.profiles.find((x) => x.id === 'nym-auth-v0.6')
+  eq('v0.6: version, rulebook, the commit it is based on', [v06?.version, v06?.commit, v06?.documentUrl?.endsWith('/docs/nym_auth_rulebook-v0.6.md')], ['0.6', '16bfeb8efb422ce789a13da24bbea0bc7438cf52', true])
+  expectAnswer('server: Vega is pending under v0.6', await accept('vega-v1', true), 409, 'pending_system')
+  expectAnswer('server: BBS is pending under v0.6', await accept(BBS_SYSTEM, true), 409, 'pending_system')
+  eq('server: Longfellow can be switched on', (await accept(LONGFELLOW_SYSTEM, true)).body.acceptedProofSystems, [LONGFELLOW_SYSTEM])
+  {
+    const t10 = await ctxBrowser.newPage()
+    await t10.goto('/tech')
+    await t10.locator('[data-profile-version]', { hasText: 'Rulebook v0.6' }).waitFor({ timeout: 15_000 })
+    check('/tech: Vega and BBS pending, Longfellow available', (await t10.locator('[data-accept="vega-v1"]').isDisabled()) && (await t10.locator(`[data-accept="${BBS_SYSTEM}"]`).isDisabled()) && !(await t10.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+    check('/tech: the switch names Longfellow under v0.6', (await t10.locator('label', { has: t10.locator('[data-threads]') }).textContent()).includes('Vega, Longfellow and BBS'))
+    await t10.close()
+  }
+  o = await overview()
+  const lf6Info = o.services?.lfVerifier?.circuits ?? []
+  check('the verifier lists the decoy circuits under 0.6, beside the other two sets', lf6Info.some((c) => c.system_id === LONGFELLOW_V06 && c.rulebook === '0.6' && LONGFELLOW_V06.endsWith(c.artifact_sha256)) && lf6Info.some((c) => c.system_id === LONGFELLOW_V05 && c.rulebook === '0.5'), JSON.stringify(lf6Info.map((c) => [c.system_id, c.rulebook])))
+  const lf6Only = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V06] } } })
+  {
+    const c10 = await client()
+    s = await newSession(c10, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c10, s, lf6Only)
+    eq('the offer: the decoy circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW_V06])
+    eq('the mdoc _req: as v0.5, pseudonym, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
+      { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'sha-256' } },
+      { fn_id: 'age_check', params: { range: '13-17' } },
+    ])
+    let refused = ''
+    try {
+      await presentV06(c10, r, { ...teen, v06: { ...teen.v06, credential: teen.v05.credential } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('the v0.5 (compact) mdoc is refused by the decoy circuits', refused.includes('bad_credential'), refused)
+    refused = ''
+    try {
+      await presentV06(c10, r, teen, LONGFELLOW_V05)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the bsc circuits under 0.6 are refused', refused.includes('unsupported_circuit'), refused)
+    refused = ''
+    try {
+      await presentV06(c10, r, { ...teen, v06: { ...teen.v06, birth_date: '2011-03-15' } })
+    } catch (e) {
+      refused = e.message
+    }
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    const lp = await presentV06(c10, r, teen)
+    eq('results: the pseudonym only', Object.keys(lp.results), ['nym'])
+    eq('the same pseudonym as under v0.4 and v0.5 (one seed)', lp.results.nym, v04Nym)
+    const bytes6 = Buffer.from(lp.presentation, 'base64url').length
+    check('the presentation is about 289 kB (v0.5: about 322 kB)', bytes6 > 280_000 && bytes6 < 300_000, `${bytes6} B`)
+    await respond(c10, r, vpForm(r, lp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.6, the decoy public inputs (no doctype)', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.6', ['proof_time', 'pseudonym.verifier_input']])
+    check('the prebuild phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    const today = new Date().toISOString().slice(0, 10)
+    eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
+    eq('under v0.6', lv?.profile, 'nym-auth-v0.6')
+    eq('completed: the account, with the age', (await call(c10, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+    o = await overview()
+    const lf6Row = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.6' && JSON.stringify(x).includes(LONGFELLOW_SYSTEM))
+    check('Benchmark: a Longfellow run under v0.6, with its Prebuild (consent) step', !!lf6Row && JSON.stringify(lf6Row.steps?.prove ?? lf6Row).includes('Prebuild (consent)'), JSON.stringify(lf6Row?.steps ?? o.measurements.rows.map((x) => x.proof_system)))
+    await c10.dispose()
+    const c11 = await client()
+    const s11 = await newSession(c11, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r11 = await fetchRequest(c11, s11, lf6Only)
+    refused = ''
+    try {
+      await presentV06(c11, r11, teen)
+    } catch (e) {
+      refused = e.message
+    }
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV06(c11, r11, adult)
+    await respond(c11, r11, vpForm(r11, ap.presentation))
+    eq('the adult proves 18+', (await sessionView(s11.id)).status, 'verified')
+    await c11.dispose()
+    // /tech's thread setting reaches the decoy circuits, as the bsc ones (Q6, which sets it the old
+    // way, { parallel }).
+    const cores = (await overview()).measurements.machine.cores
+    const threadsOf = async (parallel) => {
+      expectAnswer(`server: threads ${parallel ? 'all' : '1'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { threads: parallel ? 'all' : 1 } }), 200)
+      const c12 = await client()
+      const s12 = await newSession(c12, { purpose: 'signin', intent: 'login' })
+      const r12 = await fetchRequest(c12, s12, lf6Only)
+      const p12 = await presentV06(c12, r12, teen)
+      await respond(c12, r12, vpForm(r12, p12.presentation))
+      const v12 = await sessionView(s12.id)
+      await c12.dispose()
+      const at = (step) => v12.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
+      return { status: v12.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
+    }
+    eq(`all: the decoy circuits on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    eq('1: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
+  }
+
+  begin('Q11', "v0.6 in the browser: the teen's phone answers with its v0.6 mdoc; /dev shows the decoy circuits and the v0.6 attestation")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('the phone answered with the decoy circuits and its v0.6 mdoc', [sv.circuit?.system_id, sv.trace.find((t) => t.step === 'witness')?.data?.rulebook], [LONGFELLOW_V06, '0.6'])
+  await closeFromPhone()
+  {
+    const t11 = await ctxBrowser.newPage()
+    const broken = []
+    t11.on('pageerror', (e) => broken.push(e.message))
+    await t11.goto('/tech')
+    await t11.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t11.getByText(/hash circuit [\d,]+ inputs/).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    check("/tech renders after a v0.6 presentation, with the decoy circuits' input counts", !broken.length && (await t11.getByText(/hash circuit [\d,]+ inputs \(269 public\)/).count()) > 0, broken.join('; '))
+    await t11.close()
+  }
+  {
+    const d11 = await ctxBrowser.newPage()
+    await d11.goto('/dev')
+    await d11.locator('[data-dev-profile]', { hasText: 'nym_auth v0.6' }).waitFor({ timeout: 15_000 })
+    check('/dev: Vega and BBS pending under v0.6', (await d11.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await d11.locator(`[data-accept="${BBS_SYSTEM}"]`).textContent()).includes('pending'))
+    const latest11 = (await call(d11.request, 'GET', '/api/dev/latest')).body
+    eq('/dev: the newest session presented with the decoy circuits', latest11.session?.response?.presentation?.decoded?.system_id, LONGFELLOW_V06)
+    await d11.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
+    await d11.keyboard.press('i')
+    await d11.getByRole('tab', { name: /Response/ }).click()
+    await d11.getByText(LONGFELLOW_V06).first().waitFor({ timeout: 10_000 }).catch(() => {})
+    check('/dev: the inspector shows the decoy system_id', (await d11.getByText(LONGFELLOW_V06).count()) > 0)
+    await d11.locator('button.att').click()
+    const att = d11.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.6: bsc and psc', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['bsc', 'psc'])
+    eq('/dev attestation, v0.6: held by the wallet', await att.locator('[data-att-secret]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-secret'))), ['secret_seed', 'birth_date', 'private_seed'])
+    const text = await att.textContent()
+    check('/dev attestation, v0.6: the title, and the MSO contains no claims', (await att.locator('h3').textContent()).includes('v0.6') && text.includes('The MSO contains no claims') && text.includes('bsc (digestID 0) and psc (digestID 1) themselves'))
+    await att.getByRole('button', { name: 'Show full structure' }).click()
+    const raw = await att.locator('.raw').textContent()
+    check('/dev attestation, v0.6: issuerAuth only, no nameSpaces; bsc and psc in valueDigests', !raw.includes('nameSpaces') && raw.includes('issuerAuth') && raw.includes('valueDigests') && raw.includes('(bsc)') && raw.includes('(psc)'), raw.slice(0, 300))
+    await d11.close()
+  }
+
+  begin('Q12', 'v0.7 over HTTP: Longfellow on the AES circuits; Vega and BBS pending; prf aes-128, a range, bounds from proof_time, another pseudonym, threads')
+  eq('server: v0.7', (await setProfile('nym-auth-v0.7')).body.profile, 'nym-auth-v0.7')
+  o = await overview()
+  eq('the demo was reset', (await accounts()).length, 0)
+  const v07 = o.profiles.find((x) => x.id === 'nym-auth-v0.7')
+  eq('v0.7: version, rulebook', [v07?.version, v07?.documentUrl?.endsWith('/docs/nym_auth_rulebook-v0.7.md')], ['0.7', true])
+  expectAnswer('server: Vega is pending under v0.7', await accept('vega-v1', true), 409, 'pending_system')
+  expectAnswer('server: BBS is pending under v0.7', await accept(BBS_SYSTEM, true), 409, 'pending_system')
+  eq('server: Longfellow can be switched on', (await accept(LONGFELLOW_SYSTEM, true)).body.acceptedProofSystems, [LONGFELLOW_SYSTEM])
+  {
+    const t12 = await ctxBrowser.newPage()
+    await t12.goto('/tech')
+    await t12.locator('[data-profile-version]', { hasText: 'Rulebook v0.7' }).waitFor({ timeout: 15_000 })
+    check('/tech: Vega and BBS pending, Longfellow available', (await t12.locator('[data-accept="vega-v1"]').isDisabled()) && (await t12.locator(`[data-accept="${BBS_SYSTEM}"]`).isDisabled()) && !(await t12.locator(`[data-accept="${LONGFELLOW_SYSTEM}"]`).isDisabled()))
+    await t12.close()
+  }
+  o = await overview()
+  const lf7Info = o.services?.lfVerifier?.circuits ?? []
+  check('the verifier lists the v0.7 circuits under 0.7, beside the other three sets', lf7Info.some((c) => c.system_id === LONGFELLOW_V07 && c.rulebook === '0.7' && LONGFELLOW_V07.endsWith(c.artifact_sha256)) && lf7Info.some((c) => c.system_id === LONGFELLOW_V06 && c.rulebook === '0.6') && lf7Info.some((c) => c.system_id === LONGFELLOW_V05 && c.rulebook === '0.5'), JSON.stringify(lf7Info.map((c) => [c.system_id, c.rulebook])))
+  const lf7Only = JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW_V07] } } })
+  {
+    const c12 = await client()
+    s = await newSession(c12, { purpose: 'signin', intent: 'signup', community: 'teenspace' })
+    r = await fetchRequest(c12, s, lf7Only)
+    eq('the offer: the v0.7 circuits only', r.client_metadata.vp_formats_supported.zkp_req.system_id_values, [LONGFELLOW_V07])
+    eq('the mdoc _req: pseudonym with prf aes-128, then age_check as a range', queryOf(r, 'mso_mdoc')._req, [
+      { fn_id: 'pseudonym', return: 'nym', params: { config: 'known-offender-matching-ssc', ver: 1, prf: 'aes-128' } },
+      { fn_id: 'age_check', params: { range: '13-17' } },
+    ])
+    const refusedBy = async (f) => {
+      try {
+        await f()
+        return ''
+      } catch (e) {
+        return e.message
+      }
+    }
+    let refused = await refusedBy(() => presentV07(c12, r, { ...teen, v07: { ...teen.v07, credential: teen.v06.credential } }))
+    check('the v0.6 (decoy) mdoc is refused by the v0.7 circuits', refused.includes('bad_credential'), refused)
+    refused = await refusedBy(() => presentV07(c12, r, teen, LONGFELLOW_V06))
+    check('the decoy circuits under 0.7 are refused', refused.includes('unsupported_circuit'), refused)
+    refused = await refusedBy(() => presentV07(c12, r, teen, LONGFELLOW_V07, '0.6'))
+    check('the v0.7 circuits under 0.6 are refused', refused.includes('unsupported_circuit'), refused)
+    refused = await refusedBy(() => presentV07(c12, r, { ...teen, v07: { ...teen.v07, birth_date: '2011-03-15' } }))
+    check('a birth date that does not open bsc is refused', refused.includes('bad_credential'), refused)
+    const lp = await presentV07(c12, r, teen)
+    eq('results: the pseudonym only', Object.keys(lp.results), ['nym'])
+    const aesNym = await derivePseudonymAes128({ config: 'known-offender-matching-ssc', seed: Buffer.from(teen.secret_seed, 'hex'), verifierId: r.client_id })
+    eq('the aes-128 pseudonym, as the site computes it', lp.results.nym, aesNym)
+    check('another pseudonym than under v0.4 to v0.6 (another PRF)', lp.results.nym !== v04Nym, `${lp.results.nym} vs ${v04Nym}`)
+    const bytes7 = Buffer.from(lp.presentation, 'base64url').length
+    check('the presentation is about 273 kB (v0.6: about 289 kB)', bytes7 > 265_000 && bytes7 < 282_000, `${bytes7} B`)
+    await respond(c12, r, vpForm(r, lp.presentation))
+    sv = await sessionView(s.id)
+    eq('verified', sv.status, 'verified')
+    const wt = sv.trace.find((t) => t.step === 'witness')?.data
+    eq('the witness: v0.7, H as a public input', [wt?.rulebook, wt?.public_inputs?.map((x) => x.name).slice(0, 2)], ['0.7', ['proof_time', 'pseudonym.nym_block']])
+    check('the prebuild phase is measured apart', typeof wt?.metrics?.prebuild_ms === 'number' && wt.metrics.prebuild_ms <= wt.metrics.witness_ms, JSON.stringify(wt?.metrics))
+    const lv = sv.trace.filter((t) => t.step === 'verify' && t.label === 'Proof verified').at(-1)?.data
+    const today = new Date().toISOString().slice(0, 10)
+    eq("the verifier's bounds, from proof_time", lv?.age_bounds, boundsOn({ minAge: 13, maxAge: 17 }, today))
+    eq('under v0.7', lv?.profile, 'nym-auth-v0.7')
+    eq('completed: the account, with the age', (await call(c12, 'POST', `/api/vp/session/${s.id}/complete`)).body.kind, 'created')
+    o = await overview()
+    const lf7Row = o.measurements.rows.find((x) => x.profile === 'nym-auth-v0.7' && JSON.stringify(x).includes(LONGFELLOW_SYSTEM))
+    check('Benchmark: a Longfellow run under v0.7, with its Prebuild (consent) step', !!lf7Row && JSON.stringify(lf7Row.steps?.prove ?? lf7Row).includes('Prebuild (consent)'), JSON.stringify(lf7Row?.steps ?? o.measurements.rows.map((x) => x.proof_system)))
+    await c12.dispose()
+    const c13 = await client()
+    const s13 = await newSession(c13, { purpose: 'signin', intent: 'signup', community: 'afterdark' })
+    const r13 = await fetchRequest(c13, s13, lf7Only)
+    refused = await refusedBy(() => presentV07(c13, r13, teen))
+    check('the teen cannot prove 18+', refused.includes('422 unsatisfiable'), refused)
+    const ap = await presentV07(c13, r13, adult)
+    await respond(c13, r13, vpForm(r13, ap.presentation))
+    eq('the adult proves 18+', (await sessionView(s13.id)).status, 'verified')
+    await c13.dispose()
+    // /tech's thread setting reaches the v0.7 circuits, as the decoy ones (Q10).
+    const cores = (await overview()).measurements.machine.cores
+    const threadsOf = async (parallel) => {
+      expectAnswer(`server: threads ${parallel ? 'all' : '1'}`, await call(ctx, 'POST', '/api/tech/threads', { data: { threads: parallel ? 'all' : 1 } }), 200)
+      const c14 = await client()
+      const s14 = await newSession(c14, { purpose: 'signin', intent: 'login' })
+      const r14 = await fetchRequest(c14, s14, lf7Only)
+      const p14 = await presentV07(c14, r14, teen)
+      await respond(c14, r14, vpForm(r14, p14.presentation))
+      const v14 = await sessionView(s14.id)
+      await c14.dispose()
+      const at = (step) => v14.trace.filter((t) => t.step === step && t.data?.metrics).at(-1)?.data?.metrics?.threads
+      return { status: v14.status, witness: at('witness'), prove: at('prove'), verify: at('verify') }
+    }
+    eq(`all: the v0.7 circuits on ${cores} threads`, await threadsOf(true), { status: 'verified', witness: cores, prove: cores, verify: cores })
+    eq('1: one thread', await threadsOf(false), { status: 'verified', witness: 1, prove: 1, verify: 1 })
+  }
+
+  begin('Q13', "v0.7 in the browser: the teen's phone answers with its v0.7 mdoc; /dev shows the v0.7 circuits and the v0.7 attestation")
+  await page.context().clearCookies()
+  await goto('/c/teenspace')
+  await open(page.getByRole('button', { name: 'Verify age with wallet' }), TEEN)
+  await scan()
+  await readRequest()
+  await phoneShows('Age proof: 13–17')
+  await phone().getByRole('button', { name: 'Share' }).click()
+  await enterPin(anyPin())
+  await dialogShows('Age verified', 30_000)
+  sv = await sessionView(lastSession())
+  eq('the phone answered with the v0.7 circuits and its v0.7 mdoc', [sv.circuit?.system_id, sv.trace.find((t) => t.step === 'witness')?.data?.rulebook], [LONGFELLOW_V07, '0.7'])
+  await closeFromPhone()
+  {
+    const t13 = await ctxBrowser.newPage()
+    const broken = []
+    t13.on('pageerror', (e) => broken.push(e.message))
+    await t13.goto('/tech')
+    await t13.locator('[data-demo-profile]').waitFor({ timeout: 15_000 })
+    await t13.getByText(/hash circuit [\d,]+ inputs/).first().waitFor({ timeout: 15_000 }).catch(() => {})
+    check("/tech renders after a v0.7 presentation, with the v0.7 circuits' input counts", !broken.length && (await t13.getByText(/hash circuit [\d,]+ inputs \(267 public\)/).count()) > 0, broken.join('; '))
+    await t13.close()
+  }
+  {
+    const d13 = await ctxBrowser.newPage()
+    await d13.goto('/dev')
+    await d13.locator('[data-dev-profile]', { hasText: 'nym_auth v0.7' }).waitFor({ timeout: 15_000 })
+    check('/dev: Vega and BBS pending under v0.7', (await d13.locator('[data-accept="vega-v1"]').textContent()).includes('pending') && (await d13.locator(`[data-accept="${BBS_SYSTEM}"]`).textContent()).includes('pending'))
+    const latest13 = (await call(d13.request, 'GET', '/api/dev/latest')).body
+    eq('/dev: the newest session presented with the v0.7 circuits', latest13.session?.response?.presentation?.decoded?.system_id, LONGFELLOW_V07)
+    await d13.waitForFunction(() => !!document.querySelector('#__nuxt')?.__vue_app__, null, { timeout: 60_000 })
+    await d13.keyboard.press('i')
+    await d13.getByRole('tab', { name: /Response/ }).click()
+    await d13.getByText(LONGFELLOW_V07).first().waitFor({ timeout: 10_000 }).catch(() => {})
+    check('/dev: the inspector shows the v0.7 system_id', (await d13.getByText(LONGFELLOW_V07).count()) > 0)
+    await d13.locator('button.att').click()
+    const att = d13.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.7: bsc and psc', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['bsc', 'psc'])
+    eq('/dev attestation, v0.7: held by the wallet', await att.locator('[data-att-secret]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-secret'))), ['secret_seed', 'birth_date', 'private_seed'])
+    const text = await att.textContent()
+    check('/dev attestation, v0.7: the title, the MSO with no claims, AES commitments, the compressed key', (await att.locator('h3').textContent()).includes('v0.7') && text.includes('The MSO contains no claims') && text.includes('eu.nym_auth.v1') && text.includes('AES-128') && text.includes('compressed'))
+    await att.getByRole('button', { name: 'Show full structure' }).click()
+    const raw = await att.locator('.raw').textContent()
+    check('/dev attestation, v0.7: issuerAuth only; valueDigests under eu.nym_auth.v1; x and the sign of y', !raw.includes('nameSpaces') && raw.includes('issuerAuth') && raw.includes('eu.nym_auth.v1') && raw.includes('(bsc)') && raw.includes('-3 (sign of y)'), raw.slice(0, 300))
+    await d13.close()
+  }
+
+  begin('Q5', 'back to v0.4: reset, Vega available again')
+  eq('server: v0.4', (await setProfile('nym-auth-v0.4')).body.profile, 'nym-auth-v0.4')
+  eq('the demo was reset', (await accounts()).length, 0)
+  eq('Vega can be switched on', (await accept('vega-v1', true)).body.acceptedProofSystems, ['vega-v1'])
+  await ctx.dispose()
+}
+
 /** The developer view (/dev): the same requests from the sequence-diagram page, with the phone in
  *  the QR popup. The teen asks for 18+ first, which the wallet cannot prove, then 13–17. */
 async function groupV() {
@@ -2751,6 +3555,17 @@ async function groupV() {
   check('no proof system switch here', !(await dev().locator('input[type=checkbox]').count()))
   check('an empty diagram', await dev().getByText('Choose an age proof and press Request').isVisible())
 
+  {
+    // The nym_auth attestation popup, under the v0.4 profile: birth_date, ssc and psc.
+    await dev().locator('button.att').click()
+    const att = page.locator('[data-attestation]')
+    await att.waitFor()
+    eq('/dev attestation, v0.4: the data elements', await att.locator('[data-att-row]').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-att-row'))), ['birth_date', 'ssc', 'psc'])
+    check('/dev attestation, v0.4: the title', (await att.locator('h3').textContent()).includes('v0.4'))
+    await page.keyboard.press('Escape')
+    await att.waitFor({ state: 'detached' })
+  }
+
   begin('V2', "18+ on the teen's phone: Requirement Not Met, access_denied, encrypted; nothing applied")
   let m = mark()
   await dev().getByRole('radio', { name: '18+' }).click()
@@ -2770,13 +3585,13 @@ async function groupV() {
   eq("the teen's phone beside the code", (await devPhone().locator('[data-phone-label]').textContent()).trim(), TEEN)
   await devPhone().getByText('Requirement Not Met').waitFor({ timeout: 20_000 })
   l = await latest()
-  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.jwt', l.session.responseKey.kid])
+  eq('the request asks for an encrypted response', [l.session.request?.response_mode, l.session.request?.client_metadata?.jwks?.keys?.[0]?.kid], ['direct_post.cwt', l.session.responseKey.kid])
   await devPhone().getByRole('button', { name: 'Close' }).click()
   await until('the session ends declined', (x) => x.session?.outcome?.reason === 'denied')
   // The page logs the response_uri call when its answer arrives, which can be after the server ended the session.
-  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.encrypted && e.sent === 'error=access_denied')
+  const encryptedDenial = () => since(m).some((e) => e.path === '/api/vp/response/:id' && e.mode === 'direct_post.cwt' && e.sent === 'error=access_denied')
   for (let k = 0; k < 30 && !encryptedDenial(); k++) await page.waitForTimeout(100)
-  check('the answer was encrypted (response=JWE)', encryptedDenial())
+  check('the answer was encrypted (application/cwt)', encryptedDenial())
   await dev().locator('.rows li', { hasText: 'Not completed: access_denied' }).waitFor()
   const r2 = await rows()
   for (const t of ['Create presentation request', 'Build DCQL query (zkp_req)', 'Make response encryption key', 'Fetch request + wallet_metadata', 'Authenticate verifier', 'Attestation does not meet the age range', 'Encrypt response', 'Send error response', 'Decrypt response']) {
@@ -2839,6 +3654,105 @@ async function groupV() {
   check('empty after R', await dev().getByText('Choose an age proof and press Request').isVisible())
 }
 
+/** The Response Mode (zkp_req.md §6.2): direct_post.cwt by default, direct_post.jwt by /tech's switch. */
+async function groupX() {
+  await resetDemo()
+  const ctx = await client()
+  const decryptTrace = async (id) => (await sessionView(id)).trace.find((t) => t.step === 'decrypt')?.data
+  const fresh = async (metadata) => {
+    const s = await newSession(ctx, { purpose: 'signin', intent: 'signup' })
+    return { s, r: await fetchRequest(ctx, s, metadata) }
+  }
+
+  begin('X1', 'direct_post.cwt by default: CBOR in a COSE_Encrypt, the presentation as its CBOR bytes')
+  eq('server: direct_post.cwt after a reset', (await overview()).responseMode, 'direct_post.cwt')
+  let { s, r } = await fresh()
+  eq('the request asks for direct_post.cwt', r.response_mode, 'direct_post.cwt')
+  const p = await present(ctx, r, teen)
+  const presBytes = Buffer.from(p.presentation, 'base64url').length
+  const cwt = await encrypted(r, vpForm(r, p.presentation))
+  const jwe = (await encryptJwt(r, vpForm(r, p.presentation))).form.response.length
+  check('the COSE_Encrypt is the presentation plus under 300 bytes', cwt.data.length - presBytes < 300, `presentation ${presBytes} B, COSE_Encrypt ${cwt.data.length} B, JWE ${jwe} B`)
+  expectAnswer('response_uri: the COSE_Encrypt', await call(ctx, 'POST', r.response_uri, cwt), 200)
+  eq('verified', (await sessionView(s.id)).status, 'verified')
+  let d = await decryptTrace(s.id)
+  eq('the trace: mode, algorithms, bytes', [d?.mode, d?.header?.alg, d?.header?.enc, d?.bytes], ['direct_post.cwt', 'ECDH-ES+HKDF-256', 'A128GCM', cwt.data.length])
+  ;({ s, r } = await fresh())
+  const p2 = await present(ctx, r, teen)
+  expectAnswer('response_uri: a COSE_Encrypt with A256GCM', await call(ctx, 'POST', r.response_uri, await encryptCwtBody(r, vpForm(r, p2.presentation), r, COSE_A256GCM)), 200)
+  d = await decryptTrace(s.id)
+  eq('verified, A256GCM in the trace', [(await sessionView(s.id)).status, d?.header?.enc], ['verified', 'A256GCM'])
+  ;({ s, r } = await fresh())
+  expectAnswer('response_uri: an error response in a COSE_Encrypt', await respond(ctx, r, { state: r.state, error: 'access_denied' }), 200)
+  eq('it ends the session as declined', (await sessionView(s.id)).outcome?.reason, 'denied')
+
+  begin('X2', 'Longfellow v0.4: the sizes on the wire')
+  await accept(LONGFELLOW_SYSTEM, true)
+  ;({ s, r } = await fresh(JSON.stringify({ vp_formats_supported: { zkp_req: { proof_system_values: [LONGFELLOW_SYSTEM], system_id_values: [LONGFELLOW] } } })))
+  const lf = await present(ctx, r, teen, LONGFELLOW)
+  const lfBytes = Buffer.from(lf.presentation, 'base64url').length
+  const lfCwt = await encrypted(r, vpForm(r, lf.presentation))
+  const lfJwe = (await encryptJwt(r, vpForm(r, lf.presentation))).form.response.length
+  check('the COSE_Encrypt is under 60 % of the JWE', lfCwt.data.length < 0.6 * lfJwe, `presentation ${lfBytes} B, COSE_Encrypt ${lfCwt.data.length} B, JWE ${lfJwe} B (form-encoded ${lfJwe + 'response='.length} B)`)
+  expectAnswer('response_uri: the COSE_Encrypt', await call(ctx, 'POST', r.response_uri, lfCwt), 200)
+  d = await decryptTrace(s.id)
+  eq('verified', (await sessionView(s.id)).status, 'verified')
+  check('decrypted in the trace', d?.mode === 'direct_post.cwt' && typeof d?.decrypt_ms === 'number', `${d?.decrypt_ms} ms`)
+  await accept(LONGFELLOW_SYSTEM, false)
+
+  begin('X3', "/tech's switch: direct_post.jwt; each request keeps the mode it asked for")
+  expectAnswer('server: an unknown mode', await call(ctx, 'POST', '/api/tech/response-mode', { data: { mode: 'direct_post' } }), 400, 'bad_request')
+  expectAnswer('server: no mode', await call(ctx, 'POST', '/api/tech/response-mode', { data: {} }), 400, 'bad_request')
+  const before = await fresh()
+  expectAnswer('server: direct_post.jwt', await call(ctx, 'POST', '/api/tech/response-mode', { data: { mode: 'direct_post.jwt' } }), 200)
+  eq('server: switched', (await overview()).responseMode, 'direct_post.jwt')
+  ;({ s, r } = await fresh())
+  eq('a new request asks for direct_post.jwt', r.response_mode, 'direct_post.jwt')
+  const p3 = await present(ctx, r, teen)
+  expectAnswer('response_uri: a COSE_Encrypt to a request that asked for direct_post.jwt', await call(ctx, 'POST', r.response_uri, await encrypted(r, vpForm(r, p3.presentation), { mode: 'direct_post.cwt' })), 400, 'response_mode')
+  eq('the session still waits for its answer', (await poll(ctx, s.id)).body.status, 'scanned')
+  check('the trace names the refusal', (await sessionView(s.id)).trace.some((t) => t.step === 'refused' && t.data?.code === 'response_mode' && t.data?.asked === 'direct_post.jwt'))
+  check('the server log names it', !SERVER_LOG || serverLog().includes(`[vp] ${s.id}: refused a direct_post.cwt response to a direct_post.jwt request`))
+  expectAnswer('response_uri: the JWE', await respond(ctx, r, vpForm(r, p3.presentation)), 200)
+  d = await decryptTrace(s.id)
+  eq('verified, direct_post.jwt in the trace', [(await sessionView(s.id)).status, d?.mode, d?.header?.alg], ['verified', 'direct_post.jwt', 'ECDH-ES'])
+  eq('a request fetched before the switch still asks for direct_post.cwt', before.r.response_mode, 'direct_post.cwt')
+  const p4 = await present(ctx, before.r, teen)
+  expectAnswer('response_uri: its COSE_Encrypt', await respond(ctx, before.r, vpForm(before.r, p4.presentation)), 200)
+  eq('verified', (await sessionView(before.s.id)).status, 'verified')
+  await call(ctx, 'POST', '/api/demo/reset')
+  eq('a demo reset restores direct_post.cwt', (await overview()).responseMode, 'direct_post.cwt')
+  await ctx.dispose()
+
+  begin('X4', '/tech in the browser: the switch; the phone answers in the mode the request asks for')
+  await resetDemo()
+  await openPage()
+  const tech = await ctxBrowser.newPage()
+  await tech.goto('/tech')
+  const select = tech.locator('[data-response-mode]')
+  await select.waitFor()
+  eq('/tech: CWT selected', await select.inputValue(), 'direct_post.cwt')
+  await select.selectOption('direct_post.jwt')
+  for (let k = 0; k < 30 && (await overview()).responseMode !== 'direct_post.jwt'; k++) await page.waitForTimeout(100)
+  eq('server: direct_post.jwt', (await overview()).responseMode, 'direct_post.jwt')
+  let m = mark()
+  await signIn('Sign up', 'Account created: u/')
+  check('the phone posted a JWE', since(m).some((e) => e.path === '/api/vp/response/:id' && e.status === 200 && e.mode === 'direct_post.jwt'))
+  await select.selectOption('direct_post.cwt')
+  for (let k = 0; k < 30 && (await overview()).responseMode !== 'direct_post.cwt'; k++) await page.waitForTimeout(100)
+  eq('server: direct_post.cwt', (await overview()).responseMode, 'direct_post.cwt')
+  await page.locator('header [data-user-menu]').click()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await waitLoggedOut()
+  m = mark()
+  await signIn('Log in', 'Logged in as u/')
+  check('the phone posted application/cwt', since(m).some((e) => e.path === '/api/vp/response/:id' && e.status === 200 && e.mode === 'direct_post.cwt'))
+  await tech.reload()
+  await select.waitFor()
+  eq('/tech: CWT selected', await select.inputValue(), 'direct_post.cwt')
+  await tech.close()
+}
+
 // ---------------------------------------------------------------------------------------------
 
 let crashed = null
@@ -2846,9 +3760,9 @@ try {
   if (STARTUP) await startupWithoutAddon()
   const ttl = await preconditions()
   if (ONLY) {
-    const groups = { E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, P: groupP, R: groupR, V: groupV, G: groupG }
+    const groups = { X: groupX, E: groupE, F: groupF, H: groupH, I: groupI, J: groupJ, K: groupK, L: groupL, M: groupM, N: groupN, Q: groupQ, P: groupP, R: groupR, V: groupV, G: groupG }
     // In the full run's order: G reads the sessions the groups before it leave.
-    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'P', 'R', 'V', 'K', 'G']
+    const ORDER = ['E', 'F', 'H', 'I', 'J', 'M', 'L', 'N', 'Q', 'P', 'R', 'V', 'X', 'K', 'G']
     for (const g of ORDER.filter((g) => ONLY.includes(g))) await groups[g]()
     throw Object.assign(new Error('only'), { only: true })
   }
@@ -2864,9 +3778,11 @@ try {
   await groupM()
   await groupL()
   await groupN()
+  await groupQ()
   await groupP()
   await groupR()
   await groupV()
+  await groupX()
   await groupK()
   await groupG()
 } catch (e) {

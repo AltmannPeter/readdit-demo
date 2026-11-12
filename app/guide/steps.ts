@@ -127,8 +127,11 @@ function ageSection(c: ConsentView, site: string): GuideSection | null {
     heading: 'Age check',
     rows: [
       { label: 'Requested', value: c.age.text },
-      { label: 'Bounds', value: c.age.range },
-      { label: `${site} receives`, value: 'true, if the birth date lies within the bounds' },
+      { label: 'Bounds', value: c.age.boundsDate === 'proof_time' ? `${c.age.range}, computed from the age range and today's UTC date (the date of proof_time)` : c.age.range },
+      // v0.4: a value function (true under its handle); v0.5: an assertion, with no output.
+      c.age.handle
+        ? { label: `${site} receives`, value: 'true, if the birth date lies within the bounds' }
+        : { label: `${site} receives`, value: 'nothing for it: a presentation exists only if the birth date lies within the bounds' },
     ],
   }
 }
@@ -174,7 +177,8 @@ function proofSection(w: WalletFlow, site: string): GuideSection | null {
     if (b.date_range_ms != null) rows.push({ label: 'Age range (date-range)', value: `${ms(b.date_range_ms)}${b.parts?.date_range ? `, ${kB(b.parts.date_range)}` : ''}` })
   } else {
     if (m?.sign_ms != null) rows.push({ label: 'Device key signature', value: ms(m.sign_ms) })
-    if (m?.witness_ms != null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
+    if (m?.prebuild_ms != null) rows.push({ label: 'Prebuild', value: `${ms(m.prebuild_ms)}: checks, the hash circuit's witness and its commitment, which a wallet can run during the consent screen` })
+    if (m?.witness_ms != null && m?.prebuild_ms == null) rows.push({ label: 'Witness', value: ms(m.witness_ms) })
   }
   if (m?.prove_ms != null) rows.push({ label: b ? 'Proving, all parts' : 'Proving', value: ms(m.prove_ms) })
   if (m?.proof_bytes != null && !b) rows.push({ label: 'Proof size', value: kB(m.proof_bytes) })
@@ -195,7 +199,7 @@ function verificationSection(v: VerificationMetrics | null | undefined, site: st
   return { heading: 'Verification', rows }
 }
 
-const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.jwt) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
+const ENCRYPTED_NOTE = 'The response came encrypted (direct_post.cwt or direct_post.jwt, as the request asked) to the key this session put in the request. The key\'s thumbprint is in the handover, so the proof only verifies for that key.'
 
 function checksSection(view: RequestView | null | undefined, site: string): GuideSection | null {
   if (view?.scheme) return schemeChecksSection(view.scheme, site)
@@ -267,8 +271,10 @@ function credentialSection(c: CredentialView | null): GuideSection | null {
     heading: 'Credential',
     rows: [
       { label: 'Document type', value: c.docType, mono: true },
-      { label: 'Encoding', value: `${c.encoding}${c.compactProfile ? ', compact profile' : ''}` },
-      { label: 'Data elements', value: c.elements.map((e) => e.id).join(', '), mono: true },
+      { label: 'Encoding', value: `${c.encoding}${c.compactProfile ? ', compact profile' : c.layout === 'decoy' ? ', decoy-digest layout' : c.layout === 'v07' ? ', v0.7 layout (AES commitments, compressed device key)' : ''}` },
+      c.layout === 'decoy' || c.layout === 'v07'
+        ? { label: 'Data elements', value: 'None: the MSO holds bsc and psc as its valueDigests 0 and 1', mono: true }
+        : { label: 'Data elements', value: c.elements.map((e) => e.id).join(', '), mono: true },
       { label: 'Issuer', value: c.issuer.country ? `${c.issuer.name} (${c.issuer.country})` : c.issuer.name },
       { label: 'Issuer signature', value: `${c.mso.signatureAlgorithm}, ${c.issuer.documentSigner}` },
       { label: 'Attribute digests', value: c.mso.digestAlgorithm },
@@ -381,7 +387,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 3,
             title: 'Cancelled at the PIN',
             summary: 'The person cancelled at the PIN screen. The device key did not sign, no proof was made, and the wallet answers access_denied, as for a declined request.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted', mono: true }] }],
           }
         : {
             id: 'declined',
@@ -389,7 +395,7 @@ function dialogStep(i: GuideInput): GuideStep {
             stage: 2,
             title: 'Declined',
             summary: 'The person declined the request. The wallet answers access_denied and shares nothing.',
-            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted (JWE)', mono: true }] }],
+            details: [{ heading: 'Response', rows: [{ label: 'Sent to response_uri', value: 'error=access_denied, encrypted', mono: true }] }],
           }
     case 'error':
       return walletErrorStep(i, context)

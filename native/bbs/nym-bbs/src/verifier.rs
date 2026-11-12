@@ -31,7 +31,8 @@ use serde_json::{json, Map, Value as Json};
 
 use crate::measure::{mb, ms, Heap, Peak};
 use crate::presentation::{Presentation, ResultValue};
-use crate::profile::{self, Handover, RequestObject, PROOF_SYSTEM, SYSTEM_ID};
+use crate::dates::{self, Utc};
+use crate::profile::{self, Handover, RequestObject, Rulebook, PROOF_SYSTEM, SYSTEM_ID};
 use crate::prover::scheme_json;
 use crate::{hex, unb64url};
 
@@ -48,10 +49,22 @@ pub struct VerifyInput {
   /// ecdsa-pop's check on one thread per core; one thread when false or absent.
   #[serde(default)]
   pub parallel: bool,
+  /// A thread count for ecdsa-pop, 1 up to the cores (`/tech`'s thread setting); it overrides
+  /// `parallel`.
+  #[serde(default)]
+  pub threads: Option<usize>,
   /// BBS issuer public keys (base64 of the 96-byte G2 point) trusted besides the configured issuer,
   /// each with the profile's schema. A key that is not a valid point is ignored.
   #[serde(default)]
   pub learned_issuers: Vec<String>,
+  /// The rulebook version the site's request follows (the demo profile): "0.4" (absent) or "0.5".
+  #[serde(default)]
+  pub rulebook: Option<String>,
+  /// The verifier's clock (RFC 3339, UTC) and its tolerance for `proof_time`, in seconds (v0.5).
+  #[serde(default)]
+  pub now: Option<String>,
+  #[serde(default)]
+  pub proof_time_tolerance_s: Option<i64>,
 }
 
 pub struct Verifier {
@@ -76,6 +89,13 @@ fn refuse(code: &'static str, reason: impl Into<String>) -> Refused {
   Refused { code, reason: reason.into(), issuer_key: None }
 }
 
+/// The plugin verifiers, with ecdsa-pop's check on `par`.
+fn with(par: Parallelism) -> BbsVerifier {
+  let mut pop = EcdsaPopVerifier::new();
+  pop.parallelism = par;
+  BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
+}
+
 impl Verifier {
   /// `issuer_params`: the trusted issuer's `IssuerParams::encode` (its public key and schema).
   pub fn load(issuer_params: &[u8]) -> Result<Self, String> {
@@ -87,11 +107,6 @@ impl Verifier {
       return Err("the trusted issuer's schema is not the profile's".into());
     }
     cd_date_range::precompute();
-    let with = |par: Parallelism| {
-      let mut pop = EcdsaPopVerifier::new();
-      pop.parallelism = par;
-      BbsVerifier::new().register(Box::new(pop)).register(Box::new(PseudonymVerifier::any())).register(Box::new(DateRangeVerifier))
-    };
     let (bbs, bbs_parallel) = (with(Parallelism::Off), with(Parallelism::Max));
     Ok(Verifier { issuer, bbs, bbs_parallel, load_ms: ms(t), keys_mb: mb(heap.held()) })
   }
@@ -133,12 +148,13 @@ impl Verifier {
     metrics.insert("heap_mb".into(), json!(mb(heap.high() - heap.base())));
     metrics.insert("peak_memory_mb".into(), json!(peak.read()));
     match outcome {
-      Ok(results) => json!({ "ok": true, "system_id": SYSTEM_ID, "results": results, "metrics": metrics }),
+      Ok((results, bounds)) => json!({ "ok": true, "system_id": SYSTEM_ID, "results": results, "bounds": bounds, "metrics": metrics }),
       Err(r) => json!({ "ok": false, "code": r.code, "reason": r.reason, "issuer_key": r.issuer_key, "metrics": metrics }),
     }
   }
 
-  fn check(&self, input: &VerifyInput, metrics: &mut Map<String, Json>) -> Result<Map<String, Json>, Refused> {
+  /// The results, and the birth-date bounds the proof showed (when the request has an age check).
+  fn check(&self, input: &VerifyInput, metrics: &mut Map<String, Json>) -> Result<(Map<String, Json>, Option<Json>), Refused> {
     let t = Instant::now();
     let bytes = unb64url("presentation", &input.presentation).map_err(|e| refuse("presentation", e))?;
     if bytes.len() > MAX_PRESENTATION_BYTES {
@@ -159,7 +175,33 @@ impl Verifier {
       _ => None,
     };
     let issuer = trusted.as_ref().unwrap_or(&self.issuer);
-    let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, issuer).map_err(|r| {
+    // proof_time: v0.4 has none in bbs_cd; v0.5 has it when the request asks for an age check, and
+    // it must lie within the tolerance of the verifier's clock. Its UTC date is D for the bounds.
+    let rulebook = Rulebook::parse(input.rulebook.as_deref()).map_err(|r| refuse("request", r.detail))?;
+    let asks_age = input
+      .request
+      .dcql_query
+      .credentials
+      .iter()
+      .find(|q| q.id == input.credential_query_id)
+      .is_some_and(|q| q.req.iter().any(|r| r.fn_id == profile::FUNCTION_AGE));
+    let proof_time = match (&p.proof_time, rulebook) {
+      (Some(_), Rulebook::V04) => return Err(refuse("presentation", "presentation: proof_time: the bbs_cd encoding has no validity period")),
+      (None, Rulebook::V05) if asks_age => return Err(refuse("proof_time", "no proof_time: the request has an age_check")),
+      (None, _) => None,
+      (Some(t), Rulebook::V05) => {
+        let t = Utc::parse_proof_time(t).map_err(|e| refuse("proof_time", format!("proof_time: {e}")))?;
+        let now = input.now.as_deref().ok_or_else(|| refuse("request", "now: the verifier's clock is missing"))?;
+        let now = Utc::parse_rfc3339(now).map_err(|e| refuse("request", format!("now: {e}")))?;
+        let tolerance = input.proof_time_tolerance_s.filter(|x| *x > 0).ok_or_else(|| refuse("request", "proof_time_tolerance_s is missing"))?;
+        let off = t.unix() - now.unix();
+        if off.abs() > tolerance {
+          return Err(refuse("proof_time", format!("proof_time {} is {off} s from now, beyond the tolerance of {tolerance} s", t.text())));
+        }
+        Some(t)
+      }
+    };
+    let s = profile::statement(&input.request, &input.credential_query_id, &input.handover, issuer, rulebook, proof_time.map(|t| t.date())).map_err(|r| {
       let code = if r.error == "unsupported_circuit" { "scheme" } else { "request" };
       refuse(code, format!("{}: {}", r.error, r.detail))
     })?;
@@ -197,11 +239,20 @@ impl Verifier {
     }
     let bytes = &p.proof;
 
-    let t = Instant::now();
     let mut vs = VerifyStats::default();
-    let par = crate::prover::parallelism(input.parallel);
+    let par = crate::prover::parallelism(input.parallel, input.threads);
     metrics.insert("threads".into(), json!(par.threads()));
-    let bbs = if input.parallel { &self.bbs_parallel } else { &self.bbs };
+    // A count between one and every core gets its verifiers here (registering is cheap).
+    let sized;
+    let bbs = match par {
+      Parallelism::Off => &self.bbs,
+      Parallelism::Max => &self.bbs_parallel,
+      Parallelism::Threads(_) => {
+        sized = with(par);
+        &sized
+      }
+    };
+    let t = Instant::now();
     let verified = bbs
       .verify(std::slice::from_ref(issuer), &s.request, bytes, None, Some(&mut vs))
       .map_err(|e| match e {
@@ -226,6 +277,7 @@ impl Verifier {
     if let Some(h) = &s.age_handle {
       results.insert(h.clone(), Json::Bool(true));
     }
-    Ok(results)
+    let bounds = s.age.as_ref().map(|a| json!({ "ge": a.ge.as_ref().map(dates::iso), "le": a.le.as_ref().map(dates::iso) }));
+    Ok((results, bounds))
   }
 }

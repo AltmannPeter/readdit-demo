@@ -4,8 +4,25 @@ There are three backends, each a Node addon (Rust, napi-rs) loaded in the site's
 the Vega addon (`native/vega`, a circuit over the nym_auth mdoc, `mso_mdoc`), described first; the
 Longfellow addon (`native/longfellow`, a circuit over the same mdoc, with the same interface), in
 its own section; and the BBS addon (`native/bbs`, a scheme over the nym_auth BBS credential,
-`bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query (v0.4) with
-a `ZkpPresentation`. Only `server/utils/services.ts` calls them. Each loads on its own; the site
+`bbs_cd`, `docs/bbs_cd.md`). All three answer the rulebook's `zkp_req` credential query with
+a `ZkpPresentation`, in the version the input names: `"rulebook": "0.4"` (the default when absent),
+`"0.5"`, `"0.6"` or `"0.7"` (the demo profile, `profiles/README.md`), in the witness (BBS: prove)
+and verify input. `"0.6"` and `"0.7"` keep v0.5's request and presentation rules
+(`Rulebook::years_range()`); `"0.7"` takes the pseudonym with `prf` `aes-128` only
+(`Rulebook::prf()`; `sha-256` there, and `aes-128` under the others, is `unsupported_config`). Only
+Longfellow serves them, with its decoy circuits (`"0.6"`) and its v0.7 circuits (`"0.7"`), below.
+v0.5 changes one thing here: `age_check` is an assertion, `{ "fn_id": "age_check", "params": {
+"range": "13-17" } }` without `return` and with no output in `results`; the prover and the
+verifier compute E and C from the range and the UTC date of `proof_time` (the prover's clock; the
+verifier reads it from the presentation after checking it against `now` within its tolerance), and
+the verifier answers the bounds it used as `"bounds": { "ge", "le" }` (null for no bound) next to
+`results` (v0.4 too, with the request's bounds). BBS presentations carry `proof_time` under v0.5
+when the request has an age check (refused otherwise: `proof_time`; under v0.4 a `proof_time` is
+refused as `presentation`). Each set of circuits reads one rulebook version: Vega and Longfellow
+prove v0.5 requests with their v0.5 circuits (`bsc`), and their v0.4 circuits refuse them (prover
+`unsupported_circuit`, verifier `circuit`); Longfellow proves v0.6 requests with its decoy circuits
+only, and v0.7 requests with its v0.7 circuits only; each of its four sets refuses the other
+versions the same way. Only `server/utils/services.ts` calls them. Each loads on its own; the site
 starts when at least one loads and offers only the systems of those that did. The
 addons replaced the earlier HTTP services (and their stubs) at Frédéric's request (2026-10-13), so
 a presentation costs no network hop on the server side.
@@ -19,23 +36,28 @@ presentation names (an unknown one goes to the first loaded addon, which refuses
   key and `secret_seed` (`app/wallet/demo-wallet.json`, no true holder binding) and sends each step
   what it needs. The prover keeps none of it between calls.
 - **Verifier:** verifies a presentation against the site's own request, handover and clock.
-- Both build their keys from the circuits (`native/vega/circuits/mdoc/shapes.zst`) once, when the
-  server starts (`server/plugins/backends.ts`), and keep them. Setup is deterministic. Nothing
+- Both build their keys from the circuits (`native/vega/circuits/mdoc/shapes.zst`, and v0.5's
+  `native/vega/circuits/mdoc-bsc/shapes.zst`) once, when the server starts (`server/plugins/backends.ts`), and keep them. Setup is deterministic. Nothing
   randomized and no witness is kept between requests.
 - Every call runs as an async task off Node's event loop; one heavy step (witness, prove, verify)
   runs at a time, so each step's time and memory are its own.
-- **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false), which
-  `services.ts` sets from `/tech`'s switch. False runs the step in a one-thread rayon pool, true in a
-  pool of one thread per core (`nym-vega/src/threads.rs`); the proof does not depend on it. The
-  witness carries the choice to the prove step. `metrics.threads` reports the threads used (the
+- **Threads.** The witness and verify inputs take `"parallel": true | false` (absent: false) and
+  `"threads": n` (absent: none), which `services.ts` sets from `/tech`'s thread setting. `threads`,
+  clamped to 1 up to the cores, wins: the step runs in a rayon pool of that many threads, built on
+  first use and kept. Without it, false runs the step on one thread and true on one per core
+  (`nym-vega/src/threads.rs`, `pool_of`). The proof does not depend on it. The witness carries the
+  choice to the prove step. `metrics.threads` reports the threads used (the
   witness summary's, the proof's and the verification's); `info.max_threads` the cores.
 - **Profiling.** Every step of the three addons (Vega, Longfellow, BBS: sign, witness, prove,
-  verify) takes `"profile": true | false` (absent: false), which `services.ts` sets from `/tech`'s
-  Profiling switch; the witness carries it to the prove step. On, the step's `metrics` also has
-  `profile`: `{ hz, ms, samples, other, lost, stacks }` from the sampling profiler
+  verify) takes `"profile": true | "full" | false` (absent: false), which `services.ts` sets from
+  `/tech`'s Profiling switch; the witness carries it to the prove step. On, the step's `metrics`
+  also has `profile`: `{ hz, ms, samples, other, lost, threads, stacks }` from the sampling profiler
   (`native/nym-profile`, pprof): `stacks` maps folded stacks (`entry;…;leaf`, the step's own code
   down to the function that was running, Rust names without generics) to samples; `other` counts
-  samples of other threads, `lost` samples whose stack could not be walked. Vega's witness, prove and verify add `phases`, vega-prover's own tracing
+  samples of other threads, `lost` samples whose stack could not be walked; `threads` every sample
+  by thread name (the pools name theirs `longfellow-<n>-<i>`, `vega-…`). `"full"` adds `full`:
+  every sample's whole stack, `thread;outermost;…;leaf`, nothing cut or dropped (Node's C++ frames
+  stay mangled; `c++filt` reads them). Vega's witness, prove and verify add `phases`, vega-prover's own tracing
   spans as a tree (`{ name, n, ms, mb, children }`, siblings of one name merged; `mb` on one thread
   only), each phase ending at the library's own `elapsed_ms` event for it. `services.ts` takes `profile` out of the metrics before they reach any trace, and calls
   one addon step at a time while Profiling is on (the sampler is process-wide).
@@ -67,12 +89,13 @@ Configuration (Nuxt runtime config, environment variables):
 | --- | --- | --- |
 | `NUXT_VEGA_ADDON` | `native/vega/community-vega.node` | The addon (`npm run build:native`), relative to the working directory |
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
+| `NUXT_VEGA_SHAPES_V05` | `native/vega/circuits/mdoc-bsc/shapes.zst` | Rulebook v0.5's circuits (`bsc`); empty: Vega proves v0.4 only |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The verifier's trust anchors (PEM) |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far `proof_time` may lie from the verifier's clock |
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | The directory of `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | The Longfellow verifier's trust anchors (PEM), the same demo issuer |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits Community can accept, comma-separated, in preference order |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.7, Longfellow v0.4 (`nuxt.config.ts`) | Circuits Community can accept, comma-separated, in preference order; each is offered under the demo profile whose rulebook version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon (`npm run build:native`) |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer parameters the verifier trusts |
 | `NUXT_ACCEPTED_SCHEMES` | `urn:mms:bbs-cd:nym_auth:v1` | `bbs_cd` schemes Community can accept |
@@ -82,7 +105,7 @@ Configuration (Nuxt runtime config, environment variables):
 
 | Item | Value |
 | --- | --- |
-| Circuit id | `urn:circuits:vega:nym_auth:v1` |
+| Circuit id | `urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df`: `urn:circuits:sha256:` and the SHA-256 of `shapes.zst` as shipped (Peter, 2026-10-28: every circuit's id is its archive's hash; was `urn:circuits:vega:nym_auth:v1`) |
 | Proof system | `vega-v1`: Microsoft vega-prover `c0ee259`, `VegaMcZkSNARK` over `T256HyraxEngine` |
 | Circuits | nym-auth-circuits `vega-age` (vendored unchanged, `native/vega/VENDOR-SHA256SUMS`): 32 step instances and one core, layout `FULL_MDOC` |
 | Statement | the nym_auth mdoc: issuer signature (ES256), docType, birth date in [E, C], validity at T, device signature on e2, `SHA-256(secret_seed) = ssc`, the `pseudonym` function with `prf` `sha-256` and `known-offender-matching-ssc` |
@@ -106,6 +129,33 @@ Public inputs, in the registry order (`shared/registry/circuits.ts`; 18 field el
 The site offers the circuit only when the verifier reports the same id, proof system, public-input
 names and order, and `shapes.zst` hash as the registry (`server/utils/vp.ts`).
 
+### Rulebook v0.5: the `bsc` circuits
+
+Since 2026-10-28 (Peter's package nym-auth-vega v1). `vega-age` 0.2.0 adds the v0.5 core
+`vega_age::bsc`; the v0.4 circuits are byte for byte the same. `nym-vega/src/bsc.rs` is the
+package's adapter from the site's statement, mdoc and Document Signer key.
+
+| Item | Value |
+| --- | --- |
+| Circuit id | `urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794`, the SHA-256 of `circuits/mdoc-bsc/shapes.zst` as shipped (`CIRCUIT_ID_V05`; the loaders refuse a file with another hash) |
+| Proof system | `vega-v1`, as v0.4 |
+| Statement | as Longfellow's v0.5: issuer signature, docType, the `bsc` item listed in the MSO, `SHA-256(secret_seed ‖ birth_date) = bsc`, the birth date in [E, C], validity at T (inclusive at both ends), device signature on e2, the pseudonym. `psc` is signed and not read |
+| Proof | 86,861 bytes (bincode, the same decoding limit as v0.4) |
+
+Public inputs (`bsc::PUBLIC_INPUTS`; 15 field elements, the verifier names the first 13 and the
+proof reports the last 2): `issuer_key_set` 2, `age_check.ge` 1 (E as YYYYMMDD, 0 when absent),
+`age_check.le` 1 (C as YYYYMMDD, 99999999 when absent), `proof_time` 1 (YYYYMMDDhhmmss), `session_transcript`
+2, `doctype` 3, `pseudonym.verifier_input` 3, `results.nym` 2. E and C come from the request's
+range on the UTC date of `proof_time`.
+
+The prover runs two phases, as a wallet would. The witness step makes the holder-side checks, then
+prepares (`app::prepare` with an unsigned core: what depends only on the credential, which a
+wallet can do while the consent screen shows, before the device signs) and reports it as
+`prebuild_ms` (the Benchmark's "Prebuild (consent)"). The prove step proves with the signed core
+(`app::prove`). The demo phone signs before the witness step, so that step also checks the device
+signature, for a refusal with its reason. The verifier refuses with `bsc::accept`: `proof_invalid`,
+or `public_input` with the first input that differs.
+
 Session binding. Community invokes the wallet cross-device with a QR code, so OpenID4VP 1.0
 Appendix B.2.6.1 applies:
 
@@ -116,9 +166,9 @@ message = cbor(["Signature1", bstr(h'A10126'), bstr(h''), bstr(DeviceAuthenticat
 e2 = SHA-256(message)
 ```
 
-The response is encrypted (`direct_post.jwt`), so `jwk_thumbprint` is the RFC 7638 SHA-256
-thumbprint (32 bytes) of the session's encryption key in `client_metadata.jwks`; with `direct_post`
-it would be null. The encoding matches the specification's example byte for byte (`nym-vega` test
+The response is encrypted (`direct_post.cwt` by default, `direct_post.jwt` by `/tech`'s switch), so
+`jwk_thumbprint` is the RFC 7638 SHA-256 thumbprint (32 bytes) of the session's encryption key in
+`client_metadata.jwks`, in both modes; with `direct_post` it would be null. The encoding matches the specification's example byte for byte (`nym-vega` test
 `openid4vp_appendix_b261_example`).
 The device key signs `message` with ES256; the circuit verifies that signature on e2.
 
@@ -167,10 +217,17 @@ and the code in the error body's `data.error`, which the phone reads (`app/walle
   "version": "0.1.0",
   "stub": false,
   "circuits": [{
-    "system_id": "urn:circuits:vega:nym_auth:v1",
+    "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
     "proof_system": "vega-v1",
+    "rulebook": "0.4",
     "shapes_sha256": "b457ba53…",
     "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "birth_date.identifier", "pseudonym.verifier_input", "results.nym"]
+  }, {
+    "system_id": "urn:circuits:sha256:7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794",
+    "proof_system": "vega-v1",
+    "rulebook": "0.5",
+    "shapes_sha256": "7df07fef…",
+    "public_inputs": ["issuer_key_set", "age_check.ge", "age_check.le", "proof_time", "session_transcript", "doctype", "pseudonym.verifier_input", "results.nym"]
   }],
   "load_ms": 276.1,
   "keys_mb": 44.4,
@@ -205,15 +262,21 @@ it does not know (such as a `pin`) is ignored.
 
 ```json
 {
-  "system_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
   "credential_query_id": "nym_attestation",
   "request": { "…": "decoded Request Object" },
   "handover": { "…": "as above" },
   "credential": { "format": "mso_mdoc", "doctype": "eu.europa.ec.eudi.nym_auth.1", "issuer_signed": "<base64url IssuerSigned>" },
   "secret_seed": "<hex, 16 bytes>",
-  "device_signature": "<hex r‖s from step 1>"
+  "device_signature": "<hex r‖s from step 1>",
+  "rulebook": "0.4"
 }
 ```
+
+Under `"rulebook": "0.5"`, with the v0.5 circuit's id, the credential is the holder's v0.5 mdoc
+and the input adds `"birth_date": "YYYY-MM-DD"`, which opens `bsc` with the seed ("Rulebook v0.5:
+the `bsc` circuits" above; Longfellow's likewise). The summary then has `"rulebook": "0.5"`, the
+15 public values grouped by input and no `counts`, and its metrics add `prebuild_ms`.
 
 Before building the witness, the prover checks: the request against what the circuit proves
 (a `zkp_req` query over `mso_mdoc`; one `pseudonym` with `known-offender-matching-ssc`, `ver` 1 and
@@ -240,7 +303,7 @@ Then `MdocWitness::full` and `app::witness` (nym-auth-circuits SPEC.md V5). `Wit
 ```json
 {
   "ok": true,
-  "system_id": "urn:circuits:vega:nym_auth:v1",
+  "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df",
   "presentation": "<base64url CBOR>",
   "results": { "nym": "<hex32>", "age": true },
   "metrics": {
@@ -284,12 +347,13 @@ Prover refusals:
   "credential_query_id": "nym_attestation",
   "presentation": "<base64url CBOR>",
   "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
-  "now": "2026-10-13T00:37:08.000Z"
+  "now": "2026-10-13T00:37:08.000Z",
+  "rulebook": "0.4"
 }
 ```
 
 ```json
-{ "ok": true, "system_id": "urn:circuits:vega:nym_auth:v1", "results": { "nym": "<hex32>", "age": true },
+{ "ok": true, "system_id": "urn:circuits:sha256:b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df", "results": { "nym": "<hex32>", "age": true }, "bounds": { "ge": "2008-10-14", "le": "2013-10-13" },
   "metrics": { "decode_ms": 0.2, "load_ms": 261.2, "keys_mb": 40.5, "verify_ms": 80.1, "total_ms": 80.5, "proof_bytes": 96079, "heap_mb": 3.1, "peak_memory_mb": 1357 } }
 ```
 
@@ -322,13 +386,13 @@ these differences.
 
 | Item | Value |
 | --- | --- |
-| Circuit id | `urn:circuits:longfellow:nym_auth:v1` |
+| Circuit id | `urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b`, the SHA-256 of `circuits.zst` (rulebook v0.4; was `urn:circuits:longfellow:nym_auth:v1`). The v0.5 circuits have their own (below) |
 | Proof system | `longfellow-libzk-v1`: google/longfellow-zk `61a8a73`, Rust runtime; Ligero (rate 1/7, 132 columns) over sumcheck. The 11 runtime crates are vendored unchanged in `native/longfellow/vendor/longfellow-zk` (`native/longfellow/VENDOR-SHA256SUMS`) |
-| Circuits | the nym-auth-circuits archive's `longfellow/mdoc`, unchanged: an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
+| Circuits | rulebook v0.4: the nym-auth-circuits archive's `longfellow/mdoc`, unchanged (v0.5: below): an LFC2 pair, the hash circuit over GF(2^128) (97,032 inputs, 586 public) and the signature circuit over P-256 (4,765 inputs, 1,155 public), SPEC.md L1 |
 | Statement | the same as Vega's, over the same mdoc, with the same pseudonym function: one account under either |
 | `circuits.zst` SHA-256 | `6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` |
 | Proof | about 344 kB: 6 MAC tags (16 bytes each), the hash circuit's proof, the signature circuit's proof (SPEC.md L6.2) |
-| Threads | 1: Google's runtime at `61a8a73` has no parallel code. `parallel` is ignored; `info.threads` and `metrics.threads` are 1 |
+| Threads | v0.4 circuits: 1 (Google's runtime at `61a8a73` directly, which has no parallel code; `parallel` is ignored and `metrics.threads` is 1). v0.5 circuits (`nym-auth-zk` 0.3.0, since 2026-10-28): the witness (prebuild), prove and verify inputs take `"parallel"` and `"threads"` as Vega's do, and run in a rayon pool of that size (`nym-longfellow/src/threads.rs`); `metrics.threads` reports the threads used, `info.max_threads` the cores. The proof bytes and verdicts do not depend on it |
 
 `loadProver(circuits)` and `loadVerifier(circuits, trustAnchorsPem, toleranceS)` take the directory
 of `circuits.zst`, `params.tsv` and `hash-semantic.tsv`, read both circuits once and check them
@@ -371,6 +435,108 @@ input differs: a wrong T, E, C, verifier_input or pseudonym fails the hash circu
 key or e2 the signature circuit; a presentation for another request fails on the transcript.
 There is no `public_input` code.
 
+### Rulebook v0.5: the bsc circuits
+
+Circuit `urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52` (the SHA-256 of `nym_auth_mdoc_bsc.lfa2.zst`, `nym_auth_zk::system_id()`) is
+`nym-auth-zk` 0.3.0 (Peter's package `nym-auth-longfellow` v1.1, revision 2 of the bsc baseline,
+with the prover and verifier on threads since 2026-10-28: `src/rt`, `CHANGES.md`; the same proof
+bytes and verdicts), in `native/longfellow/nym-auth-zk` and pinned in `VENDOR-SHA256SUMS`, on the
+same vendored runtime. It reads rulebook v0.5 requests and credentials. Both addon objects load it next
+to the v0.4 circuits (the archive compiled into the crate), and `info.circuits` lists both, each
+under its own id with `rulebook: "0.4" | "0.5"`, `artifact`, `artifact_sha256` and
+`public_inputs`. The circuit id in the witness input and in the presentation picks the circuits; an
+id with a request of the other version is refused (`unsupported_circuit`, verifier `circuit`). The
+site offers the circuits of the demo profile's version (`shared/registry/circuits.ts` `rulebook`,
+`server/utils/vp.ts`).
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.5, compact profile: `bsc` = SHA-256(secret_seed ‖ birth_date) at digestID 0, `psc` at 1 (signed, not read). Sig_structure 376 to 439 bytes, bsc item 56 to 119 (package INTEGRATION.md §5); `nym_auth_zk::mdoc::parse` refuses anything else |
+| Statement | the issuer's signature under Q, the docType, validFrom ≤ proof_time ≤ validUntil (both inclusive), the device signature on e2, (secret_seed, birth_date) opens bsc, E ≤ birth_date ≤ C from the range and the UTC date of proof_time, the `known-offender-matching-ssc` pseudonym (the same formula as v0.4, so the same pseudonym) |
+| Artifact SHA-256 | `nym_auth_mdoc_bsc.lfa2.zst` `f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52`; hash circuit id `a5856d5c…36ca` (278 public slots), signature circuit id `6a62a572…315f` (1,155) |
+| MAC | the affine `t = a + c·m`; the challenge is `mac.challenge` (no `mac.a_v`); the transcript starts from `"nym_auth/v1/mdoc-bsc/longfellow" ‖ e2` |
+| Proof | about 323 kB: 6 tags, the hash proof, the signature proof (`proof_parts`: the tags and the rest) |
+
+Public inputs in circuit order: `doctype` 8, `proof_time` 2, `pseudonym.verifier_input` 256,
+`results.nym` 2, `age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 6 + 768,
+`issuer_key_set` 2, `session_transcript` 256 (hash + signature). The crate computes all of them
+from `nym_auth_zk::Request`, which `nym-longfellow/src/bsc.rs` (the package's adapter) builds from
+the request, the handover and the certificate's key; nothing else is passed to it.
+
+**Prover.** Two phases (`nym-auth-zk` 0.2.0 and later). `witness` takes `birth_date` (`YYYY-MM-DD`)
+besides `secret_seed`; it reads the credential (`bad_credential`, also for a v0.4 credential),
+checks the device signature (`bad_credential`), then runs the crate's `prebuild`: the holder-side
+checks with their reasons (INTEGRATION.md §6: the issuer signature, the opening of `bsc`, the birth
+date's form, `bad_credential`; validity at proof_time, inclusive, and the birth date in [E, C],
+`unsatisfiable`; `bsc::prover_refusal`), the statement, the MAC keys, the hash circuit's witness
+and its commitment. `prove` runs `prove_prebuilt`: the signature circuit's witness, its
+commitment, the MAC challenge and both proofs. A wallet can run `prebuild` while the consent screen
+is shown, before the device signs; `metrics.prebuild_ms` reports it apart (part of `witness_ms`),
+and `/tech`'s Benchmark shows it as "Prebuild (consent)". The witness summary has
+`rulebook: "0.5"` and the v0.5 input names.
+
+**Verifier.** Steps 1 to 4 as above (the `results` keys are the pseudonym's handle only: v0.5's
+`age_check` has no output; v0.5 allows an empty `results` map, so a presentation without the
+pseudonym is refused as `results`, where v0.4 refuses an empty map as `presentation`); step 5 is the
+crate's verifier. `proof_invalid.input` names the first
+circuit that fails: another session already fails `hash`, since e2 seeds the transcript; another
+issuer key fails only `signature`. `bounds` are E and C from the range and the date of
+`proof_time` (`dates::range_bounds`, which agrees with the crate).
+
+**Fetch.** `nym-auth-zk` names google/longfellow-zk `61a8a73` by git; the workspace's `[patch]` builds it
+from the vendored copy, but Cargo still fetches the git repository once to resolve the patch
+(`cargo metadata --locked --offline` fails without it in the git cache). Nothing from it is built.
+
+### Longfellow under rulebook v0.6: the decoy circuits
+
+Circuit `urn:circuits:sha256:5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac` (the
+SHA-256 of `nym_auth_mdoc_decoy.lfa2.zst`, `nym_auth_zk_decoy::system_id()`) is `nym-auth-zk-decoy`
+0.1.0 (Peter's package `nym-auth-longfellow-decoy-v1`, rulebook v0.6 revision), in
+`native/longfellow/nym-auth-zk-decoy` as delivered and pinned in `VENDOR-SHA256SUMS`, with the
+package's adapter `nym-longfellow/src/decoy.rs`. It reads rulebook v0.6 requests and credentials
+only: both addon objects load it beside the v0.4 and bsc sets, `info.circuits` lists it with
+`rulebook: "0.6"`, and the decoy id under another version, or another set's id under `"0.6"`, is
+refused (`unsupported_circuit`, verifier `circuit`). The API, the two phases, the MAC, the refusals
+and the threads are the bsc circuits' (above); the statement is theirs without the docType, which
+the layout fixes.
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.6, the decoy-digest layout (package INTEGRATION.md §5): IssuerSigned is `{ "issuerAuth" }` only, no `nameSpaces`; the MSO (398 bytes, fixed key order) holds `bsc` and `psc` themselves as valueDigests 0 and 1; the Sig_structure is 423 bytes with every private field at a fixed offset. `nym_auth_zk_decoy::mdoc::parse` refuses anything else, so a v0.4 or v0.5 credential is `bad_credential` |
+| Artifact SHA-256 | `nym_auth_mdoc_decoy.lfa2.zst` `5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac` (227,925 bytes); hash circuit id `b52fc806…ff62` (269 public slots), signature circuit id `6a62a572…315f` (1,155, the bsc set's) |
+| MAC | as the bsc circuits; the transcript starts from `"nym_auth/v1/mdoc-decoy/longfellow"` ‖ e2 |
+| Proof | about 289 kB |
+
+Public inputs in circuit order: `proof_time` 1, `pseudonym.verifier_input` 256, `results.nym` 2,
+`age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 6 + 768, `issuer_key_set`
+2, `session_transcript` 256 (hash + signature): no `doctype`, and one `proof_time` element. Tests:
+`nym-longfellow/tests/decoy_crosscheck.rs`, `v06_flow.rs` (the package's) and `decoy_flow.rs` (the
+demo holders' `v06` credentials).
+
+### Longfellow under rulebook v0.7: the AES circuits
+
+Circuit `urn:circuits:sha256:218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd` (the
+SHA-256 of `nym_auth_mdoc_v07.lfa2.zst`, `nym_auth_zk_v07::system_id()`) is `nym-auth-zk-v07` 0.1.0
+(Peter's package `nym-auth-longfellow-v07-v1`), in `native/longfellow/nym-auth-zk-v07` as delivered
+and pinned in `VENDOR-SHA256SUMS`, with the package's adapter `nym-longfellow/src/v07.rs`. It reads
+rulebook v0.7 requests and credentials only: both addon objects load it beside the other three
+sets, `info.circuits` lists it with `rulebook: "0.7"`, and the v0.7 id under another version, or
+another set's id under `"0.7"`, is refused (`unsupported_circuit`, verifier `circuit`). The API, the
+two phases, the refusals and the threads are the decoy circuits'.
+
+| Item | Value |
+| --- | --- |
+| Credential | rulebook v0.7 (package INTEGRATION.md §5): the decoy-digest layout with the valueDigests namespace `eu.nym_auth.v1`, `bsc` = AES-128(secret_seed, "nym/b" ‖ 01 ‖ birth_date) ‖ AES-128(secret_seed, "nym/b" ‖ 02 ‖ 0^10) and `psc` likewise under private_seed (or 32 zero bytes), and the device key compressed (`-3` the sign of y); MSO 350 bytes, Sig_structure 375 (6 SHA-256 blocks). `nym_auth_zk_v07::mdoc::parse` refuses anything else (`bad_credential`) and recovers y |
+| Pseudonym | `known-offender-matching-ssc`, `prf` `aes-128`: AES-128(secret_seed, H[0..16]) ‖ AES-128(secret_seed, H[16..32]), H = SHA-256("nym_auth/v1/aes-128/known-offender-matching-ssc" ‖ 0^32 ‖ SHA-256(verifier_id)), which the crate computes from `verifier_id`. Another value than v0.4–v0.6's for the same seed |
+| Artifact SHA-256 | `nym_auth_mdoc_v07.lfa2.zst` `218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd` (152,142 bytes); hash circuit id `18d504fe…b073` (267 public slots), signature circuit id `55cd9b6e…a344` (899) |
+| MAC | 4 words over e and the device key's x (v0.6: 6); the transcript starts from `"nym_auth/v1/mdoc-v07/longfellow"` ‖ e2 |
+| Proof | about 273 kB |
+
+Public inputs in circuit order: `proof_time` 1, `pseudonym.nym_block` 256 (H), `results.nym` 2,
+`age_check.ge` 1, `age_check.le` 1, `mac.challenge` 1 + 128, `mac.tags` 4 + 512, `issuer_key_set`
+2, `session_transcript` 256 (hash + signature). Tests: `nym-longfellow/tests/v07_crosscheck.rs`,
+`v07_flow.rs` (the package's) and `v07_holders_flow.rs` (the demo holders' `v07` credentials).
+
 **Build.** `native/longfellow/.cargo/config.toml` turns on carry-less multiplication for the
 GF(2^128) arithmetic: `+pclmulqdq` on x86-64 (without it, Google's portable code), `+aes` on
 arm64, without which the runtime does not compile (Apple Silicon has it by default, Linux arm64 does
@@ -390,8 +556,10 @@ a time.
 verifier reports the registry's proof system, schema and plugins (`server/utils/vp.ts`).
 
 **Threads.** The crates are built with bbs-cd-plugins' `parallel` feature. `prove` and `verify`
-take `"parallel": true | false` (absent: false): ecdsa-pop runs with `Parallelism::Max` (one thread
-per core) or `Off`. The library makes the output the same for both. `metrics.threads` reports it,
+take `"parallel": true | false` (absent: false) and `"threads": n`: ecdsa-pop runs with
+`Parallelism::Threads(n)` (n clamped to 1 up to the cores; 1 is `Off`, the core count `Max`), or
+without `threads` with `Max` (one thread per core) or `Off`. The library makes the output the same
+for all of them. `metrics.threads` reports it,
 `info.max_threads` the cores.
 
 **Prover: `prove`.** One call per presentation; there is no separate sign step, because the device
@@ -401,27 +569,30 @@ key signs inside `ecdsa-pop` (hashed ECDSA over the plugin's device message).
 { "request": { …Request Object… }, "credential_query_id": "nym_attestation_bbs",
   "handover": { "client_id": "…", "nonce": "…", "response_uri": "…", "jwk_thumbprint": "<base64url, 32 bytes>" },
   "credential": { "format": "bbs_cd", "schema_id": "…", "issuer_params": "…", "signature": "…", "messages": ["…"] },
-  "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" } }
+  "device_key": { "kty": "EC", "crv": "P-256", "x": "…", "y": "…", "d": "…" },
+  "rulebook": "0.5" }
 ```
 
-It answers `{ ok: true, system_id, presentation, results, metrics, statement }`: `presentation` is
+It answers `{ ok: true, system_id, presentation, results, metrics, proof_time, statement }`: `presentation` is
 base64url(CBOR(ZkpPresentation)), its `proof` the bbs-cd-plugins envelope, `issuer_key_set` the
-96-byte issuer key, `results.nym` the 48-byte G1 point, no `proof_time`; `results` as the
+96-byte issuer key, `results.nym` the 48-byte G1 point, `proof_time` only under v0.5 with an age
+check (also answered as `proof_time`, null otherwise); `results` as the
 verifier's; `metrics` `offline_ms` (commitments and
 the ecdsa-pop preparation), `bbs_ms`, `ecdsa_pop_ms`, `device_sign_ms`, `pseudonym_ms`,
 `date_range_ms`, `online_ms`, `prove_ms`, `total_ms`, `proof_bytes` (the envelope),
 `presentation_bytes` (the ZkpPresentation), `parts` (bytes per part), `heap_mb`, `peak_memory_mb`; `statement` the derived BBS request (audience, nonce, verifier input,
-committed attributes, plugins). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
+committed attributes, plugins, `rulebook`, `age_bounds`). Refusals as the Vega prover's: `422 unsatisfiable` (the birth date
 is outside the range), `400 unsupported_request`, `unsupported_config`, `unsupported_function`,
 `unsupported_circuit` (the request does not offer the scheme), `bad_credential` (the credential
 does not decode or verify, or the device key is not the credential's), `bad_request`.
 
-**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover, learned_issuers? }`,
-all but the presentation from the site's session store. `learned_issuers`: BBS issuer public keys
+**Verifier: `verify`.** `{ request, credential_query_id, presentation, handover, learned_issuers?, rulebook?, now?, proof_time_tolerance_s? }`,
+all but the presentation from the site's session store; `now` (RFC 3339) and
+`proof_time_tolerance_s` are needed for a v0.5 age check. `learned_issuers`: BBS issuer public keys
 (base64 of the 96-byte point) trusted besides the configured issuer, each with the profile's
-schema ("Trust new issuers", `server/utils/issuers.ts`). It answers `{ ok: true, system_id, results, metrics }`
+schema ("Trust new issuers", `server/utils/issuers.ts`). It answers `{ ok: true, system_id, results, bounds, metrics }`
 or `{ ok: false, code, reason, issuer_key, metrics }` with `code` `presentation`, `scheme`, `issuer_key_set`,
-`request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5); `issuer_key` (base64) names the
+`proof_time` (v0.5), `request`, `results` or `proof_invalid` (`docs/bbs_cd.md` §5); `issuer_key` (base64) names the
 one key of an `issuer_key_set` refusal that is not trusted, null otherwise. `metrics`: `decode_ms`, `verify_ms`, `parse_ms`, `bbs_ms`,
 `ecdsa_pop_ms`, `pseudonym_ms`, `date_range_ms`, `total_ms`, `proof_bytes`.
 
@@ -443,8 +614,9 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | | 410 `expired`, `cancelled`, `already_used` | The request expired, the site's dialog was closed, or it was already fetched once |
 | | 503 `none_accepted`, `unavailable` | The site accepts nothing now, or has no system to offer (the offer is made again at this point, from `/tech`'s switches) |
 | response_uri | 404 `unknown_session` | |
-| | 400 `invalid_response` | `response` is not a JWE (ECDH-ES, A128GCM) to the session's key, or its payload is not a JSON object; logged as `[vp] <id>: refused a response that does not decrypt` |
-| | 400 `state_mismatch` | `state` (inside the JWE) is not the session's; checked first after decryption |
+| | 400 `invalid_response` | `direct_post.cwt` (`Content-Type: application/cwt`): the body is not a COSE_Encrypt (tag 96; A128GCM, A192GCM or A256GCM; one ECDH-ES + HKDF-256 recipient, zkp_req.md §6.2) to the session's key, or its plaintext is not a CBOR map. `direct_post.jwt` (form field `response`): not a JWE (ECDH-ES, A128GCM or A256GCM) to the session's key, or its payload is not a JSON object. Logged as `[vp] <id>: refused a response that does not decrypt` |
+| | 400 `state_mismatch` | `state` (inside the COSE_Encrypt or the JWE) is not the session's; checked first after decryption |
+| | 400 `response_mode` | Encrypted in the other mode than the request's `response_mode` (a request keeps the mode it was fetched with); logged as `[vp] <id>: refused a <mode> response to a <mode> request`. The session still waits |
 | | 400 `unencrypted` | A vp_token sent as form fields (`direct_post`); logged as `[vp] <id>: refused an unencrypted response`. An unencrypted error response (`error`, `state`) is accepted |
 | | 410 `expired`, `cancelled` | |
 | | 400 `not_requested` | The request was never fetched |
@@ -458,12 +630,15 @@ Every refusal carries a plain status text and a code in the error body's `data.e
 | `GET /api/dev/latest` | | This browser's newest session for the developer view, created after `?after=<ms>`, and what `/tech` accepts |
 | `POST /api/comments` | 401 `login_required`, 400 `bad_request`, 403 `age_required` | Logged out or banned; an unknown post or a comment not of 1 to 2,000 characters; an age-restricted community without a matching age check |
 | `POST /api/mod/ban`, `/unban` | 400 `bad_request`, 404 `unknown_account` | |
-| `POST /api/tech/accept` | 400 `bad_request` | An unknown proof system. Switching off the last accepted one is allowed |
-| `POST /api/tech/threads` | 400 `bad_request` | `parallel` is not a boolean |
+| `POST /api/tech/accept` | 400 `bad_request`, 409 `pending_system` | An unknown proof system; one the demo profile cannot use yet (a profile system with `status: pending`; none since 2026-10-28). Switching off the last accepted one is allowed |
+| `POST /api/tech/demo-profile` | 400 `bad_request` | `{ profile }`: `nym-auth-v0.4` or `nym-auth-v0.5`. Switches the profile and resets the demo; a later demo reset keeps it |
+| `POST /api/tech/threads` | 400 `bad_request` | `{ threads }`: a whole number from 1 to the machine's cores, or `'all'` (the core count is stored as `'all'`); or `{ parallel }`, a boolean (true is `'all'`, false is 1). Anything else: 400. Answers `threads`, `threadCount`, `maxThreads`, `multithreading`. A demo reset restores `NUXT_MULTITHREADING`. `GET /api/tech/overview` returns the same four |
+| `POST /api/tech/response-mode` | 400 `bad_request` | `{ mode }`: `direct_post.cwt` or `direct_post.jwt`. Requests fetched from then on ask for it; a demo reset restores `NUXT_RESPONSE_MODE` |
 | `POST /api/tech/issuers` | 400 `bad_request`, 404 `unknown_issuer` | `{ trust_new: boolean }` switches "Trust new issuers"; `{ forget: <fingerprint> }` removes an added issuer (404 when there is none). Neither: 400 |
-| `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean. Off at start and after a demo reset |
+| `POST /api/tech/profiling` | 400 `bad_request` | `on` is not a boolean or `"full"` (on, and whole stacks kept; for `npm run bench profiling=full`). Off at start and after a demo reset |
 | `GET /api/tech/profile?row=` | 400 `bad_request` | Without `row` (a Benchmark row's `key`). Answers the row's profiled runs: `{ runs, prove, verify }`, each `{ runs, samples, other, lost, hz, stacks, phases }` (the prover's stacks rooted at Device signature, Witness, Proof for the circuits) |
 | `POST /api/tech/measurements/clear` | | Empties the measurements file and the profiles file |
+| `GET /api/tech/measurements` | 400 `bad_request` | `?since=<ISO time>`: the Benchmark's rows (as `/tech`'s) over the active profile's records made at or after it; without it, all of them. `&raw=1` adds the records; `&profiles=1` adds them and their profiles (`profiles`: one per profiled run, the `.data/profiles.jsonl` record). `newest` is the newest record's time. `scripts/bench.mjs` reads it. 400 for a `since` that is not a time |
 
 `{ purpose: 'dev', age: 'none' | 'over18' | 'range13to17' }` is the developer view's request: the
 pseudonym, and the age range 18+ or 13–17 if chosen; its completion creates the account or logs in

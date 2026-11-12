@@ -1,20 +1,29 @@
 import { compactDecrypt, decodeProtectedHeader } from 'jose'
-import { RETURN_AGE, RETURN_PSEUDONYM } from '#shared/utils/dcql'
+import { CWT_CONTENT_TYPE, decodeAuthorizationResponse, decryptCwt } from '#shared/utils/cwt'
+import { RETURN_PSEUDONYM } from '#shared/utils/dcql'
 import { PROOF_SYSTEMS, findSystem } from '#shared/registry/circuits'
 import type { FailReason } from '../../../utils/store'
 import type { IssuerFormat } from '../../../utils/issuers'
+import type { BirthDateRange } from '#shared/types'
 
 /**
- * response_uri (direct_post.jwt). Form field `response`: a JWE (ECDH-ES, A128GCM) to the session's
- * key, whose payload holds the response parameters: vp_token (a JSON object) and state, or error
- * and state. An unencrypted error response (error + state as form fields) is accepted too, as
- * OpenID4VP allows a wallet that cannot encrypt; an unencrypted vp_token is refused.
+ * response_uri, in the Response Mode the request asked for:
+ * - direct_post.cwt (zkp_req.md §6.2): the body is a COSE_Encrypt (tag 96; ECDH-ES + HKDF-256,
+ *   A128GCM) to the session's key, Content-Type application/cwt, whose plaintext is the CBOR
+ *   Authorization Response (§6.1): vp_token with each ZkpPresentation as the CBOR map itself, and
+ *   state; or error and state (shared/utils/cwt.ts);
+ * - direct_post.jwt (OpenID4VP 1.0): form field `response`, a JWE (ECDH-ES, A128GCM) to the
+ *   session's key, whose payload holds vp_token (a JSON object, presentations base64url) and
+ *   state, or error and state.
+ * An unencrypted error response (error + state as form fields) is accepted in both, as OpenID4VP
+ * allows a wallet that cannot encrypt; an unencrypted vp_token is refused.
  * Verification runs here, with the request and session values from the site's own store.
  *
- * Refused before anything is processed: 404 unknown_session, 400 invalid_response (not a JWE to
- * this session's key, or a payload that is not a JSON object), 400 state_mismatch (checked first
- * after decryption, so a caller without the request's state learns nothing about the session),
- * 400 unencrypted, 410 expired or cancelled, 400 not_requested (the request was never fetched)
+ * Refused before anything is processed: 404 unknown_session, 400 invalid_response (not a
+ * COSE_Encrypt or JWE to this session's key, or a payload that is not a map or JSON object), 400
+ * state_mismatch (checked first after decryption, so a caller without the request's state learns
+ * nothing about the session), 400 response_mode (encrypted in the other mode than the request asked
+ * for), 400 unencrypted, 410 expired or cancelled, 400 not_requested (the request was never fetched)
  * and 400 already_answered (a second response: a replay). None of these changes the session. A
  * response that was processed answers 200, whether the presentation was accepted or refused; the
  * refusal's rule goes to the server log and the session trace (/tech), not to the caller.
@@ -22,12 +31,30 @@ import type { IssuerFormat } from '../../../utils/issuers'
  */
 export default defineEventHandler(async (event) => {
   const s = getVpSession(getRouterParam(event, 'id')!)
-  const raw = (await readRawBody(event, 'utf8')) ?? ''
-  const posted = Object.fromEntries(new URLSearchParams(raw))
+  const cwt = String(getRequestHeader(event, 'content-type') ?? '').toLowerCase().split(';')[0]!.trim() === CWT_CONTENT_TYPE
+  const body = (await readRawBody(event, false)) ?? Buffer.alloc(0)
+  const bodyBytes = body.length
+  const posted = cwt ? {} : Object.fromEntries(new URLSearchParams(body.toString('utf8')))
 
   let form: Record<string, unknown>
-  let jwe: { header: Record<string, unknown>; bytes: number; decrypt_ms: number } | undefined
-  if (typeof posted.response === 'string') {
+  /** The encrypted response: its Response Mode, header, size and decryption time. */
+  let envelope: { mode: 'direct_post.cwt' | 'direct_post.jwt'; header: Record<string, unknown>; bytes: number; decrypt_ms: number } | undefined
+  if (cwt) {
+    const t0 = performance.now()
+    try {
+      const { plaintext, header } = await decryptCwt(new Uint8Array(body), s.responseKey.privateKey, s.responseKey.jwk.kid)
+      const decoded = decodeAuthorizationResponse(plaintext)
+      form = {
+        ...(decoded.state !== undefined && { state: decoded.state }),
+        ...(decoded.error !== undefined && { error: decoded.error }),
+        ...(decoded.vp_token !== undefined && { vp_token: decoded.vp_token }),
+      }
+      envelope = { mode: 'direct_post.cwt', header: { ...header }, bytes: bodyBytes, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+    } catch (e) {
+      console.warn(`[vp] ${s.id}: refused a response that does not decrypt: ${(e as Error).message}`)
+      throw refusal(400, 'invalid_response', 'The body is not a COSE_Encrypt to this session\'s key holding a CBOR Authorization Response.')
+    }
+  } else if (typeof posted.response === 'string') {
     const t0 = performance.now()
     try {
       const header = decodeProtectedHeader(posted.response)
@@ -37,7 +64,7 @@ export default defineEventHandler(async (event) => {
       const payload = JSON.parse(new TextDecoder().decode(plaintext)) as unknown
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('the payload is not a JSON object')
       form = payload as Record<string, unknown>
-      jwe = { header: header as Record<string, unknown>, bytes: posted.response.length, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+      envelope = { mode: 'direct_post.jwt', header: header as Record<string, unknown>, bytes: posted.response.length, decrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
     } catch (e) {
       console.warn(`[vp] ${s.id}: refused a response that does not decrypt: ${(e as Error).message}`)
       throw refusal(400, 'invalid_response', 'response is not a JWE to this session\'s key.')
@@ -47,23 +74,30 @@ export default defineEventHandler(async (event) => {
   }
 
   if (form.state !== s.state) throw refusal(400, 'state_mismatch', 'state does not match this session.')
-  if (!jwe && form.error === undefined) {
+  // The mode the request asked for (a request fetched before the cwt switch asked for direct_post.jwt).
+  const asked = s.request?.response_mode
+  if (envelope && asked && envelope.mode !== asked) {
+    console.warn(`[vp] ${s.id}: refused a ${envelope.mode} response to a ${asked} request`)
+    addTrace(s, 'refused', 'Response in another Response Mode refused', { code: 'response_mode', mode: envelope.mode, asked, bytes: bodyBytes })
+    throw refusal(400, 'response_mode', `The request asked for ${asked}.`)
+  }
+  if (!envelope && form.error === undefined) {
     console.warn(`[vp] ${s.id}: refused an unencrypted response`)
-    addTrace(s, 'refused', 'Unencrypted response refused', { code: 'unencrypted', bytes: raw.length })
-    throw refusal(400, 'unencrypted', 'The response must be encrypted (direct_post.jwt).')
+    addTrace(s, 'refused', 'Unencrypted response refused', { code: 'unencrypted', bytes: bodyBytes })
+    throw refusal(400, 'unencrypted', `The response must be encrypted (${asked ?? 'direct_post.cwt'}).`)
   }
   const ended = endedReason(s)
   if (ended) throw goneRefusal(ended)
   if (s.status === 'waiting' || !s.request) throw refusal(400, 'not_requested', 'This session is not waiting for a response.')
   if (s.status !== 'scanned') {
     console.warn(`[vp] ${s.id}: refused a second response (already_answered)`)
-    addTrace(s, 'refused', 'Second response refused', { code: 'already_answered', bytes: raw.length })
+    addTrace(s, 'refused', 'Second response refused', { code: 'already_answered', bytes: bodyBytes })
     throw refusal(400, 'already_answered', 'This session has already received a response.')
   }
   s.status = 'responded'
-  if (jwe) {
-    s.response = { jwe: { header: jwe.header, bytes: jwe.bytes } }
-    addTrace(s, 'decrypt', 'Response decrypted', { header: jwe.header, bytes: jwe.bytes, decrypt_ms: jwe.decrypt_ms })
+  if (envelope) {
+    s.response = { envelope: { mode: envelope.mode, header: envelope.header, bytes: envelope.bytes } }
+    addTrace(s, 'decrypt', 'Response decrypted', { mode: envelope.mode, header: envelope.header, bytes: envelope.bytes, decrypt_ms: envelope.decrypt_ms })
   }
 
   const fail = (reason: FailReason, detail?: string) => {
@@ -81,7 +115,7 @@ export default defineEventHandler(async (event) => {
 
   if (form.error !== undefined) {
     const error = String(form.error)
-    addTrace(s, 'response', 'Error response received', { error, encrypted: !!jwe, bytes: raw.length })
+    addTrace(s, 'response', 'Error response received', { error, encrypted: !!envelope, ...(envelope && { mode: envelope.mode }), bytes: bodyBytes })
     return fail(error === 'access_denied' ? 'denied' : 'invalid_request', error)
   }
 
@@ -93,7 +127,8 @@ export default defineEventHandler(async (event) => {
   const list = query ? token[query.id] : undefined
   if (query && Array.isArray(list) && typeof list[0] === 'string') s.response!.presentation = list[0]
   addTrace(s, 'response', 'Presentation received', {
-    bytes: raw.length,
+    bytes: bodyBytes,
+    ...(envelope && { mode: envelope.mode }),
     encrypted: true,
     ...(query && { query: query.id, format: query.meta.source_format }),
     presentations: Array.isArray(list) ? list.map((p) => (typeof p === 'string' ? p.length : 0)) : 0,
@@ -119,17 +154,24 @@ export default defineEventHandler(async (event) => {
   let newIssuer = presented && store().trustNewIssuers && !(await isTrusted(presented)) ? presented : null
   if (format === 'mso_mdoc' && !presented) console.warn(`[issuers] ${s.id}: cannot read issuer_key_set from the presentation; the verifier checks it`)
   const t0 = Date.now()
-  let result: { ok: true; proofId: string; results: Record<string, string | true>; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; unknownIssuer?: string | null; metrics?: VerifyMetrics }
+  // The demo profile the session was created under: the rulebook version the verifiers apply.
+  const profile = sessionProfile(s)
+  const rulebook = profile.rulebook.version
+  let result: { ok: true; proofId: string; results: Record<string, string | true>; bounds?: BirthDateRange; metrics?: VerifyMetrics } | { ok: false; code?: string; reason: string; input?: string | null; unknownIssuer?: string | null; metrics?: VerifyMetrics }
   try {
     const call = { request: s.request, credential_query_id: query.id, presentation: list[0], handover: handoverFor(s) }
     /** One verification with these issuers trusted besides the configured ones. */
     const verify = async (learned: string[]) => {
       const { profile, ...r } =
         format === 'mso_mdoc'
-          ? await verifier.verify({ ...call, now: new Date().toISOString(), learned_issuers: learned })
-          : await bbsVerifier.verify({ ...call, learned_issuers: learned })
+          ? await verifier.verify({ ...call, rulebook, now: new Date().toISOString(), learned_issuers: learned })
+          : await bbsVerifier.verify({ ...call, rulebook, now: new Date().toISOString(), proof_time_tolerance_s: Number(useRuntimeConfig().proofTimeToleranceS), learned_issuers: learned })
       keepProfile(s, 'verify', profile)
-      if (r.ok) return { ok: true as const, proofId: r.system_id, results: r.results, metrics: r.metrics }
+      if (r.ok) {
+        // The bounds an age check's proof showed (a verifier that computes them reports them; null: no bound).
+        const bounds = r.bounds ? { ...(r.bounds.ge && { ge: r.bounds.ge }), ...(r.bounds.le && { le: r.bounds.le }) } : undefined
+        return { ok: true as const, proofId: r.system_id, results: r.results, ...(bounds && { bounds }), metrics: r.metrics }
+      }
       const named = r.code === 'issuer_key_set' ? ('certificate' in r ? r.certificate : 'issuer_key' in r ? r.issuer_key : null) : null
       return { ok: false as const, code: r.code, reason: r.reason, input: 'input' in r ? r.input : null, unknownIssuer: named ?? null, metrics: r.metrics }
     }
@@ -167,23 +209,42 @@ export default defineEventHandler(async (event) => {
   if (!system || system.source_format !== source) return reject('circuit', `${result.proofId} is not a ${source} system`)
   if (offered && !offered.includes(result.proofId)) return reject('circuit', `${result.proofId} not offered`)
   if (!store().acceptedProofSystems.includes(system.proof_system)) return reject('format', `${system.proof_system} is no longer accepted`)
-  const expected = query._req.map((r) => r.return).sort().join()
+  // results: exactly the return handles of the value functions (v0.5: age_check is an assertion
+  // and has none).
+  const expected = query._req
+    .map((r) => r.return)
+    .filter((h): h is string => !!h)
+    .sort()
+    .join()
   if (Object.keys(result.results).sort().join() !== expected) return reject('results', 'results keys do not match _req')
   // 32 bytes (sha-256) or a 48-byte G1 point (hashdh-bls12381g1).
   const pseudonym = result.results[RETURN_PSEUDONYM]
   const nymHex = source === 'mso_mdoc' ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{96}$/
   if (typeof pseudonym !== 'string' || !nymHex.test(pseudonym)) return reject('results', 'bad pseudonym')
-  const hasAge = query._req.some((r) => r.fn_id === 'age_check')
-  if (hasAge && result.results[RETURN_AGE] !== true) return reject('results', 'bad predicate')
+  const ageItem = query._req.find((r) => r.fn_id === 'age_check')
+  const hasAge = !!ageItem
+  // The age check, as the profile defines it: a value function returns true under its handle; an
+  // assertion has no output, the proof itself shows it holds. The birth-date bounds the proof
+  // established: the request's own (bounds from the request) or the verifier's, computed from the
+  // range and the date of proof_time.
+  const ageSpec = profile.functions.age_check
+  let ageBounds: BirthDateRange | undefined
+  if (ageItem) {
+    if (ageSpec.kind === 'value' && result.results[ageItem.return ?? ''] !== true) return reject('results', 'bad predicate')
+    ageBounds = ageSpec.bounds_date === 'proof_time' ? result.bounds : { ...(ageItem.params.ge && { ge: ageItem.params.ge }), ...(ageItem.params.le && { le: ageItem.params.le }) }
+    if (!ageBounds) return reject('results', 'the verifier reported no age bounds')
+  }
 
   s.status = 'verified'
-  s.outcome = { ok: true, format: source, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const }) }
+  s.outcome = { ok: true, format: source, proofId: result.proofId, pseudonym, ...(hasAge && { age: true as const, ageBounds }) }
   const added = newIssuer ? await learnIssuer(newIssuer, result.proofId, format) : null
   await recordMeasurement(s, source, result.proofId, result.metrics as Record<string, unknown> | undefined, hasAge)
   addTrace(s, 'verify', 'Proof verified', {
     format: source,
     system_id: result.proofId,
     results: result.results,
+    ...(ageBounds && { age_bounds: ageBounds }),
+    profile: profile.id,
     metrics: result.metrics,
     ...(added && { issuer_added: addedName(added) }),
     round_trip_ms: roundTripMs,

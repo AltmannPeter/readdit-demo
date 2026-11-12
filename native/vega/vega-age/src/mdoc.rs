@@ -216,7 +216,7 @@ impl MdocWitness {
 }
 
 /// Reads the date-time that follows `key` at offset `at`, as the number YYYYMMDDhhmmss.
-fn date_time<CS: ConstraintSystem<t256::Scalar>>(
+pub(crate) fn date_time<CS: ConstraintSystem<t256::Scalar>>(
   mut cs: CS,
   message: &Message,
   at: Option<usize>,
@@ -381,7 +381,7 @@ impl VegaCircuit<T256HyraxEngine> for MdocCore {
     cs: &mut CS,
     shared: &[AllocatedNum<t256::Scalar>],
   ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
-    let cells = Cells(shared);
+    let cells = Cells::new(shared);
     let (_, facts) = age_part(cs, &cells, self.witness.as_deref(), &AGE)?;
     facts.into_slots(cs.namespace(|| "facts"))
   }
@@ -451,7 +451,7 @@ impl VegaCircuit<T256HyraxEngine> for MdocNymCore {
     shared: &[AllocatedNum<t256::Scalar>],
   ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
     let w = self.witness.as_deref();
-    let cells = Cells(shared);
+    let cells = Cells::new(shared);
     let (signed, facts) = age_part(cs, &cells, w, &FULL_MDOC)?;
     let mut slots = facts.into_slots(cs.namespace(|| "facts"))?;
     slots.extend(nym_part(cs.namespace(|| "pseudonym"), &cells, &signed, w, &FULL_MDOC)?);

@@ -22,6 +22,7 @@
 //! The prover keeps no holder state: every call brings the credential material it needs. The
 //! keys are built once from the circuits and kept, since they are deterministic.
 
+pub mod bsc;
 pub mod circuit;
 pub mod dates;
 pub mod error;

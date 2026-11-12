@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 pub mod credential;
+pub mod dates;
 pub mod error;
 pub mod measure;
 pub mod presentation;

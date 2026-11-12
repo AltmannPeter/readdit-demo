@@ -1,4 +1,5 @@
-// OpenID4VP 1.0 with the `zkp_req` format of the Nym-authentication rulebook (v0.4): one DCQL
+// OpenID4VP 1.0 with the `zkp_req` format of the Nym-authentication rulebook (v0.4 and v0.5, by
+// demo profile, shared/profiles): one DCQL
 // format for zero-knowledge presentations over either encoding of the nym_auth attestation,
 // ISO/IEC 18013-5 (`mso_mdoc`, proved with circuits) and BBS committed disclosures (`bbs_cd`,
 // proved with a scheme and its plugins).
@@ -17,7 +18,7 @@ export type PseudonymConfig =
   | 'user-managed-pseudonym-xsite-ssc'
 
 /** The pseudonym's PRF: `sha-256` (mso_mdoc), `hashdh-bls12381g1` (bbs_cd, a 48-byte G1 point). */
-export type PseudonymPrf = 'sha-256' | 'hashdh-bls12381g1'
+export type PseudonymPrf = 'sha-256' | 'aes-128' | 'hashdh-bls12381g1'
 
 export interface PseudonymReq {
   fn_id: 'pseudonym'
@@ -30,10 +31,13 @@ export interface PseudonymReq {
   }
 }
 
+/** age_check: a value function in v0.4 (`return`, params `ge`/`le` birth-date bounds), an
+ *  assertion in v0.5 (no `return`, param `range` in whole years). The profile decides
+ *  (shared/protocol/request.ts). */
 export interface AgeCheckReq {
   fn_id: 'age_check'
-  return: string
-  params: { ge?: string; le?: string }
+  return?: string
+  params: { ge?: string; le?: string; range?: string }
 }
 
 export type ReqItem = PseudonymReq | AgeCheckReq
@@ -85,6 +89,14 @@ export interface WalletMetadata {
   authorization_encryption_enc_values_supported?: string[]
 }
 
+/** The Response Modes the demo uses: direct_post.cwt (zkp_req.md §6.2: a CBOR response in a
+ *  COSE_Encrypt, the body itself) and direct_post.jwt (OpenID4VP 1.0: a JSON response in a JWE,
+ *  posted as `response`); plain direct_post only for an error the wallet cannot encrypt. */
+export type ResponseMode = 'direct_post' | 'direct_post.jwt' | 'direct_post.cwt'
+/** The encrypted Response Modes the site can ask for (/tech's switch). */
+export const ENCRYPTED_RESPONSE_MODES = ['direct_post.cwt', 'direct_post.jwt'] as const
+export type EncryptedResponseMode = (typeof ENCRYPTED_RESPONSE_MODES)[number]
+
 /** Decoded payload of the Request Object fetched from `request_uri`. */
 export interface RequestObject {
   iss?: string
@@ -92,7 +104,7 @@ export interface RequestObject {
   iat?: number
   wallet_nonce?: string
   response_type: 'vp_token'
-  response_mode: 'direct_post' | 'direct_post.jwt'
+  response_mode: ResponseMode
   response_uri: string
   client_id: string
   nonce: string
@@ -101,7 +113,7 @@ export interface RequestObject {
   client_metadata: {
     client_name?: string
     vp_formats_supported: VpFormats
-    /** direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
+    /** direct_post.cwt and direct_post.jwt: the verifier's ephemeral key to encrypt the response to. */
     jwks?: { keys: EncryptionJwk[] }
     /** Absent: A128GCM only (OpenID4VP 1.0). */
     encrypted_response_enc_values_supported?: string[]

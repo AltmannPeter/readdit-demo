@@ -1,10 +1,22 @@
 import type { DevAge, DevSession } from '~/dev/flow'
 
+export interface DevProfile {
+  id: string
+  label: string
+  version: string
+  commit: string | null
+  commitUrl: string | null
+  documentUrl: string
+  pending: Array<{ proof_system: string; note: string }>
+}
+
 interface DevState {
   session: DevSession | null
   /** The proof systems the site accepts now (/tech). */
   accepted: string[]
   multithreading: boolean
+  /** The demo profile (/tech's dropdown): version, commit and rulebook links, systems it cannot use yet. */
+  profile: DevProfile | null
   /** Sessions created up to this time (server clock, ms) are not shown (Clear, R). */
   clearedAt: number
   age: DevAge
@@ -33,6 +45,7 @@ export function useDevFlow() {
     session: null,
     accepted: [],
     multithreading: false,
+    profile: null,
     clearedAt: 0,
     age: 'none',
     ownId: null,
@@ -52,7 +65,8 @@ export function useDevFlow() {
   let completing: string | null = null
   async function load() {
     try {
-      const r = await $fetch<{ accepted: string[]; multithreading: boolean; session: DevSession | null }>('/api/dev/latest', { query: { after: state.value.clearedAt } })
+      const r = await $fetch<{ profile: DevProfile; accepted: string[]; multithreading: boolean; session: DevSession | null }>('/api/dev/latest', { query: { after: state.value.clearedAt } })
+      state.value.profile = r.profile
       state.value.accepted = r.accepted
       state.value.multithreading = r.multithreading
       state.value.session = r.session

@@ -171,12 +171,12 @@ pub fn pseudonym_of(values: &[t256::Scalar]) -> Option<[u8; 32]> {
 }
 
 /// 2^72, the weight of a chunk's byte 7 (counted from 0 at the top).
-fn two_72() -> t256::Scalar {
+pub(crate) fn two_72() -> t256::Scalar {
   t256::Scalar::from(1u64 << 36).square()
 }
 
 /// The constant of a chunk's bytes.
-fn constant(bytes: &[u8]) -> Lc {
+pub(crate) fn constant(bytes: &[u8]) -> Lc {
   Lc::constant(from_be(bytes))
 }
 
@@ -240,10 +240,26 @@ pub fn seed_and_nym<CS: ConstraintSystem<t256::Scalar>>(
   }
   let digest = [cells.state(s, 0), cells.state(s, 1)];
 
+  let facts = nym_blocks(&mut cs, cells, regions.nym.first, &seed)?;
+  Ok((digest, facts))
+}
+
+/// The rules of the pseudonym's two blocks at positions `n` and `n + 1`, for the seed `seed` (a
+/// 128-bit table chunk, which the steps range-check): the first block holds DST's 39 bytes, the
+/// seed's 16 and prover_input's first 9 zero bytes, the seed split at its ninth byte; the second
+/// prover_input's next 16 zero bytes, then verifier_input with the padding. Returns the five values
+/// the rest segment compares with verifier_input and the pseudonym ([`check`]). The v0.4 core
+/// ([`seed_and_nym`]) and the v0.5 core (`crate::bsc`) share it.
+pub(crate) fn nym_blocks<CS: ConstraintSystem<t256::Scalar>>(
+  cs: &mut CS,
+  cells: &Cells,
+  n: usize,
+  seed: &Lc,
+) -> Result<[Lc; VALUES], SynthesisError> {
+  let chunk = |j: usize, c: usize| cells.chunk(CHUNKS_PER_BLOCK * j + c);
   // The pseudonym's first block: DST's 39 bytes, the seed's 16, and prover_input's first 9 zero
   // bytes. The seed's low 7 bytes, a 56-bit number, fill the last chunk's top; its high 9 bytes
   // end the chunk before it, after DST's last 7.
-  let n = regions.nym.first;
   equal(cs.namespace(|| "pseudonym dst 0"), &chunk(n, 0), &constant(&DST[..16]));
   equal(cs.namespace(|| "pseudonym dst 1"), &chunk(n, 1), &constant(&DST[16..32]));
   let low = seed.value.map(|v| {
@@ -255,21 +271,20 @@ pub fn seed_and_nym<CS: ConstraintSystem<t256::Scalar>>(
   let low = pack(&alloc_bits(cs.namespace(|| "seed low bytes"), low, 56)?);
   let two_72 = two_72();
   equal(cs.namespace(|| "pseudonym seed low"), &chunk(n, 3), &low.scale(two_72));
-  let high = (&seed - &low).scale(inverse(t256::Scalar::from(1u64 << 56)));
+  let high = (seed - &low).scale(inverse(t256::Scalar::from(1u64 << 56)));
   let dst_end = Lc::constant(from_be(&DST[32..]) * two_72);
   equal(cs.namespace(|| "pseudonym seed high"), &chunk(n, 2), &(dst_end + &high));
 
   // The pseudonym's second block: prover_input's next 16 zero bytes, then what the rest segment
   // compares with verifier_input.
   equal(cs.namespace(|| "pseudonym prover input"), &chunk(n + 1, 0), &Lc::zero());
-  let facts = [
+  Ok([
     chunk(n + 1, 1),
     chunk(n + 1, 2),
     chunk(n + 1, 3),
     cells.state(n + 1, 0),
     cells.state(n + 1, 1),
-  ];
-  Ok((digest, facts))
+  ])
 }
 
 /// The commitment's rule ([`seed_and_nym`]'s digest against `ssc`'s value, its two 128-bit

@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 import type { VpFormats } from '#shared/types/oid4vp'
 import { PROOF_SYSTEMS, findCircuit, findScheme, findSystem } from '#shared/registry/circuits'
+import { systemAvailable } from '#shared/profiles'
 import type { VpSessionRecord } from './store'
 
 const list = (v: unknown) =>
@@ -17,7 +18,13 @@ const list = (v: unknown) =>
  * is a configuration error and fails the offer.
  */
 async function circuitOffer(systems: string[]): Promise<string[]> {
-  const accepted = list(useRuntimeConfig().acceptedCircuits).filter((id) => systems.includes(findCircuit(id)?.proof_system ?? ''))
+  // The circuits of the demo profile's rulebook version: each reads that version's credential and
+  // requests (a circuit's id names its archive, so v0.4's and v0.5's Longfellow circuits differ).
+  const version = activeProfile().rulebook.version
+  const accepted = list(useRuntimeConfig().acceptedCircuits).filter((id) => {
+    const e = findCircuit(id)
+    return !!e && e.rulebook === version && systems.includes(e.proof_system)
+  })
   if (!accepted.length) return []
   const info = await verifier.info()
   const ids = accepted.filter((id) => {
@@ -72,7 +79,9 @@ export class NothingAccepted extends Error {
  * configuration mismatch. With nothing accepted, NothingAccepted.
  */
 export async function verifierOffer(): Promise<VpFormats> {
-  const accepted = store().acceptedProofSystems
+  // A proof system the demo profile cannot use yet (status pending) is not offered.
+  const profile = activeProfile()
+  const accepted = store().acceptedProofSystems.filter((x) => systemAvailable(profile, x))
   if (!accepted.length) throw new NothingAccepted()
   const missing: string[] = []
   const take = async (systems: string[], make: () => Promise<string[]>): Promise<string[]> => {

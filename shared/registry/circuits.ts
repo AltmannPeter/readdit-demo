@@ -35,18 +35,26 @@ export interface CircuitEntry {
   label: string
   source_format: 'mso_mdoc'
   doctype: string
-  /** 'any' = accepts any ISO/IEC 18013-5 conformant encoding; 'compact' = compact profile only. */
-  profile: 'any' | 'compact'
+  /** 'any' = accepts any ISO/IEC 18013-5 conformant encoding; 'compact' = compact profile only;
+   *  'decoy' = the decoy-digest layout (rulebook v0.6) only; 'v07' = the v0.7 layout (rulebook v0.7) only. */
+  profile: 'any' | 'compact' | 'decoy' | 'v07'
   functions: {
     pseudonym?: PseudonymSupport
-    age_check?: { params: Array<'ge' | 'le'> }
+    age_check?: { params: Array<'ge' | 'le' | 'range'> }
   }
   issuer_key_set: 'x509-ds-cert-list'
   checks_validity: boolean
   public_inputs: PublicInput[]
   /** The circuit as data, pinned by hash: the services must report the same. */
   artifact?: { name: string; sha256: string }
+  /** The rulebook version whose credential and requests the circuit reads (a demo profile's
+   *  `rulebook.version`): v0.4 (birth_date, ssc), v0.5 (bsc), v0.6 (decoy digests) or v0.7 (AES commitments). */
+  rulebook: string
 }
+
+/** A circuit's id (Peter, 2026-10-28): `urn:circuits:sha256:` and the SHA-256 of its archive as
+ *  shipped, so each set of circuits has its own id. */
+export const circuitId = (archiveSha256: string) => `urn:circuits:sha256:${archiveSha256}`
 
 // Vega nym_auth (nym-auth-circuits, SPEC.md V3.2): 18 core public values in this order.
 const VEGA_PUBLIC_INPUTS: PublicInput[] = [
@@ -75,9 +83,71 @@ const LONGFELLOW_PUBLIC_INPUTS: PublicInput[] = [
   { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the SessionTranscript [null, null, OpenID4VPHandover] also seeds the Fiat–Shamir transcript' },
 ]
 
+// Longfellow nym_auth under rulebook v0.5: the nym-auth-zk bsc circuits (Peter's package
+// nym-auth-longfellow v1.1, INTEGRATION.md §7), with their own id. Hash circuit 277 + 1 = 278 public
+// slots, signature circuit 1154 + 1 = 1155; values = elements in both, circuit order.
+const LONGFELLOW_V05_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'doctype', source: 'verifier', values: 8, derivation: 'the pattern 67 "docType" 78 1c and the docType eu.europa.ec.eudi.nym_auth.1: two 16-byte limbs, then 6 byte elements (hash circuit)' },
+  { name: 'proof_time', source: 'presentation', values: 2, derivation: 'T = YYYYMMDDhhmmss as x^(T+533333333333328) and x^(T+533333333333329) (hash circuit), checked against the verifier clock within tolerance, outside the proof' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 256, derivation: 'SHA-256(verifier_id), verifier_id = client_id (x509_san_dns form), as bits (hash circuit)' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, as two 16-byte halves (hash circuit)' },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'E from the range and the UTC date of proof_time, as x^(E+533333328); 0 when absent (hash circuit)' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'C from the range and the UTC date of proof_time, as x^(C+533333328); 99999999 when absent (hash circuit)' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat–Shamir bytes drawn after both commitments, in both circuits (bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c·m_k, the six 16-byte words at the head of the proof, in both circuits: they tie the signed message and the device key the hash circuit reads to those the signature circuit verifies' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (signature circuit)' },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure) as bits (signature circuit); the transcript starts from "nym_auth/v1/mdoc-bsc/longfellow" ‖ e2' },
+]
+
+// Longfellow nym_auth under rulebook v0.6: the nym-auth-zk-decoy circuits over the decoy-digest
+// layout (Peter's package nym-auth-longfellow-decoy-v1, INTEGRATION.md §7), with their own id. Hash
+// circuit 268 + 1 = 269 public slots, signature circuit 1154 + 1 = 1155; values = elements in both,
+// circuit order (nym-longfellow/src/decoy.rs, PUBLIC_INPUTS). No doctype entry: the layout fixes it.
+const LONGFELLOW_DECOY_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'x^(T+533333333333328), T = YYYYMMDDhhmmss (UTC); tolerance checked outside the proof' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 256, derivation: 'SHA-256(verifier_id), bit j of byte d at 8d+j; verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: "the pseudonym's two 16-byte halves, LE" },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'x^(E+533333328); E = 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'x^(C+533333328); C = 99999999 when absent' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat-Shamir bytes after both commitments (1 in the hash circuit, 128 bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 774, derivation: 't_k = a_k + c m_k, the six words at the head of the proof (6 + 768 bits)' },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: "Q's x and y" },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: "e2's 256 bits, least significant first" },
+]
+
+// Longfellow nym_auth under rulebook v0.7: the nym-auth-zk-v07 circuits over the v0.7 layout
+// (Peter's package nym-auth-longfellow-v07-v1, INTEGRATION.md §7), with their own id. Hash circuit
+// 266 + 1 = 267 public slots, signature circuit 898 + 1 = 899; values = elements in both, circuit
+// order (nym-longfellow/src/v07.rs, PUBLIC_INPUTS).
+const LONGFELLOW_V07_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'x^(T+533333333333328), T = YYYYMMDDhhmmss (UTC); tolerance checked outside the proof' },
+  { name: 'pseudonym.nym_block', source: 'verifier', values: 256, derivation: 'H = SHA-256("nym_auth/v1/aes-128/known-offender-matching-ssc" || 0^32 || SHA-256(verifier_id)), bit j of byte d at 8d+j; verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: "the pseudonym's two 16-byte halves, LE" },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'x^(E+533333328); E = 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'x^(C+533333328); C = 99999999 when absent' },
+  { name: 'mac.challenge', source: 'verifier', values: 129, derivation: 'c, 16 Fiat-Shamir bytes after both commitments (1 in the hash circuit, 128 bits in the signature circuit)' },
+  { name: 'mac.tags', source: 'presentation', values: 516, derivation: "t_k = a_k + c m_k over e and the device key's x, the four words at the head of the proof (4 + 512 bits)" },
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: "Q's x and y" },
+  { name: 'session_transcript', source: 'verifier', values: 256, derivation: "e2's 256 bits, least significant first" },
+]
+
+// Vega nym_auth under rulebook v0.5: vega-age 0.2.0's bsc core (Peter's package nym-auth-vega v1,
+// INTEGRATION.md §3), with its own id. 15 core public values in this order; the verifier names the
+// first 13, the proof reports the last 2.
+const VEGA_V05_PUBLIC_INPUTS: PublicInput[] = [
+  { name: 'issuer_key_set', source: 'presentation', values: 2, derivation: 'one DER Document Signer certificate, validated against the trust anchors; its P-256 key is the issuer key Q (x, y)' },
+  { name: 'age_check.ge', source: 'verifier', values: 1, derivation: 'E as YYYYMMDD from the range on the UTC date of proof_time; 0 when absent' },
+  { name: 'age_check.le', source: 'verifier', values: 1, derivation: 'C as YYYYMMDD from the range on the UTC date of proof_time; 99999999 when absent' },
+  { name: 'proof_time', source: 'presentation', values: 1, derivation: 'YYYYMMDDhhmmss (UTC), checked against the verifier clock within tolerance' },
+  { name: 'session_transcript', source: 'verifier', values: 2, derivation: 'e2 = SHA-256(DeviceAuthentication Sig_structure), two 16-byte halves; SessionTranscript [null, null, OpenID4VPHandover]' },
+  { name: 'doctype', source: 'verifier', values: 3, derivation: 'pattern of the docType eu.europa.ec.eudi.nym_auth.1' },
+  { name: 'pseudonym.verifier_input', source: 'verifier', values: 3, derivation: 'SHA-256(verifier_id), verifier_id = client_id' },
+  { name: 'results.nym', source: 'presentation', values: 2, derivation: 'the pseudonym, 32 bytes, two halves' },
+]
+
 export const CIRCUIT_REGISTRY: CircuitEntry[] = [
   {
-    system_id: 'urn:circuits:vega:nym_auth:v1',
+    system_id: circuitId('b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df'),
     proof_system: 'vega-v1',
     label: 'Vega nym_auth v1',
     source_format: 'mso_mdoc',
@@ -91,9 +161,78 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     checks_validity: true,
     public_inputs: VEGA_PUBLIC_INPUTS,
     artifact: { name: 'shapes.zst', sha256: 'b457ba5382eb7604ef035e790f2cb24f0cd5fdcd065f383ff1c2c49fab1bb4df' },
+    rulebook: '0.4',
   },
   {
-    system_id: 'urn:circuits:longfellow:nym_auth:v1',
+    system_id: circuitId('7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794'),
+    proof_system: 'vega-v1',
+    label: 'Vega nym_auth v0.5 (bsc)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'compact',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: VEGA_V05_PUBLIC_INPUTS,
+    artifact: { name: 'shapes.zst', sha256: '7df07fefef643512270e2de4964bc1f9b6238015225cfd872e2fb35e7bb80794' },
+    rulebook: '0.5',
+  },
+  {
+    system_id: circuitId('f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v1 (bsc)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'compact',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_V05_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_bsc.lfa2.zst', sha256: 'f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52' },
+    rulebook: '0.5',
+  },
+  {
+    system_id: circuitId('5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v0.6 (decoy digests)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'decoy',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['sha-256'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_DECOY_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_decoy.lfa2.zst', sha256: '5d7d2b5d094032df5b02f576d2ae7b99d3f0932d47516336693f8d670cfd63ac' },
+    rulebook: '0.6',
+  },
+  {
+    system_id: circuitId('218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd'),
+    proof_system: 'longfellow-libzk-v1',
+    label: 'Longfellow nym_auth v0.7 (AES commitments)',
+    source_format: 'mso_mdoc',
+    doctype: NYM_DOCTYPE,
+    profile: 'v07',
+    functions: {
+      pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['aes-128'], ver: [1], required: true },
+      age_check: { params: ['range'] },
+    },
+    issuer_key_set: 'x509-ds-cert-list',
+    checks_validity: true,
+    public_inputs: LONGFELLOW_V07_PUBLIC_INPUTS,
+    artifact: { name: 'nym_auth_mdoc_v07.lfa2.zst', sha256: '218a72dea317cfcde2e715860e6b3a5dda2c67260f4cf9e8311c62ef900c34bd' },
+    rulebook: '0.7',
+  },
+  {
+    system_id: circuitId('6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b'),
     proof_system: 'longfellow-libzk-v1',
     label: 'Longfellow nym_auth v1',
     source_format: 'mso_mdoc',
@@ -107,11 +246,12 @@ export const CIRCUIT_REGISTRY: CircuitEntry[] = [
     checks_validity: true,
     public_inputs: LONGFELLOW_PUBLIC_INPUTS,
     artifact: { name: 'circuits.zst', sha256: '6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b' },
+    rulebook: '0.4',
   },
 ]
 
 export function findCircuit(id: string): CircuitEntry | undefined {
-  return CIRCUIT_REGISTRY.find((c) => c.system_id === id)
+  return CIRCUIT_REGISTRY.find((x) => x.system_id === id)
 }
 
 // ---- bbs_cd: schemes (rulebook v0.4, "BBS committed-disclosure encoding"; docs/bbs_cd.md) ----
@@ -131,7 +271,7 @@ export interface SchemeEntry {
   plugins: Array<{ id: string; attribute: string; proves: string }>
   functions: {
     pseudonym: PseudonymSupport
-    age_check: { params: Array<'ge' | 'le'> }
+    age_check: { params: Array<'ge' | 'le' | 'range'> }
   }
   /** The issuer key set: one BBS issuer public key (96 bytes), so the Verifier sees the issuer. */
   issuer_key_set: 'bbs-issuer-pk'
@@ -154,7 +294,8 @@ export const SCHEME_REGISTRY: SchemeEntry[] = [
     ],
     functions: {
       pseudonym: { configs: ['known-offender-matching-ssc'], prf: ['hashdh-bls12381g1'], ver: [1], required: true },
-      age_check: { params: ['ge', 'le'] },
+      // ge/le: rulebook v0.4; range (ages in years, bounds from the date of proof_time): v0.5.
+      age_check: { params: ['ge', 'le', 'range'] },
     },
     issuer_key_set: 'bbs-issuer-pk',
     statement: [
@@ -162,7 +303,7 @@ export const SCHEME_REGISTRY: SchemeEntry[] = [
       { name: 'nonce', derivation: 'the request nonce' },
       { name: 'credential', derivation: "the issuer's BBS public key and the schema digest, nothing disclosed" },
       { name: 'pseudonym.verifier_input', derivation: 'UTF-8(verifier_id), verifier_id = client_id (x509_san_dns form)' },
-      { name: 'age_check', derivation: 'ge and le as sent, as YYYYMMDD' },
+      { name: 'age_check', derivation: 'v0.4: ge and le as sent; v0.5: E and C from range and the UTC date of proof_time; as YYYYMMDD' },
     ],
   },
 ]
@@ -178,6 +319,12 @@ export const SYSTEM_REGISTRY: SystemEntry[] = [...CIRCUIT_REGISTRY, ...SCHEME_RE
 
 export function findSystem(id: string): SystemEntry | undefined {
   return SYSTEM_REGISTRY.find((s) => s.system_id === id)
+}
+
+/** The approved systems for rulebook `version` (a demo profile's): the circuits that read its
+ *  credential and requests, and the schemes (BBS reads both versions). */
+export function registryFor(version?: string): SystemEntry[] {
+  return SYSTEM_REGISTRY.filter((e) => e.source_format !== 'mso_mdoc' || !version || e.rulebook === version)
 }
 
 /** The type value a system is for: the doctype (mso_mdoc) or the schema id (bbs_cd). */

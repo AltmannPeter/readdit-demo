@@ -1,6 +1,7 @@
 import { findCommunity } from '#shared/data/communities'
 import { buildDcqlQuery, authorizationUrl, clientIdFor, requestUriFor } from '#shared/utils/dcql'
-import { decideGate, gateRange, todayISO } from '#shared/utils/age'
+import { decideGate, todayISO } from '#shared/utils/age'
+import { ageParamsFor } from '#shared/protocol/request'
 import { randomHex } from '#shared/utils/bytes'
 import { DEV_GATES, type DevAge, type VpPurpose, type VpSessionRecord } from '../../utils/store'
 
@@ -76,8 +77,9 @@ export default defineEventHandler(async (event) => {
   const origin = publicOrigin(event, body.origin)
   const id = randomHex(16)
   const ttl = sessionTtlMs()
-  const age = gate ? gateRange(gate, todayISO()) : undefined
-  const dcql = buildDcqlQuery(offer, age)
+  const profile = activeProfile()
+  const ageParams = gate ? ageParamsFor(profile, gate, todayISO()) : undefined
+  const dcql = buildDcqlQuery(offer, profile, ageParams)
   const s: VpSessionRecord = {
     id,
     purpose,
@@ -91,7 +93,8 @@ export default defineEventHandler(async (event) => {
     nonce: randomHex(16),
     state: randomHex(16),
     responseKey: await newResponseKey(),
-    ...(age && { age }),
+    profile: profile.id,
+    ...(ageParams && { ageParams }),
     dcql,
     offer,
     status: 'waiting',

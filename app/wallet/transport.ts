@@ -1,5 +1,6 @@
 import { CompactEncrypt, compactVerify, decodeProtectedHeader, importJWK } from 'jose'
 import type { AuthorizationResponse, RequestObject, WalletMetadata } from '#shared/types/oid4vp'
+import { CWT_CONTENT_TYPE, coseEncOf, encodeAuthorizationResponse, encryptCwt } from '#shared/utils/cwt'
 
 /** How the wallet talks to the verifier: fetch request_uri, post to response_uri. */
 export interface WalletTransport {
@@ -9,42 +10,50 @@ export interface WalletTransport {
     clientId: string
     walletMetadata?: WalletMetadata
   }): Promise<VerifiedRequest>
-  /** direct_post.jwt: encrypts the response to the request's key first (encryptResponse), unless
-   *  the caller passes the encrypted response. */
+  /** Encrypts the response to the request's key first (encryptResponse), in the request's Response
+   *  Mode, unless the caller passes the encrypted response. */
   postResponse(request: RequestObject, body: AuthorizationResponse, encrypted?: EncryptedResponse | null): Promise<void>
 }
 
-/** How the response was encrypted, for the technical view. */
-export interface EncryptedResponse {
-  jwe: string
-  header: { alg: string; enc: string; kid?: string }
-  encrypt_ms: number
-}
+/** How the response was encrypted, for the technical view, and what is posted. */
+export type EncryptedResponse =
+  | { mode: 'direct_post.jwt'; jwe: string; header: { alg: string; enc: string; kid?: string }; bytes: number; encrypt_ms: number }
+  | { mode: 'direct_post.cwt'; cwt: Uint8Array; header: { alg: string; enc: string; kid?: string }; bytes: number; encrypt_ms: number }
 
 /**
- * direct_post.jwt (OpenID4VP 1.0): the response parameters as the payload of a JWE to the first
- * usable key in client_metadata.jwks, ECDH-ES on P-256, `enc` A128GCM by default, the key's `kid`
- * copied into the header. Null when the request asks for no encryption or gives no usable key.
+ * Encrypts the response to the first usable key in client_metadata.jwks (ECDH on P-256, `enc`
+ * A128GCM by default, the key's `kid` passed on), in the request's Response Mode:
+ * - direct_post.cwt (zkp_req.md §6.2): the CBOR Authorization Response, each ZkpPresentation the
+ *   CBOR map itself, in a COSE_Encrypt (ECDH-ES + HKDF-256), posted as the body;
+ * - direct_post.jwt (OpenID4VP 1.0): the JSON parameters in a JWE (ECDH-ES), posted as `response`.
+ * Null when the request asks for no encryption or gives no usable key.
  */
 export async function encryptResponse(request: RequestObject, body: AuthorizationResponse): Promise<EncryptedResponse | null> {
-  if (request.response_mode !== 'direct_post.jwt') return null
+  if (request.response_mode !== 'direct_post.jwt' && request.response_mode !== 'direct_post.cwt') return null
   const jwk = encryptionKeyOf(request)
   const enc = responseEncOf(request)
   if (!jwk || !enc) return null
   const t0 = performance.now()
+  const ms = () => Math.round((performance.now() - t0) * 100) / 100
+  if (request.response_mode === 'direct_post.cwt') {
+    const { bytes, header } = await encryptCwt(encodeAuthorizationResponse(body), jwk, coseEncOf(enc))
+    return { mode: 'direct_post.cwt', cwt: bytes, header, bytes: bytes.length, encrypt_ms: ms() }
+  }
   const header = { alg: jwk.alg!, enc, ...(jwk.kid && { kid: jwk.kid }) }
   const key = await importJWK({ kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jwk.alg)
   const jwe = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify(body))).setProtectedHeader(header).encrypt(key)
-  return { jwe, header, encrypt_ms: Math.round((performance.now() - t0) * 100) / 100 }
+  return { mode: 'direct_post.jwt', jwe, header, bytes: jwe.length, encrypt_ms: ms() }
 }
 
-/** The form posted to response_uri: `response` (encrypted), or the parameters as fields. Only an
- *  error response goes unencrypted (OpenID4VP allows it when the wallet cannot encrypt). */
-export async function responseForm(request: RequestObject, body: AuthorizationResponse, encrypted?: EncryptedResponse | null): Promise<URLSearchParams> {
+/** What is posted to response_uri: the COSE_Encrypt as the body (direct_post.cwt), `response`
+ *  (direct_post.jwt), or the parameters as form fields. Only an error response goes unencrypted
+ *  (OpenID4VP allows it when the wallet cannot encrypt). */
+export async function responseBody(request: RequestObject, body: AuthorizationResponse, encrypted?: EncryptedResponse | null): Promise<{ contentType: string; body: BodyInit }> {
   const e = encrypted === undefined ? await encryptResponse(request, body) : encrypted
-  if (e) return new URLSearchParams({ response: e.jwe })
+  if (e?.mode === 'direct_post.cwt') return { contentType: CWT_CONTENT_TYPE, body: e.cwt as BufferSource }
+  if (e) return { contentType: 'application/x-www-form-urlencoded', body: new URLSearchParams({ response: e.jwe }) }
   if (!('error' in body)) throw new Error('the request gives no key to encrypt the presentation to')
-  return new URLSearchParams({ state: body.state, error: body.error })
+  return { contentType: 'application/x-www-form-urlencoded', body: new URLSearchParams({ state: body.state, error: body.error }) }
 }
 
 /** An HTTP refusal from request_uri or response_uri: its status and the code in its error body. */
@@ -117,8 +126,8 @@ export const httpTransport: WalletTransport = {
     return verified
   },
   async postResponse(request, body, encrypted) {
-    const form = await responseForm(request, body, encrypted)
-    const res = await fetch(request.response_uri, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form })
+    const post = await responseBody(request, body, encrypted)
+    const res = await fetch(request.response_uri, { method: 'POST', headers: { 'content-type': post.contentType }, body: post.body })
     if (!res.ok) throw new TransportError('response_uri', res.status, await codeOf(res))
   },
 }

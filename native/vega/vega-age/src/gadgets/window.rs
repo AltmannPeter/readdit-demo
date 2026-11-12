@@ -25,7 +25,16 @@ pub fn find(bytes: &[u8], pattern: &[u8], what: &str) -> Result<usize, String> {
 pub struct Message<'a> {
   cells: &'a Cells<'a>,
   region: Region,
-  last: OneHot,
+  end: End,
+}
+
+/// Where every read of a message must end.
+enum End {
+  /// Within the message's blocks up to its last one, a private index within the region.
+  LastBlock(OneHot),
+  /// Within the message's bytes: its length, a private value that the message's SHA-256 padding
+  /// fixes ([`super::padding`]).
+  Length(Lc),
 }
 
 /// Bytes read at an offset, and the offset as a sum of slots.
@@ -50,7 +59,16 @@ impl<'a> Message<'a> {
       digest.push(last.select(cs.namespace(|| format!("digest half {h}")), &states)?);
     }
     let digest = [digest[0].clone(), digest[1].clone()];
-    Ok((Message { cells, region, last }, digest))
+    Ok((Message { cells, region, end: End::LastBlock(last) }, digest))
+  }
+
+  /// A message whose region holds exactly its padded blocks, of the private length `len` that its
+  /// padding fixes ([`super::padding::padded`]): every read ends within its `len` bytes, so no read
+  /// reaches the padding. Its digest is the state after the region's last block.
+  pub fn of_length(cells: &'a Cells<'a>, region: Region, len: Lc) -> (Self, [Lc; 2]) {
+    let last = region.first + region.blocks - 1;
+    let digest = [cells.state(last, 0), cells.state(last, 1)];
+    (Message { cells, region, end: End::Length(len) }, digest)
   }
 
   /// Reads `len` bytes starting at the private byte offset `at` from the start of the message.
@@ -64,8 +82,10 @@ impl<'a> Message<'a> {
   ///
   /// The chunks are split into bytes, and a shifter drops the first `at mod 16` of them in four
   /// stages of 8, 4, 2 and 1 bytes, each stage one choice per byte. A last rule keeps the window
-  /// inside the message's blocks up to its last one. The signature fixes those blocks only, so a
-  /// prover could write anything into a later block.
+  /// inside the message's blocks up to its last one: the signature fixes those blocks only, so a
+  /// prover could write anything into a later block. For a message of a checked length
+  /// ([`Message::of_length`]) the rule keeps the window within its length instead, so no window
+  /// reaches the padding.
   ///
   /// A witness generator, which ignores the rules, takes the selections, the chunks' bits and the
   /// choices natively.
@@ -87,11 +107,21 @@ impl<'a> Message<'a> {
       + &chunk.index().scale(t256::Scalar::from(CHUNK_BYTES as u64))
       + &pack(&shift);
 
-    // The window ends within the last block: 64 · (last + 1) − (offset + len) is not negative.
-    let end_of_last =
-      (self.last.index() + &Lc::constant(t256::Scalar::ONE)).scale(t256::Scalar::from(64));
-    let room = end_of_last - &offset - &Lc::small(len as u64);
-    range_check(cs.namespace(|| "inside the signed blocks"), &room, OFFSET_BITS)?;
+    // The window ends within the last block: 64 · (last + 1) − (offset + len) is not negative; or
+    // within the message: its length − (offset + len) is not negative.
+    let room = match &self.end {
+      End::LastBlock(last) => {
+        let end_of_last =
+          (last.index() + &Lc::constant(t256::Scalar::ONE)).scale(t256::Scalar::from(64));
+        end_of_last - &offset - &Lc::small(len as u64)
+      }
+      End::Length(message_len) => message_len.clone() - &offset - &Lc::small(len as u64),
+    };
+    let rule = match &self.end {
+      End::LastBlock(_) => "inside the signed blocks",
+      End::Length(_) => "inside the message",
+    };
+    range_check(cs.namespace(|| rule), &room, OFFSET_BITS)?;
     if cs.is_witness_generator() {
       let at = at.ok_or(SynthesisError::AssignmentMissing)?;
       return Ok(Window { bytes: self.read_values(&mut cs, at, len, chunks)?, offset });

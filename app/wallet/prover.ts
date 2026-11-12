@@ -17,7 +17,7 @@ export interface ProveOutput {
   presentation: string
   results: Record<string, string | true>
   witness_ms?: number
-  metrics: { witness_ms?: number; prove_ms?: number; total_ms?: number; proof_bytes?: number; presentation_bytes?: number }
+  metrics: { witness_ms?: number; prebuild_ms?: number; prove_ms?: number; total_ms?: number; proof_bytes?: number; presentation_bytes?: number }
 }
 
 export type ProveError = 'unsatisfiable' | 'unavailable' | 'error'
@@ -55,8 +55,13 @@ export async function unlockAndSign(o: { request: RequestObject; credential: num
 }
 
 /** Steps 2 and 3: the witness from the credential, then the proof. */
-export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number }): Promise<ProveOutput> {
+/** `rulebook`: the version the wallet read the request under (shared/protocol/request.ts). */
+export async function prove(o: { request: RequestObject; queryId: string; systemId: string; deviceSignature: string; credential: number; rulebook?: string }): Promise<ProveOutput> {
   const m = mdocMaterial(o.credential)
+  // v0.5 to v0.7: the holder's mdoc of that version, and the birth date that opens its bsc with
+  // the seed. v0.4: the v0.4 mdoc.
+  const held = o.rulebook === '0.5' ? m.v05 : o.rulebook === '0.6' ? m.v06 : o.rulebook === '0.7' ? m.v07 : undefined
+  if ((o.rulebook === '0.5' || o.rulebook === '0.6' || o.rulebook === '0.7') && !held) throw new ProverError('error', `no v${o.rulebook} credential on this phone`)
   try {
     return await $fetch<ProveOutput>('/api/wallet/prove', {
       method: 'POST',
@@ -64,9 +69,11 @@ export async function prove(o: { request: RequestObject; queryId: string; system
         request: o.request,
         credential_query_id: o.queryId,
         system_id: o.systemId,
-        credential: m.credential,
+        credential: held?.credential ?? m.credential,
         secret_seed: m.secret_seed,
+        ...(held && { birth_date: held.birth_date }),
         device_signature: o.deviceSignature,
+        ...(o.rulebook && { rulebook: o.rulebook }),
       },
     })
   } catch (e) {
@@ -96,12 +103,12 @@ export interface BbsProveOutput {
 
 /** bbs_cd, once the PIN screen has unlocked the wallet: one step. The device key signs inside the
  *  ecdsa-pop plugin; the phone sends the BBS credential and the device key, as for the mdoc. */
-export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number }): Promise<BbsProveOutput> {
+export async function proveBbs(o: { request: RequestObject; queryId: string; credential: number; rulebook?: string }): Promise<BbsProveOutput> {
   const m = holders[o.credential]!
   try {
     return await $fetch<BbsProveOutput>('/api/wallet/prove', {
       method: 'POST',
-      body: { request: o.request, credential_query_id: o.queryId, credential: m.credential, device_key: m.device_key },
+      body: { request: o.request, credential_query_id: o.queryId, credential: m.credential, device_key: m.device_key, ...(o.rulebook && { rulebook: o.rulebook }) },
     })
   } catch (e) {
     throw failure('/api/wallet/prove', e)

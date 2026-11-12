@@ -163,6 +163,20 @@ Logged-in users can vote, join communities and comment.
 session; the chips above the tiles select earlier ones, and name the phone that was on
 screen.
 
+- **Demo profile.** Which version of the nym_auth rulebook the site runs: **nym_auth v0.4** (at
+  start; `NUXT_DEMO_PROFILE`), **nym_auth v0.5**, **nym_auth v0.6** or **nym_auth v0.7**. Switching resets the demo; **Reset demo** keeps
+  the choice. Next to it: the rulebook's version and date, links to the rulebook and to the commit
+  the profile is based on on GitHub ("not committed yet" until it is), and the commit the site is
+  built from. **What this version defines** lists the credential, the functions (and how each side
+  reads them), the pseudonym configurations and the proof systems. Under v0.5 the age check asks
+  for an age range in years. Vega, Longfellow and BBS all prove it: Vega and Longfellow with their
+  v0.5 circuits, and the mdoc phones answer with their v0.5 mdoc (same pseudonym as v0.4). v0.6
+  asks the same way; only Longfellow proves it, with its decoy circuits, and the mdoc phones answer
+  with their v0.6 mdoc (the decoy-digest layout; same pseudonym again). Vega and BBS show "pending"
+  under v0.6. v0.7 asks for the pseudonym with `prf` `aes-128`; only Longfellow proves it, with its
+  v0.7 circuits, and the mdoc phones answer with their v0.7 mdoc (AES commitments). The pseudonym
+  differs from the earlier versions', so a person gets another account. Vega and BBS show "pending".
+  `/dev` shows the profile in its header. More in `profiles/README.md`.
 - **Proof systems.** A switch per proof system: Vega and Longfellow (circuits over the mdoc,
   `mso_mdoc`) and BBS (`bbs_cd`). None is ticked at start or after **Reset demo**: tick one before
   the demo. Vega and Longfellow use the same credential and give the same pseudonym, so the same
@@ -176,9 +190,10 @@ screen.
   circuits took to load once at start, the threads it runs on now and the circuit it runs (the
   verifier: also its trust anchor and the `proof_time` tolerance). The lock icon is **Request
   signing**, the certificate that signs Community's requests.
-- **Multithreading (Vega and BBS).** Off at start and after **Reset demo**: Vega and BBS run on
-  one thread. On, they run on one thread per core, and the line next to the switch says how many.
-  Longfellow always runs on one thread: Google's runtime has no parallel code.
+- **Threads.** 1 at start and after **Reset demo**. Choose any count up to the machine's cores, or
+  **All**, and Vega, BBS and Longfellow's v0.5 to v0.7 circuits run on that many threads. The
+  label names them ("Vega, Longfellow and BBS" under v0.5 to v0.7, "Vega and BBS" under v0.4).
+  Longfellow's v0.4 circuits always run on one thread.
 - **Trust new issuers.** On at start and after **Reset demo**. Community's verifiers trust the
   demo issuers. With this on, a presentation from a wallet whose credential comes from another
   issuer is accepted, and that issuer is trusted from then on (kept in
@@ -246,7 +261,8 @@ There is no guide panel here.
   **Request**. The **nym_auth** button shows the attestation in both encodings, with the demo
   credentials' values.
 - **QR popup.** The real request: a phone whose wallet supports `zkp_req` and encrypted responses
-  (`direct_post.jwt`), and that can reach the site, can scan it. **Simulate scan** lists the three
+  (`direct_post.cwt`, or `direct_post.jwt` by the technical view's switch), and that can reach the
+  site, can scan it. **Simulate scan** lists the three
   demo phones beside the code, each with its credential's encoding and whether the technical view
   accepts it now; pick one and **Scan**. **Change phone** goes back to the list until the phone has
   scanned. The popup stays until **Close** on the phone's success screen. **Cancel request** ends
@@ -254,7 +270,7 @@ There is no guide panel here.
 - **The diagram.** One row per step, from the session's trace. **OID4VP extensions** and **ZKP**
   highlight the steps the rulebook adds and the proof steps. Click a row for its details.
 - **Inspector** (under the diagram). The DCQL query, the request (QR payload, signed Request Object),
-  the response (JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
+  the response (COSE_Encrypt or JWE header, the decrypted response, the decoded ZkpPresentation) and the verifier's
   checks.
 A request here creates the Community account or logs in, and records the proven age range, as on
 the site.
@@ -303,7 +319,7 @@ gives Community the same pseudonym.
    range) and sizes.
 10. **Longfellow.** **Moderation:** **Reset demo**. **Technical:** tick Longfellow. **Site:** sign up
    on the teen's phone, try c/afterdark (requirement not met), then c/teenspace. **Technical:** the
-   circuit used is `urn:circuits:longfellow:nym_auth:v1`; the proof is about 344 kB. Without the
+   circuit used is `urn:circuits:sha256:6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b` (under v0.5, `urn:circuits:sha256:f4d75ee2a112c63adfb00f1da45347c4691085c8cca6ab13cee7b03f00cdbd52`); the proof is about 344 kB. Without the
    reset, logging in with Longfellow reaches the account made with Vega: the pseudonym is the same.
 11. **Developer.** **Moderation:** **Reset demo**. **Technical:** tick Vega. **Developer:** choose
    **18+**, **Request**, **Simulate scan**, the teen's phone, **Scan**: it says the requirement is not met; **Close**
@@ -339,16 +355,20 @@ site, tick the proof system you will show in the technical view, and run the who
 | --- | --- | --- |
 | `NUXT_VEGA_ADDON` | `native/vega/community-vega.node` | The Vega addon (`npm run build:native`) |
 | `NUXT_VEGA_SHAPES` | `native/vega/circuits/mdoc/shapes.zst` | The circuits as data |
+| `NUXT_VEGA_SHAPES_V05` | `native/vega/circuits/mdoc-bsc/shapes.zst` | Rulebook v0.5's circuits; empty: Vega proves v0.4 only |
 | `NUXT_VEGA_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the verifier trusts |
 | `NUXT_PROOF_TIME_TOLERANCE_S` | `300` | How far a proof's time may lie from the server's clock, in seconds |
+| `NUXT_DEMO_PROFILE` | `nym-auth-v0.4` | The demo profile at start (`profiles/`); /tech switches it |
+| `NUXT_PUBLIC_BUILD_COMMIT` | read from `.git` | The commit /tech links as the build |
 | `NUXT_LONGFELLOW_ADDON` | `native/longfellow/community-longfellow.node` | The Longfellow addon |
 | `NUXT_LONGFELLOW_CIRCUITS` | `native/longfellow/circuits/mdoc` | Its circuits: `circuits.zst`, `params.tsv`, `hash-semantic.tsv` |
 | `NUXT_LONGFELLOW_TRUST_ANCHORS` | `native/vega/demo/document-signer.pem` | Issuer certificates the Longfellow verifier trusts (the same demo issuer) |
-| `NUXT_ACCEPTED_CIRCUITS` | `urn:circuits:vega:nym_auth:v1,urn:circuits:longfellow:nym_auth:v1` | Circuits the site can accept, in preference order |
+| `NUXT_ACCEPTED_CIRCUITS` | Vega v0.4, Vega v0.5, Longfellow v0.5, Longfellow v0.6, Longfellow v0.7, Longfellow v0.4 (`nuxt.config.ts`; ids `urn:circuits:sha256:<archive SHA-256>`) | Circuits the site can accept, in preference order; each under the profile whose version it reads |
 | `NUXT_BBS_ADDON` | `native/bbs/community-bbs.node` | The BBS addon |
 | `NUXT_BBS_ISSUER_PARAMS` | `native/bbs/demo/issuer-params.bin` | The BBS issuer the verifier trusts |
 | `NUXT_ACCEPTED_PROOF_SYSTEMS` | empty | Proof systems accepted at start and after a reset (`vega-v1`, `longfellow-libzk-v1`, `bbs-cd-plugins-v0.1`, comma-separated); empty: none, the technical view switches them on |
-| `NUXT_MULTITHREADING` | `false` | Vega and BBS on every core at start and after a reset; the technical view switches it |
+| `NUXT_RESPONSE_MODE` | `direct_post.cwt` | How requests ask the wallet to encrypt its response at start and after a reset: `direct_post.cwt` (CBOR in a COSE_Encrypt, zkp_req.md §6.2) or `direct_post.jwt` (JSON in a JWE); the technical view switches it |
+| `NUXT_MULTITHREADING` | `false` | Vega, BBS and Longfellow v0.5 to v0.7 on every core at start and after a reset (else one thread); the technical view sets any count |
 | `NUXT_MEASUREMENTS_FILE` | `.data/measurements.jsonl` | Where the technical view's measurements are kept (JSON lines) |
 | `NUXT_PROFILES_FILE` | `.data/profiles.jsonl` | Where the technical view's profiles are kept (JSON lines) |
 | `NUXT_TRUST_NEW_ISSUERS` | `true` | Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start and after a demo reset |
@@ -390,8 +410,26 @@ them before writing:
 cd native/vega
 cargo run --release -p nym-issuer -- --holder 2011-03-14 --holder 1990-05-20 \
   --valid-from 2026-10-13 --valid-until 9999-12-31T23:59:59Z --keep ../../app/wallet/demo-wallet.json \
-  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem
+  --wallet-out ../../app/wallet/demo-wallet.json --trust-out demo/document-signer.pem --v05 --v06 --v07
 ```
+
+`--v05` also issues each holder's rulebook v0.5 mdoc (`bsc`, `psc`, the compact profile the v0.5
+Longfellow circuits read; each is checked against their layout before writing), under the same
+Document Signer, device key, seed and validity, into the holder's `v05` with its `birth_date` and
+`private_seed`. The phone shows one card per holder and answers a request with the mdoc of the
+version it reads under; a request for the pseudonym only reads the same under both, so the demo
+wallet takes the version the site runs. The pseudonym is the same in both versions.
+
+`--v06` also issues each holder's rulebook v0.6 mdoc in the decoy-digest layout (`bsc` and `psc` as
+the MSO's valueDigests, no data elements; the layout the v0.6 Longfellow circuits read), written
+byte by byte and checked against the circuits' template before writing, under the same Document
+Signer, device key, seeds, birth date and validity, into the holder's `v06`. Re-issuing gives a new
+Document Signer, so the v0.4 and v0.5 credentials change bytes too (their contents do not).
+
+`--v07` also issues each holder's rulebook v0.7 mdoc: the same layout with the namespace
+`eu.nym_auth.v1`, `bsc` and `psc` as AES-128 commitments and the device key compressed (the layout
+the v0.7 Longfellow circuits read), written byte by byte and checked against their template, into
+the holder's `v07`.
 
 The credentials do not expire: `validUntil` is `9999-12-31T23:59:59Z`, the farthest an mdoc tdate
 holds, and the Document Signer certificate's `notAfter` is `99991231235959Z`, RFC 5280's value for
@@ -412,11 +450,45 @@ cargo run --release -p bbs-issuer -- --wallet ../../app/wallet/demo-wallet.json 
   --birth-date 2011-03-14 --out ../../app/wallet/demo-wallet-bbs.json --issuer-params demo/issuer-params.bin
 ```
 
+## Benchmarks from the terminal
+
+`npm run bench` runs presentations against the running site (local or Docker) through the demo
+phone's own routes and prints `/tech`'s Benchmark figures for exactly those runs: prove and verify
+time with the time by step, proof and presentation size, and memory. The runs also appear in
+`/tech`. `npm run bench help` lists the options. For example, ten runs of Longfellow under v0.6
+with the 13–17 check, on one thread and on every core, written to a CSV:
+
+```sh
+npm run bench runs=10 profile=v0.6 system=longfellow threads=1,all age=13-17 out=v06.csv
+```
+
+`threads` takes any counts up to the site's cores, and ranges: `threads=1,2,4,all` or
+`threads=1-8`.
+
+For the call trees, add `profiling` (as `/tech`'s switch) or `profiling=full` (every sample's whole
+stack, with its thread: Node, libuv, rayon's scheduling and idle time included) and a JSON `out`:
+
+```sh
+npm run bench runs=30 profile=v0.7 system=longfellow threads=1,4 age=13-17 profiling=full out=lf-v07.json
+```
+
+The JSON then holds each run's profiles, and next to it go folded stacks per cell, summed over its
+runs: `lf-v07.longfellow-1t.prove.folded`, `.verify.folded`, and with `full`
+`.prove.full.folded`, `.verify.full.folded`. They open in speedscope (speedscope.app),
+`inferno-flamegraph` or `flamegraph.pl`. Each run gives a few hundred samples at most (the kernel
+delivers about 250 a second), so use 20 runs or more for a stable picture. The terminal also prints
+each cell's samples by thread.
+
+Options are `name=value`, so npm passes them on without a `--`. It sets `/tech`'s settings for each
+run and puts them back afterwards. A `profile` other than the one the site runs resets the demo, as
+the dropdown does.
+
 ## Checks
 
 ```sh
-npm run vega:check                              # real proofs of both credentials: pseudonyms, refusals, any PIN, 18+ (needs build:native)
-(cd native/vega && cargo test -p nym-vega)      # the OpenID4VP handover against the spec's example, age_check mapping
+npm run vega:check                              # real proofs of both credentials, v0.4 and v0.5: pseudonyms, refusals, any PIN, 18+ (needs build:native)
+npm run vectors:check                           # the site's pseudonyms and age ranges against the rulebook v0.5 test vectors and v0.6's and v0.7's provisional ones
+(cd native/vega && cargo test --release -p nym-vega)  # the handover against the spec's example, age_check mapping, v0.5 end to end
 (cd native/vega && sha256sum -c VENDOR-SHA256SUMS)  # vendored circuits unchanged
 (cd native/bbs && cargo test --release -p nym-bbs)  # BBS: prove, verify, the same pseudonym, refusals
 (cd native/bbs && sha256sum -c --quiet VENDOR-SHA256SUMS)  # vendored bbs-cd-plugins unchanged
@@ -442,7 +514,7 @@ node scripts/flows-check.mjs http://localhost:3000 --server-log /tmp/server.log 
 Requests then expire after 40 s, so the expiry paths take a minute. `COMMUNITY_TEST_FAULTS=1` turns
 on a test-only route that makes the next call of one addon step fail, for the "backend failing"
 paths; never set it for the demo. `--shots <dir>` saves the run's screenshots (19 to 33);
-`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread switch, the
+`--only M` runs one self-contained group (L is Longfellow, M is BBS, P the thread setting, the
 measurements and Profiling, V the developer view; G needs a session from a group before it). The
 scratch measurements and profiles files keep the run's proofs out of the demo's own, which group P
 clears.

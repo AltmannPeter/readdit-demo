@@ -72,8 +72,8 @@ const errorResponse = computed(() => session.value?.trace.find((t) => t.step ===
       </template>
       <template v-else-if="tab === 'response'">
         <div v-if="session?.response" class="stack">
-          <h4 class="section-label">JWE header</h4>
-          <DevJsonView :value="session.response.jwe" />
+          <h4 class="section-label">{{ session.response.envelope.mode === 'direct_post.cwt' ? 'COSE_Encrypt headers' : 'JWE header' }} ({{ session.response.envelope.mode }}, {{ session.response.envelope.bytes }} bytes)</h4>
+          <DevJsonView :value="session.response.envelope.header" />
           <template v-if="session.response.presentation">
             <h4 class="section-label">Decrypted response</h4>
             <DevJsonView :value="{ vp_token: { [session.answered ?? 'query']: [session.response.presentation.base64url] }, state: session.request?.state }" />

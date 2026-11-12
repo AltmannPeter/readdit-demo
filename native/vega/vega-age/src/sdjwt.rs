@@ -677,7 +677,7 @@ impl VegaCircuit<T256HyraxEngine> for SdJwtCore {
     cs: &mut CS,
     shared: &[AllocatedNum<t256::Scalar>],
   ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
-    let cells = Cells(shared);
+    let cells = Cells::new(shared);
     let (_, _, facts) = age_part(cs, &cells, self.witness.as_deref(), &AGE)?;
     facts.into_slots(cs.namespace(|| "facts"))
   }
@@ -747,7 +747,7 @@ impl VegaCircuit<T256HyraxEngine> for SdJwtNymCore {
     shared: &[AllocatedNum<t256::Scalar>],
   ) -> Result<Vec<AllocatedNum<t256::Scalar>>, SynthesisError> {
     let w = self.witness.as_deref();
-    let cells = Cells(shared);
+    let cells = Cells::new(shared);
     let (signed, start, facts) = age_part(cs, &cells, w, &FULL_SD_JWT)?;
     let mut slots = facts.into_slots(cs.namespace(|| "facts"))?;
     let payload = EncodedText { message: &signed, start, start_hint: w.map(|w| w.payload_at) };

@@ -1,8 +1,9 @@
 //! Node addon: the nym_auth Vega prover and verifier, called in process by Community's server
 //! (`server/utils/services.ts`).
 //!
-//! - [`load_prover`] and [`load_verifier`] build each side's keys from `shapes.zst` once, on a
-//!   worker thread, and resolve to a [`Prover`] or a [`Verifier`] that keeps them. Setup is
+//! - [`load_prover`] and [`load_verifier`] build each side's keys from `shapes.zst` once (and,
+//!   given the path of rulebook v0.5's `circuits/mdoc-bsc/shapes.zst`, its keys too), on a worker
+//!   thread, and resolve to a [`Prover`] or a [`Verifier`] that keeps them. Setup is
 //!   deterministic, so keeping the keys keeps nothing about any holder or request.
 //! - The prover's native steps: [`Prover::sign`] (the device key signs DeviceAuthentication; the
 //!   wallet's PIN screen stands for the phone's unlock and the prover takes no PIN),
@@ -15,7 +16,8 @@
 //!
 //! With `"profile": true` in a step's JSON (`/tech`'s Profiling switch), the step's metrics also
 //! carry `profile`: the sampled stacks (`nym-profile`), and for witness, prove and verify
-//! vega-prover's own phases (`nym_vega::phases`).
+//! vega-prover's own phases (`nym_vega::phases`). `"profile": "full"` adds every stack whole
+//! (`full`), for `npm run bench profiling=full`.
 
 mod alloc;
 
@@ -25,6 +27,7 @@ use std::sync::{Arc, Mutex};
 use napi::bindgen_prelude::{AsyncTask, Either};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
+use nym_profile::Mode;
 use nym_vega::error::Refusal;
 use nym_vega::{measure, prover, verifier};
 
@@ -57,9 +60,9 @@ fn flag(input: &str, key: &str) -> bool {
 }
 
 /// Runs a step under the sampler and, when `phases`, vega-prover's phase recorder.
-fn profiled<T>(on: bool, phases: bool, heap: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
-  let sampler = nym_profile::Sampler::start(on, ROOTS);
-  let (out, recorded) = nym_vega::phases::record(on && phases, heap, f);
+fn profiled<T>(mode: Mode, phases: bool, heap: bool, f: impl FnOnce() -> T) -> (T, Option<serde_json::Value>) {
+  let sampler = nym_profile::Sampler::start(mode, ROOTS);
+  let (out, recorded) = nym_vega::phases::record(mode.on() && phases, heap, f);
   let samples = sampler.finish();
   let profile = (samples.is_some() || recorded.is_some()).then(|| {
     let mut p = samples.unwrap_or_else(|| serde_json::json!({}));
@@ -86,6 +89,7 @@ fn refusal_json(r: &Refusal) -> String {
 
 pub struct LoadProver {
   shapes: PathBuf,
+  shapes_v05: Option<PathBuf>,
 }
 
 impl Task for LoadProver {
@@ -93,7 +97,7 @@ impl Task for LoadProver {
   type JsValue = Prover;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    guarded(|| prover::Prover::load(&self.shapes))
+    guarded(|| prover::Prover::load(&self.shapes, self.shapes_v05.as_deref()))
   }
 
   fn resolve(&mut self, _: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -101,14 +105,15 @@ impl Task for LoadProver {
   }
 }
 
-/// Builds the prover key from `shapes` (path to `shapes.zst`).
+/// Builds the prover key from `shapes` (path to `shapes.zst`), and v0.5's from `shapes_v05`.
 #[napi]
-pub fn load_prover(shapes: String) -> AsyncTask<LoadProver> {
-  AsyncTask::new(LoadProver { shapes: PathBuf::from(shapes) })
+pub fn load_prover(shapes: String, shapes_v05: Option<String>) -> AsyncTask<LoadProver> {
+  AsyncTask::new(LoadProver { shapes: PathBuf::from(shapes), shapes_v05: shapes_v05.map(PathBuf::from) })
 }
 
 pub struct LoadVerifier {
   shapes: PathBuf,
+  shapes_v05: Option<PathBuf>,
   trust_anchors_pem: String,
   tolerance_s: i64,
 }
@@ -118,7 +123,7 @@ impl Task for LoadVerifier {
   type JsValue = Verifier;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    guarded(|| verifier::Verifier::load(&self.shapes, &self.trust_anchors_pem, self.tolerance_s))
+    guarded(|| verifier::Verifier::load(&self.shapes, self.shapes_v05.as_deref(), &self.trust_anchors_pem, self.tolerance_s))
   }
 
   fn resolve(&mut self, _: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -127,10 +132,10 @@ impl Task for LoadVerifier {
 }
 
 /// Builds the verifier key from `shapes`, with the trust anchors (PEM text) and the proof_time
-/// tolerance in seconds.
+/// tolerance in seconds, and v0.5's from `shapes_v05`.
 #[napi]
-pub fn load_verifier(shapes: String, trust_anchors_pem: String, tolerance_s: i64) -> AsyncTask<LoadVerifier> {
-  AsyncTask::new(LoadVerifier { shapes: PathBuf::from(shapes), trust_anchors_pem, tolerance_s })
+pub fn load_verifier(shapes: String, trust_anchors_pem: String, tolerance_s: i64, shapes_v05: Option<String>) -> AsyncTask<LoadVerifier> {
+  AsyncTask::new(LoadVerifier { shapes: PathBuf::from(shapes), shapes_v05: shapes_v05.map(PathBuf::from), trust_anchors_pem, tolerance_s })
 }
 
 // ---- the prover ----
@@ -147,7 +152,7 @@ pub struct Witness {
   data: Arc<Mutex<Option<prover::WitnessData>>>,
   summary: String,
   /// The witness step's input asked for a profile, and its thread switch; prove follows both.
-  profile: bool,
+  profile: Mode,
   parallel: bool,
 }
 
@@ -172,7 +177,7 @@ impl Task for Sign {
   fn compute(&mut self) -> Result<Self::Output> {
     guarded(|| {
       let (out, profile) =
-        profiled(flag(&self.input, "profile"), false, false, || parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i)));
+        profiled(Mode::of(&self.input), false, false, || parse::<prover::SignInput>("sign", &self.input).and_then(|i| self.prover.sign(&i)));
       Ok(match out {
         Ok(o) => {
           let mut json = serde_json::to_value(o).map_err(|e| e.to_string())?;
@@ -193,7 +198,7 @@ impl Task for Sign {
 pub struct MakeWitness {
   prover: Arc<prover::Prover>,
   input: String,
-  profile: bool,
+  profile: Mode,
   parallel: bool,
 }
 
@@ -229,7 +234,7 @@ impl Task for MakeWitness {
 pub struct Prove {
   prover: Arc<prover::Prover>,
   data: Option<prover::WitnessData>,
-  profile: bool,
+  profile: Mode,
   parallel: bool,
 }
 
@@ -273,7 +278,7 @@ impl Prover {
   /// Step 2, the witness. JSON in; a Witness, or the refusal as JSON text.
   #[napi]
   pub fn witness(&self, input: String) -> AsyncTask<MakeWitness> {
-    let (profile, parallel) = (flag(&input, "profile"), flag(&input, "parallel"));
+    let (profile, parallel) = (Mode::of(&input), flag(&input, "parallel"));
     AsyncTask::new(MakeWitness { prover: self.inner.clone(), input, profile, parallel })
   }
 
@@ -307,8 +312,8 @@ impl Task for Verify {
     guarded(|| {
       let input: verifier::VerifyInput = serde_json::from_str(&self.input).map_err(|e| format!("verify: {e}"))?;
       let guard = measure::exclusive()?;
-      let (on, parallel) = (flag(&self.input, "profile"), flag(&self.input, "parallel"));
-      let (mut out, profile) = profiled(on, true, !parallel, || self.verifier.verify(&input));
+      let (mode, parallel) = (Mode::of(&self.input), flag(&self.input, "parallel"));
+      let (mut out, profile) = profiled(mode, true, !parallel, || self.verifier.verify(&input));
       drop(guard);
       attach(&mut out, profile);
       Ok(out.to_string())

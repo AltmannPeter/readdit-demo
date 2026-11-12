@@ -10,10 +10,23 @@
 //! the panic guard's plumbing. Samples without such a frame (Node's own threads, an idle worker)
 //! are counted apart, as `other`, and samples whose stack could not be walked, as `lost`.
 //!
+//! Every profile also counts the samples per thread (`threads`, by the thread's name: the addons'
+//! pools name theirs, such as `longfellow-4-2`). [`Mode::Full`] (`"profile": "full"` in a step's
+//! JSON) adds `full`: every sample's whole stack, nothing cut, the thread's name as its first
+//! frame, `other` and `lost` samples included. It is for exports (`npm run bench profiling=full`),
+//! not for /tech's flame graphs.
+//!
+//! The profiler's own memory (pprof's sample table, the symbol caches it fills while resolving the
+//! samples) is not the step's: [`quiet`] is true on the thread while pprof starts, builds its
+//! report and stops, and the addons' counting allocators leave those allocations out. Counted,
+//! they moved the heap figures between steps by up to several MB (2026-11-02, macOS: the
+//! witness held into the prove step read 0 MB in most profiled runs).
+//!
 //! The sampler is process-wide: one runs at a time. The site calls one profiled step at a time
 //! (`server/utils/services.ts`), so the samples are that step's. A sampler that cannot start (one
 //! is already running) gives no profile; the step itself is unaffected.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -30,36 +43,98 @@ pub const HZ: i32 = 997;
 /// library cannot deadlock its own thread.
 const BLOCKLIST: &[&str] = &["libgcc", "vdso", "ld-linux", "ld-musl", "libunwind", "dyld"];
 
+thread_local! {
+  static QUIET: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while this thread runs pprof's own bookkeeping (starting, building the report, stopping).
+/// The addons' counting allocators do not count what is allocated or freed meanwhile: pprof
+/// allocates and frees that memory only there.
+pub fn quiet() -> bool {
+  QUIET.with(Cell::get)
+}
+
+/// Runs `f` with [`quiet`] true on this thread, back to false afterwards, also on a panic.
+fn hushed<T>(f: impl FnOnce() -> T) -> T {
+  struct Reset;
+  impl Drop for Reset {
+    fn drop(&mut self) {
+      QUIET.with(|q| q.set(false));
+    }
+  }
+  QUIET.with(|q| q.set(true));
+  let _reset = Reset;
+  f()
+}
+
+/// What a step asked for: no profile, /tech's profile, or that and every stack in full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Mode {
+  #[default]
+  Off,
+  On,
+  Full,
+}
+
+impl Mode {
+  /// The mode a step's JSON input asks for in `profile`: `true`, `"full"`, or anything else (or
+  /// input that is not JSON) for off.
+  pub fn of(input: &str) -> Self {
+    let v = serde_json::from_str::<Json>(input).ok();
+    match v.as_ref().and_then(|v| v.get("profile")) {
+      Some(Json::Bool(true)) => Mode::On,
+      Some(Json::String(s)) if s == "full" => Mode::Full,
+      _ => Mode::Off,
+    }
+  }
+
+  pub fn on(self) -> bool {
+    self != Mode::Off
+  }
+}
+
 /// A sampler in progress, or none (profiling off, or another one running).
 pub struct Sampler {
   guard: Option<pprof::ProfilerGuard<'static>>,
   started: Instant,
   roots: &'static [&'static str],
+  full: bool,
 }
 
 impl Sampler {
-  /// Starts sampling when `on`. `roots`: the path prefixes of the addon's own code
+  /// Starts sampling unless `mode` is off. `roots`: the path prefixes of the addon's own code
   /// (`["nym_vega::", "vega_age::", …]`).
-  pub fn start(on: bool, roots: &'static [&'static str]) -> Self {
-    let guard = on.then(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(BLOCKLIST).build().ok()).flatten();
-    Sampler { guard, started: Instant::now(), roots }
+  pub fn start(mode: Mode, roots: &'static [&'static str]) -> Self {
+    let guard = mode.on().then(|| hushed(|| pprof::ProfilerGuardBuilder::default().frequency(HZ).blocklist(BLOCKLIST).build().ok())).flatten();
+    Sampler { guard, started: Instant::now(), roots, full: mode == Mode::Full }
   }
 
   /// Stops sampling: the folded stacks (`stacks`), the samples kept (`samples`), the samples of
-  /// other threads (`other`) and those whose stack could not be walked (`lost`), the wall time
-  /// sampled in ms (`ms`) and the requested rate (`hz`). None when the sampler did not run.
+  /// other threads (`other`) and those whose stack could not be walked (`lost`), every sample by
+  /// thread (`threads`), the wall time sampled in ms (`ms`) and the requested rate (`hz`); in
+  /// [`Mode::Full`], also `full`. None when the sampler did not run.
   pub fn finish(self) -> Option<Json> {
     let guard = self.guard?;
     let ms = (self.started.elapsed().as_secs_f64() * 1e6).round() / 1e3;
-    let report = guard.report().build().ok()?;
-    drop(guard);
+    let Some(report) = hushed(|| guard.report().build().ok()) else {
+      hushed(|| drop(guard));
+      return None;
+    };
     let mut stacks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut threads: BTreeMap<String, u64> = BTreeMap::new();
+    let mut full: BTreeMap<String, u64> = BTreeMap::new();
     let (mut kept, mut other, mut lost) = (0u64, 0u64, 0u64);
     for (frames, &count) in report.data.iter() {
       let count = count.max(0) as u64;
       // pprof lists a sample's frames from the leaf up; each frame may hold inlined functions,
       // innermost first.
       let names: Vec<String> = frames.frames.iter().flat_map(|f| f.iter().map(|s| clean(&s.name()))).collect();
+      let thread = clean(&frames.thread_name_or_id());
+      *threads.entry(thread.clone()).or_default() += count;
+      if self.full {
+        let whole: Vec<&str> = std::iter::once(thread.as_str()).chain(names.iter().rev().map(|n| if n.is_empty() { "Unknown" } else { n.as_str() })).collect();
+        *full.entry(whole.join(";")).or_default() += count;
+      }
       // A stack the unwinder could not walk past its first frame (code without unwind tables).
       if names.iter().all(|n| n.is_empty() || n == "Unknown") {
         lost += count;
@@ -77,7 +152,17 @@ impl Sampler {
       *stacks.entry(path.join(";")).or_default() += count;
       kept += count;
     }
-    Some(json!({ "hz": HZ, "ms": ms, "samples": kept, "other": other, "lost": lost, "stacks": stacks }))
+    // The report's names and the sampler (whose stop allocates the next sample table) go as they
+    // came: quietly.
+    hushed(|| {
+      drop(report);
+      drop(guard);
+    });
+    let mut out = json!({ "hz": HZ, "ms": ms, "samples": kept, "other": other, "lost": lost, "threads": threads, "stacks": stacks });
+    if self.full {
+      out["full"] = json!(full);
+    }
+    Some(out)
   }
 }
 
@@ -215,11 +300,44 @@ mod sampling {
   }
 
   #[test]
-  fn samples_a_busy_loop() {
-    let s = super::Sampler::start(true, &["nym_profile::"]);
+  fn samples_a_busy_loop_and_full_keeps_every_frame() {
+    let s = super::Sampler::start(super::Mode::On, &["nym_profile::"]);
     let x = std::hint::black_box(burn(std::hint::black_box(600_000_000)));
     let p = s.finish().expect("a profile");
     eprintln!("{x} {}", serde_json::to_string_pretty(&p).unwrap());
     assert!(p["samples"].as_u64().unwrap() > 10);
+    assert!(p.get("full").is_none());
+    let total: u64 = p["threads"].as_object().unwrap().values().map(|v| v.as_u64().unwrap()).sum();
+    assert_eq!(total, p["samples"].as_u64().unwrap() + p["other"].as_u64().unwrap() + p["lost"].as_u64().unwrap());
+
+    // Full, in the same test: the sampler is process-wide, and tests run side by side.
+    let s = super::Sampler::start(super::Mode::Full, &["nym_profile::"]);
+    let x = std::hint::black_box(burn(std::hint::black_box(600_000_000)));
+    let p = s.finish().expect("a profile");
+    eprintln!("{x}");
+    let full = p["full"].as_object().unwrap();
+    let total: u64 = full.values().map(|v| v.as_u64().unwrap()).sum();
+    assert_eq!(total, p["threads"].as_object().unwrap().values().map(|v| v.as_u64().unwrap()).sum::<u64>());
+    // The test harness's own frames sit above the test function: nothing is cut.
+    assert!(full.keys().any(|k| k.contains("nym_profile::sampling::burn") && k.contains("test::")), "{full:?}");
+  }
+
+  #[test]
+  fn quiet_only_inside_and_back_after_a_panic() {
+    assert!(!super::quiet());
+    assert!(super::hushed(super::quiet));
+    assert!(!super::quiet());
+    let _ = std::panic::catch_unwind(|| super::hushed(|| panic!("inside")));
+    assert!(!super::quiet());
+  }
+
+  #[test]
+  fn modes() {
+    use super::Mode;
+    assert_eq!(Mode::of(r#"{"profile":true}"#), Mode::On);
+    assert_eq!(Mode::of(r#"{"profile":"full"}"#), Mode::Full);
+    assert_eq!(Mode::of(r#"{"profile":false}"#), Mode::Off);
+    assert_eq!(Mode::of(r#"{"profile":"yes"}"#), Mode::Off);
+    assert_eq!(Mode::of("not json"), Mode::Off);
   }
 }

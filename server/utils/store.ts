@@ -1,5 +1,7 @@
 import type { Account, AgeGate, BirthDateRange } from '#shared/types'
-import type { DcqlQuery, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import type { DcqlQuery, EncryptedResponseMode, RequestObject, SourceFormat, VpFormats, WalletMetadata } from '#shared/types/oid4vp'
+import { availableParallelism } from 'node:os'
+import { systemStatus } from '#shared/profiles'
 import type { ResponseKey } from './response-key'
 import type { SizePart, StepProfile } from './services'
 
@@ -74,8 +76,11 @@ export interface VpSessionRecord {
   state: string
   /** The key the wallet encrypts its response to (direct_post.jwt). Not in any trace or API answer. */
   responseKey: ResponseKey
-  /** The age range the request asks for, if any (from the community's gate, when the session starts). */
-  age?: BirthDateRange
+  /** The demo profile the session was created under (shared/profiles; a profile switch resets the demo). */
+  profile?: string
+  /** The age_check params the request asks for, if any, as the profile writes them from the
+   *  community's gate when the session starts (v0.4: birth-date bounds; v0.5: a range in years). */
+  ageParams?: Record<string, string>
   /** The DCQL query: one zkp_req credential query per source format the accepted systems cover,
    *  alternatives in credential_sets.
    *  Made again, with the offer, when the wallet fetches the request, so it follows /tech's switches. */
@@ -90,12 +95,16 @@ export interface VpSessionRecord {
    *  it as the response route measures it (round_trip_ms); accepted or refused. */
   verification?: { decode_ms?: number; verify_ms?: number; total_ms?: number; round_trip_ms: number }
   /** The decrypted response, for the developer view: its JWE header and size, and the presentation. */
-  response?: { jwe: { header: Record<string, unknown>; bytes: number }; presentation?: string }
+  /** The encrypted response as received: its Response Mode, the envelope's header (JWE header, or
+   *  the COSE algorithms and kid) and size; the presentation (base64url of its CBOR). */
+  response?: { envelope: { mode: string; header: Record<string, unknown>; bytes: number }; presentation?: string }
   /** The query the wallet answered, once a response arrived. */
   answered?: string
   /** `format`: the source format of the answered query; `proofId`: the system (circuit or scheme)
    *  of the verified presentation. */
-  outcome?: { ok: true; format: SourceFormat; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: FailReason; detail?: string }
+  outcome?:
+    | { ok: true; format: SourceFormat; proofId: string; pseudonym: string; age?: true; ageBounds?: BirthDateRange }
+    | { ok: false; reason: FailReason; detail?: string }
   /** `age`: the session's age proof was recorded for the account. */
   completion?: { ok: boolean; kind: CompletionKind; handle?: string; age?: true; community?: string; linked?: true }
   trace: TraceEvent[]
@@ -136,10 +145,14 @@ interface Store {
   /** The proof systems the site accepts now (/tech switches them; a demo reset restores the
    *  configured ones, runtime config acceptedProofSystems). */
   acceptedProofSystems: string[]
-  /** Vega and BBS on every core (/tech's switch; a demo reset restores runtime config multithreading). */
-  multithreading: boolean
-  /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset). */
-  profiling: boolean
+  /** The threads Vega, BBS and Longfellow v0.5 to v0.7 run on (/tech's thread setting): 'all' (one
+   *  per core) or a count from 1 to maxThreads(). A demo reset restores runtime config multithreading. */
+  threads: ThreadSetting
+  /** The encrypted Response Mode requests ask for (/tech's switch; a demo reset restores runtime config responseMode). */
+  responseMode: EncryptedResponseMode
+  /** /tech's Profiling switch: the addons sample their steps (off at start and after a demo reset).
+   *  'full' also keeps every stack whole (`npm run bench profiling=full`; /tech shows it as on). */
+  profiling: boolean | 'full'
   /** /tech's "Trust new issuers" (server/utils/issuers.ts; a demo reset restores runtime config trustNewIssuers). */
   trustNewIssuers: boolean
 }
@@ -154,10 +167,33 @@ export function configuredProofSystems(): string[] {
     .filter(Boolean)
 }
 
-/** Whether Vega and BBS run on every core at start (runtime config multithreading). */
-export function configuredMultithreading(): boolean {
+/** The Response Mode at start (runtime config responseMode): direct_post.cwt unless set to direct_post.jwt. */
+export function configuredResponseMode(): EncryptedResponseMode {
+  return String(useRuntimeConfig().responseMode) === 'direct_post.jwt' ? 'direct_post.jwt' : 'direct_post.cwt'
+}
+
+/** /tech's thread setting: one per core, or a count. */
+export type ThreadSetting = 'all' | number
+
+/** The thread setting at start (runtime config multithreading): every core when true, else one. */
+export function configuredThreads(): ThreadSetting {
   const v = useRuntimeConfig().multithreading as unknown
-  return v === true || v === 'true' || v === '1'
+  return v === true || v === 'true' || v === '1' ? 'all' : 1
+}
+
+/** The most threads /tech offers: this machine's cores. The addons clamp to their own count. */
+export function maxThreads(): number {
+  return availableParallelism()
+}
+
+/** The threads the setting gives: a count, or every core. */
+export function threadCount(t: ThreadSetting = store().threads): number {
+  return t === 'all' ? maxThreads() : Math.min(t, maxThreads())
+}
+
+/** Whether the setting runs on more than one thread (the old multithreading switch). */
+export function multithreading(t: ThreadSetting = store().threads): boolean {
+  return threadCount(t) > 1
 }
 
 /** Whether an unknown mdoc issuer is trusted from its first verified presentation on, at start
@@ -174,8 +210,10 @@ function fresh(): Store {
     accounts: new Map(),
     comments: [],
     bannedNotices: new Map(),
-    acceptedProofSystems: configuredProofSystems(),
-    multithreading: configuredMultithreading(),
+    // Only what the demo profile can use (a pending system stays off).
+    acceptedProofSystems: configuredProofSystems().filter((x) => systemStatus(activeProfile(), x)?.status === 'available'),
+    threads: configuredThreads(),
+    responseMode: configuredResponseMode(),
     profiling: false,
     trustNewIssuers: configuredTrustNewIssuers(),
   }

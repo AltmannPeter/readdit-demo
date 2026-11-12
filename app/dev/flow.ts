@@ -5,6 +5,10 @@
 import { findSystem } from '#shared/registry/circuits'
 import type { DcqlQuery, EncryptionJwk, RequestObject, VpFormats } from '#shared/types/oid4vp'
 
+
+/** The encrypted response's envelope, by its Response Mode. */
+const envelopeName = (mode: unknown) => (mode === 'direct_post.cwt' ? 'COSE_Encrypt' : 'JWE')
+
 export type Actor = 'browser' | 'backend' | 'wallet'
 export type Tag = 'openid' | 'nym_auth' | 'zkp'
 
@@ -54,7 +58,7 @@ export interface DevSession {
   request: RequestObject | null
   requestJwsHeader: Record<string, unknown> | null
   requestJwsBytes: number | null
-  response: { jwe: { header: Record<string, unknown>; bytes: number }; presentation?: { base64url: string; chars: number; decoded: unknown } } | null
+  response: { envelope: { mode: string; header: Record<string, unknown>; bytes: number }; presentation?: { base64url: string; chars: number; decoded: unknown } } | null
   answered: string | null
   outcome: { ok: true; format: string; proofId: string; pseudonym: string; age?: true } | { ok: false; reason: string; detail?: string } | null
   completion: { ok: boolean; kind: string; handle?: string; age?: true; community?: string } | null
@@ -218,7 +222,7 @@ export function eventsOf(s: DevSession): FlowEvent[] {
         })
         break
       case 'wallet.encrypt':
-        push({ at: t.at, actor: 'wallet', title: 'Encrypt response', plain: `JWE (${d.header?.alg}, ${d.header?.enc}) to the site's session key.`, payload: d })
+        push({ at: t.at, actor: 'wallet', title: 'Encrypt response', plain: `${envelopeName(d.mode)} (${d.header?.alg}, ${d.header?.enc}) to the site's session key.`, payload: d })
         break
       case 'decrypt': {
         const error = next?.step === 'response' ? next.data?.error : undefined
@@ -229,9 +233,16 @@ export function eventsOf(s: DevSession): FlowEvent[] {
           method: 'POST response_uri',
           title: error ? 'Send error response' : 'Send response (ZkpPresentation)',
           tag: error ? undefined : 'openid',
-          plain: error ? `error=${error}, encrypted (direct_post.jwt).` : 'Each vp_token entry is a CBOR ZkpPresentation, sent encrypted (direct_post.jwt).',
+          plain: error
+            ? `error=${error}, encrypted (${d.mode ?? 'direct_post.jwt'}).`
+            : d.mode === 'direct_post.cwt'
+              ? 'A CBOR response: each vp_token entry is the ZkpPresentation map itself, in a COSE_Encrypt (direct_post.cwt).'
+              : 'Each vp_token entry is a CBOR ZkpPresentation in base64url, in a JWE (direct_post.jwt).',
           status: error ? 'error' : 'ok',
-          payload: { 'content-type': 'application/x-www-form-urlencoded', response: `JWE, ${d.bytes} characters`, header: d.header },
+          payload:
+            d.mode === 'direct_post.cwt'
+              ? { 'content-type': 'application/cwt', body: `COSE_Encrypt, ${d.bytes} bytes`, header: d.header }
+              : { 'content-type': 'application/x-www-form-urlencoded', response: `JWE, ${d.bytes} characters`, header: d.header },
         })
         push({
           at: t.at,
@@ -295,7 +306,7 @@ export function checksOf(s: DevSession): Check[] {
   const mdoc = s.outcome?.ok ? s.outcome.format === 'mso_mdoc' : s.answered !== 'nym_attestation_bbs'
   const system = verify?.system_id ?? (s.outcome?.ok ? s.outcome.proofId : undefined)
   const list: Array<Check & { codes: string[] }> = [
-    { label: 'Response decrypted', detail: `JWE (${decrypt?.header?.alg ?? 'ECDH-ES'}, ${decrypt?.header?.enc ?? 'A128GCM'}) to the session key`, status: 'pending', codes: [] },
+    { label: 'Response decrypted', detail: `${envelopeName(decrypt?.mode)} (${decrypt?.header?.alg ?? 'ECDH-ES'}, ${decrypt?.header?.enc ?? 'A128GCM'}) to the session key`, status: 'pending', codes: ['response_mode'] },
     { label: 'Session matches', detail: 'state is this session\'s', status: 'pending', codes: [] },
     { label: 'Presentation decodes', detail: 'one ZkpPresentation for one of the queries', status: 'pending', codes: ['vp_token', 'presentation', 'proof_encoding'] },
     { label: 'Approved system', detail: `${system ?? 'the system'} is in the registry, was offered, and is still accepted`, status: 'pending', codes: ['scheme', 'circuit', 'format'] },

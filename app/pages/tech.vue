@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { COMMUNITY_PREFIX } from '#shared/data/communities'
 import { PROOF_SYSTEMS, type CircuitEntry, type SchemeEntry } from '#shared/registry/circuits'
+import type { ProfileManifest } from '#shared/profiles'
 
 definePageMeta({ layout: false })
 useHead({ title: 'Technical view · Community' })
@@ -90,13 +91,20 @@ interface SizePart {
   children: SizePart[]
 }
 interface Overview {
+  profile: string
+  profiles: ProfileManifest[]
   services: { prover: Service; verifier: Service; lfProver: Service; lfVerifier: Service; bbsProver: Service; bbsVerifier: Service }
   acceptedProofSystems: string[]
   multithreading: boolean
-  profiling: boolean
+  /** The thread setting: 'all' (one per core) or a count; threadCount is what it gives. */
+  threads: 'all' | number
+  threadCount: number
+  maxThreads: number
+  responseMode: 'direct_post.cwt' | 'direct_post.jwt'
+  profiling: boolean | 'full'
   trustNewIssuers: boolean
   learnedIssuers: Array<{ format: 'mso_mdoc' | 'bbs_cd'; fingerprint: string; subject: string; issuer: string; not_after: string | null; added_at: string; system_id: string }>
-  measurements: { runs: number; file: string; machine: Machine; rows: MeasurementRow[] }
+  measurements: { runs: number; profileRuns: number; profile: string; file: string; machine: Machine; rows: MeasurementRow[] }
   signer: { subject: string; selfSigned: boolean }
   sessions: Session[]
 }
@@ -139,7 +147,8 @@ const kb = (n?: number | null) => (n == null ? '–' : n >= 1000 ? `${(n / 1000)
 const mb = (n?: number | null) => (n == null ? '' : `${n < 10 ? n.toFixed(1) : Math.round(n)} MB`)
 const mbSpread = (s: Spread | null) => (!s ? '–' : s.min === s.max ? mb(s.median) : `${mb(s.median)} (${mb(s.min).replace(' MB', '')}–${mb(s.max)})`)
 type Counts = { shared: number; precommitted: number; rest: number; public: number } | { hash: { inputs: number; public: number }; signature: { inputs: number; public: number } }
-const n = (x: number) => x.toLocaleString('en-GB')
+/** A count as text; '–' when an addon did not report it (a missing field must not stop the page rendering). */
+const n = (x?: number | null) => (typeof x === 'number' ? x.toLocaleString('en-GB') : '–')
 const values = (c?: Counts | null) =>
   !c
     ? ''
@@ -244,6 +253,32 @@ const memTotal = (r: MeasurementRow, side: 'prove' | 'verify') => {
   if (work == null) return '–'
   return mb((m?.keys_mb ?? 0) + work)
 }
+/** The demo profile the site runs, and the build the site runs from. */
+const profile = computed(() => data.value?.profiles.find((p) => p.id === data.value?.profile) ?? null)
+const pub = useRuntimeConfig().public as { repository?: string; buildCommit?: string }
+const buildUrl = pub.buildCommit && pub.repository ? `${pub.repository}/commit/${pub.buildCommit}` : null
+/** A proof system the profile cannot use yet (pending), with why. */
+const pending = (id: string) => profile.value?.systems.find((x) => x.proof_system === id && x.status !== 'available') ?? null
+const encodings = computed(() => {
+  const e = profile.value?.credential.encodings ?? {}
+  return [
+    ...(e.mso_mdoc ? [{ name: 'mso_mdoc', type: e.mso_mdoc.doctype, attributes: e.mso_mdoc.attributes }] : []),
+    ...(e.bbs_cd ? [{ name: 'bbs_cd', type: e.bbs_cd.schema_id, attributes: e.bbs_cd.attributes }] : []),
+  ]
+})
+const profileError = ref('')
+const switchingProfile = ref(false)
+async function setProfile(id: string) {
+  profileError.value = ''
+  switchingProfile.value = true
+  try {
+    await $fetch('/api/tech/demo-profile', { method: 'POST', body: { profile: id } })
+  } catch {
+    profileError.value = 'Not changed.'
+  }
+  switchingProfile.value = false
+  await load()
+}
 const acceptError = ref('')
 async function setAccepted(id: string, accept: boolean) {
   acceptError.value = ''
@@ -259,12 +294,22 @@ const ids = (f: Formats | undefined) => f?.zkp_req?.system_id_values?.join(', ')
 const formats = computed(() => (session.value?.offer.zkp_req ? (['zkp_req'] as const) : []))
 
 const threadError = ref('')
-async function setThreads(parallel: boolean) {
+async function setThreads(value: string) {
   threadError.value = ''
   try {
-    await $fetch('/api/tech/threads', { method: 'POST', body: { parallel } })
+    await $fetch('/api/tech/threads', { method: 'POST', body: { threads: value === 'all' ? 'all' : Number(value) } })
   } catch {
     threadError.value = 'Not changed.'
+  }
+  await load()
+}
+const modeError = ref('')
+async function setResponseMode(mode: string) {
+  modeError.value = ''
+  try {
+    await $fetch('/api/tech/response-mode', { method: 'POST', body: { mode } })
+  } catch {
+    modeError.value = 'Not changed.'
   }
   await load()
 }
@@ -289,10 +334,14 @@ async function issuers(body: { trust_new: boolean } | { forget: string }) {
   await load()
 }
 const day = (iso: string) => iso.slice(0, 10)
-/** The threads a backend runs on now: Vega and BBS follow the switch, Longfellow has one. */
-const threadsNow = computed(() => (data.value?.multithreading ? data.value.measurements.machine.cores : 1))
+/** The threads a backend runs on now: Vega, BBS and Longfellow's v0.5 to v0.7 circuits follow the
+ *  setting; Longfellow's v0.4 circuits run on one thread. */
+const threadsNow = computed(() => data.value?.threadCount ?? 1)
+/** The setting's choices: 1 up to one fewer than the cores, then every core. */
+const threadChoices = computed(() => Array.from({ length: Math.max(0, (data.value?.maxThreads ?? 1) - 1) }, (_, i) => i + 1))
+const longfellowSingle = (svc: Service) => !!svc.implementation?.startsWith('Longfellow') && profile.value?.version === '0.4'
 const threadText = (svc: Service) => {
-  const n = svc.max_threads != null ? (data.value?.multithreading ? svc.max_threads : 1) : (svc.threads ?? 1)
+  const n = svc.max_threads != null && !longfellowSingle(svc) ? Math.min(threadsNow.value, svc.max_threads) : (svc.threads ?? 1)
   return `${n} thread${n === 1 ? '' : 's'}`
 }
 
@@ -330,20 +379,93 @@ const statusTone = (s: string) =>
     </header>
 
     <main v-if="data" class="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <!-- the demo profile: which rulebook version the site runs; switching resets the demo -->
+      <section v-if="profile" class="card p-4" data-profile-section>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <h2 class="font-semibold">Demo profile</h2>
+          <select
+            class="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+            data-demo-profile
+            :value="data.profile"
+            :disabled="switchingProfile"
+            @change="setProfile(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="p in data.profiles" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </select>
+          <span class="text-xs text-muted">Switching resets the demo.</span>
+          <span class="flex flex-wrap items-center gap-x-3 text-xs" data-profile-version>
+            <span>Rulebook v{{ profile.version }} · {{ profile.date }}</span>
+            <a :href="profile.documentUrl" target="_blank" rel="noopener" class="underline decoration-dotted underline-offset-2" data-profile-document>rulebook ↗</a>
+            <a v-if="profile.commitUrl" :href="profile.commitUrl" target="_blank" rel="noopener" class="font-mono underline decoration-dotted underline-offset-2" data-profile-commit>{{ profile.commit!.slice(0, 7) }} ↗</a>
+            <span v-else class="text-muted" data-profile-commit>not committed yet</span>
+            <a v-if="buildUrl" :href="buildUrl" target="_blank" rel="noopener" class="text-muted underline decoration-dotted underline-offset-2" data-build-commit>build {{ pub.buildCommit!.slice(0, 7) }} ↗</a>
+          </span>
+        </div>
+        <p v-if="profileError" class="mt-1 text-xs text-adult">{{ profileError }}</p>
+        <details class="mt-2 text-xs" data-profile-details>
+          <summary class="cursor-pointer text-muted">What this version defines</summary>
+          <div class="mt-2 grid gap-4 lg:grid-cols-2">
+            <div>
+              <h3 class="font-semibold">Credential: {{ profile.credential.id }}</h3>
+              <div v-for="enc in encodings" :key="enc.name" class="mt-1">
+                <p class="font-mono">{{ enc.name }} · {{ enc.type }}</p>
+                <ul class="mt-0.5 space-y-0.5">
+                  <li v-for="a in enc.attributes" :key="a.id">
+                    <span class="font-mono">{{ a.id }}</span> <span class="text-muted">({{ a.role }}{{ a.presence === 'optional' ? ', optional' : '' }})</span> {{ a.description }}
+                  </li>
+                </ul>
+              </div>
+              <p v-if="profile.credential.metadataUrls.length" class="mt-1 flex flex-wrap gap-x-3">
+                <a v-for="m in profile.credential.metadataUrls" :key="m.url" :href="m.url" target="_blank" rel="noopener" class="underline decoration-dotted underline-offset-2">{{ m.label }} ↗</a>
+              </p>
+              <h3 class="mt-3 font-semibold">Pseudonym configurations</h3>
+              <ul class="mt-0.5 space-y-0.5">
+                <li v-for="c in profile.pseudonymConfigs" :key="c.id">
+                  <span class="font-mono">{{ c.id }}</span> <span class="text-muted">{{ c.seed }} · {{ c.encodings.join(', ') }}</span>
+                  <span v-if="c.requested" class="ml-1 rounded bg-surface px-1">requested</span>
+                </li>
+              </ul>
+              <h3 class="mt-3 font-semibold">Proof systems</h3>
+              <ul class="mt-0.5 space-y-0.5">
+                <li v-for="x in profile.systems" :key="x.proof_system">
+                  <span class="font-mono">{{ x.system_id ?? x.proof_system }}</span>
+                  <span class="ml-1.5" :class="x.status === 'available' ? 'text-muted' : 'text-adult'">{{ x.status }}</span><span v-if="x.note" class="text-muted">: {{ x.note }}</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="font-semibold">Functions</h3>
+              <div v-for="f in profile.functions" :key="f.id" class="mt-1" :data-profile-function="f.id">
+                <p>
+                  <span class="font-mono">{{ f.id }}</span>
+                  <span class="text-muted"> · {{ f.kind }}{{ f.return ? ` (return ${f.return})` : '' }} · {{ f.wire }}{{ f.boundsDate ? ` · bounds from ${f.boundsDate === 'proof_time' ? 'the date of proof_time' : 'the request'}` : '' }}</span>
+                </p>
+                <p class="mt-0.5">{{ f.meaning }}</p>
+                <ul class="mt-0.5 list-disc pl-4 text-muted">
+                  <li v-for="t in f.translation" :key="t">{{ t }}</li>
+                </ul>
+                <p class="mt-0.5"><span class="text-muted">Proven:</span> {{ f.proof }}</p>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <!-- proof systems: the switches, and each one's prover and verifier as icons -->
       <section class="card p-4">
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
           <h2 class="text-sm font-semibold">Proof systems</h2>
-          <div v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="!loaded(p.id) && 'opacity-50'">
-            <label class="flex items-center gap-2">
+          <div v-for="p in PROOF_SYSTEMS" :key="p.id" class="flex items-center gap-2 text-sm" :class="(!loaded(p.id) || pending(p.id)) && 'opacity-50'">
+            <label class="flex items-center gap-2" :title="pending(p.id)?.note ?? ''">
               <input
                 type="checkbox"
                 :data-accept="p.id"
                 :checked="data.acceptedProofSystems.includes(p.id)"
-                :disabled="!loaded(p.id)"
+                :disabled="!loaded(p.id) || !!pending(p.id)"
                 @change="setAccepted(p.id, ($event.target as HTMLInputElement).checked)"
               />
               {{ shortName(p.label) }}
+              <span v-if="pending(p.id)" class="text-xs text-adult" :data-pending="p.id">pending</span>
             </label>
             <button
               v-for="side in SIDES[p.id]"
@@ -412,12 +534,21 @@ const statusTone = (s: string) =>
 
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3">
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" data-threads :checked="data.multithreading" @change="setThreads(($event.target as HTMLInputElement).checked)" />
-            Multithreading (Vega and BBS)
+            Threads ({{ profile?.version !== '0.4' ? 'Vega, Longfellow and BBS' : 'Vega and BBS' }})
+            <select data-threads class="rounded-md border border-line bg-surface px-2 py-1 text-sm tabular-nums" :value="data.threads === 'all' || data.threads >= data.maxThreads ? 'all' : String(data.threads)" @change="setThreads(($event.target as HTMLSelectElement).value)">
+              <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
+              <option value="all">All ({{ data.maxThreads }})</option>
+            </select>
           </label>
-          <span class="text-xs text-muted tabular-nums" data-threads-text>{{ threadsNow }} thread{{ threadsNow === 1 ? '' : 's' }}</span>
           <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" data-profiling :checked="data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
+            Response
+            <select data-response-mode class="rounded-md border border-line bg-surface px-2 py-1 text-sm" :value="data.responseMode" @change="setResponseMode(($event.target as HTMLSelectElement).value)">
+              <option value="direct_post.cwt">CWT (COSE_Encrypt)</option>
+              <option value="direct_post.jwt">JWT (JWE)</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" data-profiling :checked="!!data.profiling" @change="setProfiling(($event.target as HTMLInputElement).checked)" />
             Profiling
           </label>
           <label class="flex items-center gap-2 text-sm">
@@ -425,7 +556,7 @@ const statusTone = (s: string) =>
             Trust new issuers
           </label>
         </div>
-        <p v-if="threadError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || profilingError || issuerError }}</p>
+        <p v-if="threadError || modeError || profilingError || issuerError" class="mt-1 text-xs text-adult">{{ threadError || modeError || profilingError || issuerError }}</p>
         <ul v-if="data.learnedIssuers.length" class="mt-2 space-y-1 text-xs" data-learned-issuers>
           <li v-for="i in data.learnedIssuers" :key="i.fingerprint" class="flex flex-wrap items-center gap-x-2">
             <span class="break-all">{{ i.format === 'bbs_cd' ? 'BBS issuer key' : i.subject || 'Unnamed issuer' }}</span>
@@ -513,7 +644,7 @@ const statusTone = (s: string) =>
                     {{ kb(t.data?.bytes) }}<template v-if="t.data?.query"> · {{ t.data.query }} ({{ t.data.format }})</template><template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
                   <p v-else-if="t.step === 'decrypt' || t.step === 'wallet.encrypt'" class="text-xs text-muted">
-                    {{ t.data?.header?.alg }} · {{ t.data?.header?.enc }} · {{ kb(t.data?.bytes) }} · {{ ms(t.data?.decrypt_ms ?? t.data?.encrypt_ms) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
+                    <template v-if="t.data?.mode">{{ t.data.mode }} · </template>{{ t.data?.header?.alg }} · {{ t.data?.header?.enc }} · {{ kb(t.data?.bytes) }} · {{ ms(t.data?.decrypt_ms ?? t.data?.encrypt_ms) }}<template v-if="t.data?.error"> · error={{ t.data.error }}</template>
                   </p>
                   <p v-else-if="t.step === 'wallet.match' && t.data?.reason" class="text-xs text-muted">{{ t.data.reason }}</p>
                   <p v-else-if="(t.step === 'verify' || t.step === 'refused') && t.data?.code" class="text-xs text-adult">
@@ -625,6 +756,9 @@ const statusTone = (s: string) =>
           <div class="min-w-0 flex-1">
             <h2 class="text-sm font-semibold">Benchmark</h2>
             <p class="mt-0.5 text-xs text-muted" data-machine>{{ machineText(data.measurements.machine) }}</p>
+            <p v-if="data.measurements.runs !== data.measurements.profileRuns" class="mt-0.5 text-xs text-muted" data-benchmark-profile>
+              Runs under {{ profile?.label ?? data.measurements.profile }}; {{ data.measurements.runs - data.measurements.profileRuns }} under other profiles not shown.
+            </p>
           </div>
           <button v-if="data.measurements.runs" class="btn-ghost text-xs" data-clear-measurements @click="clearMeasurements">{{ clearing ? 'Click again to clear' : 'Clear' }}</button>
         </div>

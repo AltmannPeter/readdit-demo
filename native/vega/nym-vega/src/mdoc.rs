@@ -188,6 +188,12 @@ impl Mdoc {
     bytes32(Item::read(&value)?, "ssc")
   }
 
+  /// `bsc` (rulebook v0.5): a bstr of 32 bytes, SHA-256(secret_seed ‖ birth_date).
+  pub fn bsc(&self) -> Result<[u8; 32], String> {
+    let value = self.element_value(crate::bsc::BSC)?;
+    bytes32(Item::read(&value)?, "bsc")
+  }
+
   /// Whether the MSO lists each item's digest (the holder's own consistency check; the circuit
   /// checks the two it reads).
   pub fn digests_listed(&self) -> bool {

@@ -82,6 +82,18 @@ pub fn issue(
   doc_type: &str,
   items: Vec<(String, Vec<u8>)>,
 ) -> Mdoc {
+  issue_from(issuer, device_key, &ISSUED, valid_until, doc_type, items)
+}
+
+/// [`issue`], valid from `valid_from` (also the time it is signed).
+pub fn issue_from(
+  issuer: &KeyPair,
+  device_key: &PublicKey,
+  valid_from: &Time,
+  valid_until: &Time,
+  doc_type: &str,
+  items: Vec<(String, Vec<u8>)>,
+) -> Mdoc {
   let digests = items
     .iter()
     .enumerate()
@@ -102,8 +114,8 @@ pub fn issue(
     (
       "validityInfo",
       record(vec![
-        ("signed", tag(0, text(&ISSUED.text()))),
-        ("validFrom", tag(0, text(&ISSUED.text()))),
+        ("signed", tag(0, text(&valid_from.text()))),
+        ("validFrom", tag(0, text(&valid_from.text()))),
         ("validUntil", tag(0, text(&valid_until.text()))),
       ]),
     ),
@@ -132,4 +144,31 @@ pub fn planted_key(forged_birth_date: &Date) -> (Vec<u8>, PublicKey) {
       point_with_x(&sha256(&item)).map(|key| (item, key))
     })
     .expect("half of all x-coordinates lie on the curve")
+}
+
+/// The nym_auth attestation of the rulebook v0.5 (`crate::bsc`), in its compact profile: the items
+/// `bsc` = SHA-256(secret_seed ‖ birth_date) (digestID 0) and `psc` (digestID 1, 32 zero bytes
+/// without a private seed), each with a 16-byte random salt, issued as [`issue_from`] issues. The
+/// Sig_structure is 423 bytes and the `bsc` item 108, as the rulebook's test vectors.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_bsc(
+  issuer: &KeyPair,
+  device_key: &PublicKey,
+  valid_from: &Time,
+  valid_until: &Time,
+  secret_seed: &[u8; 16],
+  birth_date: &[u8; 10],
+  psc: [u8; 32],
+  label: &str,
+) -> Mdoc {
+  let bsc = sha256(&crate::bsc::opening(secret_seed, birth_date));
+  let items = [("bsc", bsc), ("psc", psc)]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (name, value))| {
+      let random = salt(&format!("{label} random {name}"));
+      (name.to_string(), item_bytes(i as u64, &random, name, Value::Bytes(value.to_vec())))
+    })
+    .collect();
+  issue_from(issuer, device_key, valid_from, valid_until, crate::bsc::DOC_TYPE, items)
 }

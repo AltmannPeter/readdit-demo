@@ -5,7 +5,7 @@ import type { ConsentView, RequestView, WalletCaps } from '~/wallet/engine'
 import type { CredentialView } from '~/wallet/holder'
 import type { ProofMetrics, WalletScreen } from '~/composables/useFlow'
 import type { ProveOutput } from '~/wallet/prover'
-import { analyzeRequest, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
+import { analyzeVersions, consentFor, parseAuthorizationUrl, queryFor } from '~/wallet/engine'
 import { TransportError, encryptResponse, httpTransport } from '~/wallet/transport'
 import { report } from '~/wallet/report'
 import { loadCredentials, nymCard, type PhoneDef } from '~/wallet/holder'
@@ -78,6 +78,9 @@ const today = useToday()
 /** Presentations made from this page, per credential, for Recent History and Presentations. */
 const history = useState<Array<{ audience: string; at: number; credential: number }>>(`siros-history-${props.phone.id}`, () => [])
 const current = computed(() => credentials.value?.find((c) => c.index === focus.value) ?? null)
+/** The version of the card's credential that answers the current request (an mdoc card holds a
+ *  v0.4 and a v0.5 mdoc; analyzeVersions). */
+const answering = ref<CredentialView | null>(null)
 /** The home screen's card position of the selected credential, and back. */
 const selectedPosition = computed(() => Math.max(0, credentials.value?.findIndex((c) => c.index === selected.value) ?? 0))
 const selectPosition = (k: number) => (selected.value = credentials.value?.[k]?.index ?? selected.value)
@@ -90,7 +93,7 @@ watchEffect(() => {
   flow.value = {
     phone: props.phone.label,
     screen: screen.value,
-    credential: current.value,
+    credential: answering.value ?? current.value,
     matching: matching.value.length,
     switching: switching.value,
     walletCircuits: phoneSystems().filter((id) => findSystem(id)?.source_format === 'mso_mdoc'),
@@ -208,8 +211,10 @@ async function onScanned() {
 
 /** The request against the chosen credential: the request screen, or Requirement Not Met. */
 async function analyze() {
-  const cred = current.value!
-  view.value = analyzeRequest(request.value!, cred, today.value, caps.value ?? { systemIds: [] })
+  const picked = analyzeVersions(request.value!, current.value!, today.value, caps.value ?? { systemIds: [] })
+  const cred = picked.credential
+  answering.value = cred
+  view.value = picked.view
   consent.value = view.value.satisfiable ? await consentFor(view.value, cred, verifierSubject.value) : null
   screen.value = view.value.satisfiable ? 'request' : 'unmet'
   const v = view.value
@@ -232,14 +237,14 @@ async function choose(index: number) {
   await analyze()
 }
 
-/** Encrypts the response (direct_post.jwt) and posts it to response_uri; a refusal there ends on
- *  the matching error screen (410: Request Expired). */
+/** Encrypts the response (direct_post.cwt or direct_post.jwt, as the request asks) and posts it to
+ *  response_uri; a refusal there ends on the matching error screen (410: Request Expired). */
 async function send(body: AuthorizationResponse): Promise<boolean> {
   try {
     const req = request.value!
     const encrypted = await encryptResponse(req, body)
     if (encrypted) {
-      await report(req.state, 'encrypt', 'Response encrypted', { header: encrypted.header, bytes: encrypted.jwe.length, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
+      await report(req.state, 'encrypt', 'Response encrypted', { mode: encrypted.mode, header: encrypted.header, bytes: encrypted.bytes, encrypt_ms: encrypted.encrypt_ms, payload: 'error' in body ? ['error', 'state'] : ['vp_token', 'state'], ...('error' in body && { error: body.error }) })
     }
     await props.transport.postResponse(req, body, encrypted)
     return true
@@ -286,7 +291,7 @@ async function onPin() {
   let presentation: string
   try {
     if (view.value!.scheme) {
-      const out = await proveBbs({ request: req, queryId, credential: focus.value })
+      const out = await proveBbs({ request: req, queryId, credential: focus.value, rulebook: view.value!.profile?.rulebook.version })
       const { prove_ms, presentation_bytes, ...bbs } = out.metrics
       metrics.value = { sign_ms: bbs.device_sign_ms, prove_ms, presentation_bytes, bbs }
       presentation = out.presentation
@@ -294,10 +299,11 @@ async function onPin() {
       const systemId = view.value!.circuit!.system_id
       const signed = await unlockAndSign({ request: req, credential: focus.value, systemId })
       metrics.value = { sign_ms: signed.metrics.sign_ms }
-      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value })
+      const out: ProveOutput = await prove({ request: req, queryId, systemId, deviceSignature: signed.device_signature, credential: focus.value, rulebook: view.value!.profile?.rulebook.version })
       metrics.value = {
         ...metrics.value,
         witness_ms: out.witness_ms ?? out.metrics.witness_ms,
+        ...(out.metrics.prebuild_ms != null && { prebuild_ms: out.metrics.prebuild_ms }),
         prove_ms: out.metrics.prove_ms,
         proof_bytes: out.metrics.proof_bytes,
         presentation_bytes: out.metrics.presentation_bytes,

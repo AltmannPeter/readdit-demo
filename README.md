@@ -27,6 +27,22 @@ Longfellow and BBS proofs, made and verified in the site's server. The site acce
 technical view switches one on. A guide panel beside the site summarises each step of the flow, with
 the technical details of the step on request.
 
+**Benchmarks from the terminal.** With the site running (`npm run build && npm run start`, or
+`npm run dev`), `npm run bench` makes presentations through the demo phone's routes and prints
+`/tech`'s Benchmark figures for those runs. `npm run bench help` lists the options;
+`GETTING-STARTED.md` ("Benchmarks from the terminal") has more examples. Under v0.7:
+
+```sh
+npm run bench runs=30 profile=v0.7 system=longfellow threads=1,4 age=13-17
+```
+
+Under v0.7 only Longfellow can be benchmarked; Vega and BBS are pending. The demo's Longfellow
+backend, for every rulebook version, runs google/longfellow-zk `61a8a73` without upstream's fix
+`7ec62ec` (carries in the P-256 field's multiply-accumulation, 24 October 2026). The v0.7 prover and
+verifier both use that function, so the figures here are optimistic: with the fix, verify takes about
+1.5 times as long and prove about 5% longer. The circuits repository's `nym-auth-v07-longfellow`
+benchmarks the same circuits with the fix.
+
 - `AGENTS.md` – decisions, architecture, open work
 - `docs/backend-api.md` – prover and verifier contract
 - `docs/bbs_cd.md` – the BBS encoding as the demo implements it

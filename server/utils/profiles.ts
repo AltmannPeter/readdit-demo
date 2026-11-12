@@ -153,6 +153,13 @@ async function records(): Promise<ProfileRecord[]> {
   return out
 }
 
+/** The profile records of these runs (a record per verified presentation that was profiled),
+ *  matched by time and Benchmark row. */
+export async function profilesOf(runs: Measurement[]): Promise<ProfileRecord[]> {
+  const keys = new Set(runs.map((m) => `${m.at}|${rowKey(m)}`))
+  return (await records()).filter((r) => keys.has(`${r.at}|${r.row}`))
+}
+
 /** Profiled runs per Benchmark row. */
 export async function profiledRuns(): Promise<Map<string, number>> {
   const n = new Map<string, number>()

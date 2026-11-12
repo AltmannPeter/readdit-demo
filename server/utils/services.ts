@@ -33,15 +33,18 @@ export interface PhaseNode {
 }
 
 /** A step's profile (/tech's Profiling switch): folded stacks from the sampler (`entry;…;leaf` →
- *  samples), the samples outside the addon's code (`other`), the step's sampled wall time, and for
- *  Vega the library's phases. */
+ *  samples), the samples outside the addon's code (`other`), every sample by thread name
+ *  (`threads`), the step's sampled wall time, and for Vega the library's phases. With Profiling
+ *  'full', `full`: every sample's whole stack, `thread;outermost;…;leaf` → samples. */
 export interface StepProfile {
   hz?: number
   ms?: number
   samples?: number
   other?: number
   lost?: number
+  threads?: Record<string, number>
   stacks?: Record<string, number>
+  full?: Record<string, number>
   phases?: PhaseNode[] | null
 }
 
@@ -71,6 +74,11 @@ export interface ServiceCircuit {
   shapes_sha256?: string | null
   artifact_sha256?: string | null
   public_inputs?: string[]
+  /** The rulebook version these circuits are for, when an addon loads one set per version
+   *  (Vega, Longfellow: "0.4" and "0.5"); absent: v0.4. */
+  rulebook?: string
+  /** The artifact's file name. */
+  artifact?: string
 }
 
 export interface ServiceInfo {
@@ -81,7 +89,7 @@ export interface ServiceInfo {
   load_ms?: number
   /** Longfellow: always 1. */
   threads?: number
-  /** Vega: the threads the switch gives it when on (the machine's cores). */
+  /** Vega and Longfellow: the threads one per core gives (the machine's cores, as the addon counts them). */
   max_threads?: number
   trust_anchors?: Array<{ subject: string; not_after: number }>
   proof_time_tolerance_s?: number
@@ -132,6 +140,10 @@ export interface ProveBody {
   credential: WalletCredential
   secret_seed: string
   device_signature: string
+  /** The rulebook version ("0.4" when absent). */
+  rulebook?: string
+  /** v0.5: the holder's birth date (YYYY-MM-DD), which opens bsc with secret_seed. */
+  birth_date?: string
 }
 
 export interface WitnessSummary {
@@ -196,7 +208,7 @@ export interface VerifyMetrics {
 }
 
 export type VerifyResult =
-  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics }
+  | { ok: true; system_id: string; results: Record<string, string | true>; bounds?: { ge?: string | null; le?: string | null } | null; metrics: VerifyMetrics }
   | { ok: false; reason: string; code?: string; input?: string | null; certificate?: string | null; metrics?: VerifyMetrics }
 
 /** The HTTP status text for a prover refusal code (docs/backend-api.md, "Prover refusals"). The code
@@ -246,9 +258,10 @@ interface NativeVerifier {
   verify(input: string): Promise<string>
 }
 interface NativeAddon {
-  /** Vega: the path of shapes.zst; Longfellow: the directory of circuits.zst. */
-  loadProver(circuits: string): Promise<NativeProver>
-  loadVerifier(circuits: string, trustAnchorsPem: string, toleranceS: number): Promise<NativeVerifier>
+  /** Vega: the path of shapes.zst, and of rulebook v0.5's (mdoc-bsc) when set; Longfellow: the
+   *  directory of circuits.zst (its v0.5 circuits are built into the addon). */
+  loadProver(circuits: string, circuitsV05?: string): Promise<NativeProver>
+  loadVerifier(circuits: string, trustAnchorsPem: string, toleranceS: number, circuitsV05?: string): Promise<NativeVerifier>
 }
 interface Native {
   prover: NativeProver
@@ -265,8 +278,8 @@ const g = globalThis as unknown as { __communityCircuits?: Partial<Record<Circui
 function backendPaths(name: CircuitBackend) {
   const cfg = useRuntimeConfig()
   return name === 'vega'
-    ? { addon: cfg.vegaAddon, circuits: cfg.vegaShapes, anchors: cfg.vegaTrustAnchors }
-    : { addon: cfg.longfellowAddon, circuits: cfg.longfellowCircuits, anchors: cfg.longfellowTrustAnchors }
+    ? { addon: cfg.vegaAddon, circuits: cfg.vegaShapes, circuitsV05: cfg.vegaShapesV05, anchors: cfg.vegaTrustAnchors }
+    : { addon: cfg.longfellowAddon, circuits: cfg.longfellowCircuits, circuitsV05: '', anchors: cfg.longfellowTrustAnchors }
 }
 
 /**
@@ -287,10 +300,11 @@ export function loadCircuitBackend(name: CircuitBackend): Promise<Native> {
       throw new Error(`The ${LABELS[name]} addon ${path(paths.addon)} could not be loaded. (${(e as Error).message})`)
     }
     const circuits = path(paths.circuits)
+    const v05 = paths.circuitsV05 ? path(paths.circuitsV05) : undefined
     const anchors = await readFile(path(paths.anchors), 'utf8')
     const [prover, verifier] = await Promise.all([
-      addon.loadProver(circuits),
-      addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS)),
+      v05 ? addon.loadProver(circuits, v05) : addon.loadProver(circuits),
+      v05 ? addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS), v05) : addon.loadVerifier(circuits, anchors, Number(cfg.proofTimeToleranceS)),
     ])
     return { prover, verifier }
   })()
@@ -363,11 +377,15 @@ async function mergedInfo(service: 'prover' | 'verifier'): Promise<ServiceInfo> 
   }, 'circuits')
 }
 
-/** /tech's switches in the call's JSON: `parallel` for the addons that have threads (Vega, BBS;
- *  Longfellow runs on one thread whatever the switch says), and `profile`. */
-function threading(backend: CircuitBackend | 'bbs'): { parallel?: boolean; profile?: boolean } {
-  const profile = store().profiling ? { profile: true } : {}
-  return backend === 'longfellow' ? profile : { parallel: store().multithreading, ...profile }
+/** /tech's settings in the call's JSON: `parallel` and `threads` (every addon; Longfellow's v0.4
+ *  circuits run on one thread whatever they say, its v0.5 to v0.7 circuits follow them), and
+ *  `profile`. 'all' sends `parallel` alone (one thread per core, as the addon counts them); a count
+ *  sends `threads` too, which the addon clamps to its cores. */
+function threading(): { parallel?: boolean; threads?: number; profile?: boolean | 'full' } {
+  const profile = store().profiling ? { profile: store().profiling } : {}
+  const t = store().threads
+  const count = t === 'all' ? {} : { threads: t }
+  return { parallel: multithreading(t), ...count, ...profile }
 }
 
 const gp = globalThis as unknown as { __communityProfiled?: Promise<unknown> }
@@ -411,7 +429,7 @@ export const prover = {
    *  circuit; the addon of `circuitId` signs, or the first loaded one. */
   async sign(body: SignBody, circuitId?: string): Promise<SignResult & { profile?: StepProfile }> {
     const b = await backendFor('prover', circuitId)
-    const r = outcome<SignResult>(await call('prover', 'prover.sign', () => oneAtATime(async () => JSON.parse(await b.n.prover.sign(JSON.stringify({ ...body, ...threading(b.name) })))), b.name))
+    const r = outcome<SignResult>(await call('prover', 'prover.sign', () => oneAtATime(async () => JSON.parse(await b.n.prover.sign(JSON.stringify({ ...body, ...threading() })))), b.name))
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 
@@ -420,7 +438,7 @@ export const prover = {
   async prove(body: ProveBody): Promise<ProveResult & { backend: CircuitBackend; profiles: { witness?: StepProfile; prove?: StepProfile }; proof_parts?: SizePart[] }> {
     const b = await backendFor('prover', body.system_id)
     const done = await call('prover', 'prover.prove', () => oneAtATime(async () => {
-      const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading(b.name) }))
+      const w = await b.n.prover.witness(JSON.stringify({ ...body, ...threading() }))
       if (typeof w === 'string') return { refusal: JSON.parse(w) }
       const witness = JSON.parse(w.summary) as WitnessSummary
       return { result: JSON.parse(await b.n.prover.prove(w)), witness }
@@ -442,9 +460,9 @@ export const verifier = {
   /** `learned_issuers`: Document Signer certificates (base64 DER) trusted besides the configured
    *  trust anchors (server/utils/issuers.ts). An `issuer_key_set` refusal for a certificate that is
    *  not trusted carries it as `certificate` (base64 DER). */
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now: string; learned_issuers?: string[] }): Promise<VerifyResult & { profile?: StepProfile }> {
     const b = await backendFor('verifier', presentedCircuit(body.presentation))
-    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading(b.name) }))) as VerifyResult), b.name)
+    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await b.n.verifier.verify(JSON.stringify({ ...body, ...threading() }))) as VerifyResult), b.name)
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 }
@@ -488,6 +506,8 @@ export interface BbsProveBody {
   handover: Handover
   credential: BbsCredential
   device_key: DeviceKeyJwk
+  /** The rulebook version ("0.4" when absent): v0.5 writes proof_time and takes ages in years. */
+  rulebook?: string
 }
 
 export interface BbsProveMetrics {
@@ -526,7 +546,7 @@ export interface BbsProveResult {
 }
 
 export type BbsVerifyResult =
-  | { ok: true; system_id: string; results: Record<string, string | true>; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
+  | { ok: true; system_id: string; results: Record<string, string | true>; bounds?: { ge?: string | null; le?: string | null } | null; metrics: VerifyMetrics & { parse_ms?: number; bbs_ms?: number; ecdsa_pop_ms?: number; pseudonym_ms?: number; date_range_ms?: number | null } }
   | { ok: false; reason: string; code?: string; issuer_key?: string | null; metrics?: VerifyMetrics }
 
 interface NativeBbsProver {
@@ -588,7 +608,7 @@ export const bbsProver = {
   /** One presentation: commitments, the device signature inside ecdsa-pop, the plugin proofs. */
   async prove(body: BbsProveBody): Promise<BbsProveResult & { profile?: StepProfile; proof_parts?: SizePart[] }> {
     const n = await bbsNative('prover')
-    const r = outcome<BbsProveResult>(await call('prover', 'prover.prove', () => oneAtATime(async () => JSON.parse(await n.prover.prove(JSON.stringify({ ...body, ...threading('bbs') })))), 'bbs'))
+    const r = outcome<BbsProveResult>(await call('prover', 'prover.prove', () => oneAtATime(async () => JSON.parse(await n.prover.prove(JSON.stringify({ ...body, ...threading() })))), 'bbs'))
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile'), proof_parts: take<SizePart[]>(r.metrics, 'proof_parts') }
   },
 }
@@ -602,9 +622,11 @@ export const bbsVerifier = {
   /** `learned_issuers`: BBS issuer keys (base64) trusted besides the configured issuer
    *  (server/utils/issuers.ts). An `issuer_key_set` refusal for a key that is not trusted carries
    *  it as `issuer_key`. */
-  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
+  /** `rulebook`: the demo profile's version ("0.4", "0.5"); `now` and `proof_time_tolerance_s`:
+   *  the verifier's clock and tolerance for proof_time (v0.5, with an age check). */
+  async verify(body: { request: RequestObject; credential_query_id: string; presentation: string; handover: Handover; rulebook?: string; now?: string; proof_time_tolerance_s?: number; learned_issuers?: string[] }): Promise<BbsVerifyResult & { profile?: StepProfile }> {
     const n = await bbsNative('verifier')
-    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading('bbs') }))) as BbsVerifyResult), 'bbs')
+    const r = await call('verifier', 'verifier.verify', () => oneAtATime(async () => JSON.parse(await n.verifier.verify(JSON.stringify({ ...body, ...threading() }))) as BbsVerifyResult), 'bbs')
     return { ...r, profile: take<StepProfile>(r.metrics, 'profile') }
   },
 }
